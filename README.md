@@ -101,6 +101,14 @@ env HYP_PASSWORD                           пароль панели, ≥8 си�
 
 ## Сборка
 
+CI (`.github/workflows/release.yml`) гоняет vet и тесты на каждый push; push тега `v*` собирает бинарники и публикует релиз:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+Локально:
+
 Go ≥ 1.22, без cgo:
 
 ```bash
