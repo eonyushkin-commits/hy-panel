@@ -97,6 +97,7 @@ dialog::backdrop{background:#0b0d1299;backdrop-filter:blur(3px)}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .grid .full{grid-column:1/-1}
 label span{display:block;font-size:12.5px;color:var(--mute);margin-bottom:4px}
+label small{display:block;font-size:11.5px;line-height:1.35;margin-top:4px}
 .chk{display:flex!important;align-items:center;gap:10px;font-size:13.5px;cursor:pointer}
 .row{display:flex;gap:8px;justify-content:flex-end;margin-top:20px}
 .qr{display:block;margin:0 auto 14px;background:#fff;padding:10px;border-radius:12px;width:232px;height:232px;border:1px solid var(--line)}
@@ -117,6 +118,7 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
   .user{flex-wrap:wrap}.acts{width:100%;padding-left:52px}
   .top .lbl{display:none}
 }
+@media (max-width:480px){.grid{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -181,8 +183,8 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
     <div class="dlg-h"><h2 id="editTitle"></h2><button type="button" class="icon ghost" onclick="$('#edit').close()" aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
     <div class="grid">
       <label class="full" id="nameWrap"><span>Имя (a-z 0-9 _ . -)</span><input name="name" required pattern="[A-Za-z0-9_.\-]{1,32}" autocapitalize="off" autocomplete="off"></label>
-      <label><span>Лимит трафика, ГБ (0 — без лимита)</span><input name="quota" type="number" min="0" step="any"></label>
-      <label><span>Устройств (0 — без лимита; телефону ≥2)</span><input name="devices" type="number" min="0"></label>
+      <label><span>Лимит трафика, ГБ</span><input name="quota" type="number" min="0" step="any" placeholder="без лимита"></label>
+      <label><span>Устройств одновременно</span><input name="devices" type="number" min="0" placeholder="без лимита"><small class="mute">телефону — от 2: при смене сети старая сессия держится ~30 с</small></label>
       <label><span>Действует до</span><input name="expires" type="date"></label>
       <label><span>Пароль</span><input name="password" autocomplete="off" pattern="[^:\s]{8,128}" title="8–128 символов, без двоеточия и пробелов"></label>
       <label class="full chk"><input type="checkbox" name="monthly" class="sw"> Сбрасывать трафик 1-го числа</label>
@@ -355,8 +357,8 @@ function openEdit(n) {
   $('#editTitle').textContent = editing ? editing.name : 'Новый пользователь';
   $('#nameWrap').hidden = !!editing; f.name.required = !editing;
   f.name.value = u.name || '';
-  f.quota.value = u.quotaBytes ? +(u.quotaBytes / GB).toFixed(2) : 0;
-  f.devices.value = u.maxDevices || 0;
+  f.quota.value = u.quotaBytes ? +(u.quotaBytes / GB).toFixed(2) : '';
+  f.devices.value = u.maxDevices || '';
   f.monthly.checked = !!u.resetMonthly;
   f.expires.value = u.expiresAt ? localDate(u.expiresAt) : '';
   f.password.value = ''; f.password.placeholder = editing ? 'не менять' : 'случайный';
