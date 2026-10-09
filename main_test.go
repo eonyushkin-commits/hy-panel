@@ -526,3 +526,23 @@ func TestUnderPath(t *testing.T) {
 		}
 	}
 }
+
+func TestNeedsFreshConfig(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, s string) string {
+		p := filepath.Join(dir, name)
+		os.WriteFile(p, []byte(s), 0o600)
+		return p
+	}
+	cases := map[string]bool{
+		filepath.Join(dir, "missing.yaml"): true,
+		write("template.yaml", "# listen: :443\n\nacme:\n  domains:\n    - your.domain.net\n  email: your@email.com\n"): true,
+		write("generated.yaml", generatedMark+"\nlisten: :443\n\nobfs:\n  type: salamander\n"):                          false,
+		write("custom.yaml", "listen: :8443\nacme:\n  domains:\n    - vpn.example.com\n"):                               false,
+	}
+	for p, want := range cases {
+		if got := needsFreshConfig(p); got != want {
+			t.Errorf("needsFreshConfig(%s) = %v, want %v", filepath.Base(p), got, want)
+		}
+	}
+}

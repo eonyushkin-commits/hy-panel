@@ -63,19 +63,21 @@ func runInstall(args []string) {
 		}
 	}
 
-	// A running Hysteria is adopted as is; otherwise (bare server, or the
-	// official installer's template that never started) it is set up fresh.
-	fresh := *force || !serviceActive(*hySvc)
+	// A configured Hysteria is adopted as is, running or not; only a missing
+	// config or the official installer's untouched template is set up fresh.
+	fresh := *force || needsFreshConfig(*hyCfg)
 	var opts hyOpts
 	if fresh {
-		fmt.Printf("Hysteria (%s) не запущена — настроим её.\n", *hySvc)
+		fmt.Printf("Hysteria (%s) ещё не настроена — настроим её.\n", *hySvc)
 		requireHysteria(*hySvc)
 		opts = askHyOpts(p, *hyPort, *host)
 		if opts.Domain != "" && !set["host"] {
 			*host = opts.Domain
 		}
-	} else {
+	} else if serviceActive(*hySvc) {
 		fmt.Printf("Hysteria (%s) работает — подключаю панель к ней, её настройки не меняю.\n", *hySvc)
+	} else {
+		fmt.Printf("Hysteria (%s) настроена, но не запущена — подключаю панель к её конфигу и запускаю, настройки не меняю.\n", *hySvc)
 	}
 
 	// Panel access: flag, else what a previous install chose (kept in the env
@@ -295,7 +297,7 @@ func runUninstall(args []string) {
 		log.Fatal("run as root: sudo hy-panel uninstall")
 	}
 	dataDir := filepath.Dir(dataPath)
-	fmt.Printf("Будет удалена панель: программа и служба (%s, %s).\nКонфиг Hysteria вернётся к виду до установки панели.\n", binPath, unitPath)
+	fmt.Printf("Будет удалена панель: программа и служба (%s, %s).\nКонфиг Hysteria вернётся к виду до установки панели; если его написала сама панель, он останется, пока не удалишь и данные.\n", binPath, unitPath)
 	if !*yes {
 		p := newPrompter()
 		if p.in == nil {
@@ -310,11 +312,28 @@ func runUninstall(args []string) {
 			*purge = p.yes("Удалить и данные?", false)
 		}
 	}
-	b, err := os.ReadFile(*hyCfg + backupExt)
-	step("restore "+*hyCfg+" from backup", err)
-	step("write "+*hyCfg, writeKeepingOwner(*hyCfg, b))
-	os.Remove(*hyCfg + backupExt) // the next install backs up the config afresh
-	step("restart "+*hySvc, systemctl("restart", *hySvc))
+	cur, _ := os.ReadFile(*hyCfg)
+	generated := strings.HasPrefix(string(cur), generatedMark)
+	switch b, err := os.ReadFile(*hyCfg + backupExt); {
+	case err != nil:
+		fmt.Println("• бэкапа конфига Hysteria нет — конфиг не трогаю")
+	case isTemplate(b) && !*purge:
+		// Restoring the official template would only leave Hysteria broken; the
+		// config the panel wrote stays, so a later install keeps the client links.
+		fmt.Println("• конфиг Hysteria, написанный панелью, оставлен: следующая установка подхватит его, ссылки клиентов не изменятся;\n  до неё Hysteria не пускает клиентов: проверять пароли некому")
+	default:
+		step("restore "+*hyCfg+" from backup", writeKeepingOwner(*hyCfg, b))
+		os.Remove(*hyCfg + backupExt) // the next install backs up the config afresh
+		if generated {
+			dir := filepath.Dir(*hyCfg)
+			for _, f := range []string{"server.crt", "server.key", "acme"} {
+				if p := filepath.Join(dir, f); !strings.Contains(string(b), p) { // still used by the restored config
+					os.RemoveAll(p)
+				}
+			}
+		}
+		step("restart "+*hySvc, systemctl("restart", *hySvc))
+	}
 	systemctl("disable", "--now", "hy-panel")
 	os.Remove(unitPath)
 	systemctl("daemon-reload")
@@ -324,7 +343,7 @@ func runUninstall(args []string) {
 		step("remove "+envPath, os.RemoveAll(envPath))
 		fmt.Println("Удалено вместе с данными. Следующая установка начнётся с нуля: новые пароль, адрес и пользователи.")
 	} else {
-		fmt.Printf("Панель удалена, данные оставлены в %s и %s.\nСледующая установка подхватит пользователей, пароль и адрес.\n", dataDir, envPath)
+		fmt.Printf("Панель удалена, данные оставлены в %s и %s.\nСледующая установка подхватит пользователей, пароль и адрес.\nУдалить их позже: rm -rf %s %s\n", dataDir, envPath, dataDir, envPath)
 	}
 }
 
