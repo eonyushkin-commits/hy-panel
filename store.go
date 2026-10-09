@@ -86,13 +86,7 @@ func (s *Store) save() error {
 	if err != nil {
 		return err
 	}
-	if _, err = f.Write(b); err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
+	if err := writeSync(f, b); err != nil {
 		os.Remove(tmp)
 		return err
 	}

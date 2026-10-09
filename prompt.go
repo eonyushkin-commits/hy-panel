@@ -28,8 +28,8 @@ func (p *prompter) line(q, def string) string {
 	fmt.Print(q)
 	l, err := p.in.ReadString('\n')
 	if err != nil && l == "" {
-		// Ctrl-D: questions without a usable default would loop forever.
-		log.Fatal("\n✗ ввод прерван")
+		fmt.Println()
+		p.in = nil // Ctrl-D: the rest of the questions take their defaults
 	}
 	if l = strings.TrimSpace(l); l == "" {
 		return def
@@ -71,10 +71,22 @@ func (p *prompter) yes(q string, def bool) bool {
 	return strings.HasPrefix(a, "y") || strings.HasPrefix(a, "д")
 }
 
+// need asks until the answer is non-empty; closed input aborts.
+func (p *prompter) need(q string) string {
+	for {
+		if a := p.line(q, ""); a != "" {
+			return a
+		}
+		if p.in == nil {
+			log.Fatal("✗ ввод прерван")
+		}
+	}
+}
+
 // port asks for a TCP/UDP port number.
 func (p *prompter) port(q string) string {
 	for {
-		a := p.line(q, "")
+		a := p.need(q)
 		if n, err := strconv.Atoi(a); err == nil && n > 0 && n < 65536 {
 			return a
 		}

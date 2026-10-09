@@ -30,6 +30,7 @@ const (
 	unitPath   = "/etc/systemd/system/hy-panel.service"
 	dataPath   = "/var/lib/hy-panel/users.json"
 	panelAddr  = "127.0.0.1:8090"
+	authURL    = "http://" + panelAddr + "/auth"
 	statsAddr  = "127.0.0.1:25413"
 	backupExt  = ".bak-hy-panel"
 	defaultCfg = "/etc/hysteria/config.yaml"
@@ -68,6 +69,7 @@ func runInstall(args []string) {
 	var opts hyOpts
 	if fresh {
 		fmt.Printf("Hysteria (%s) не запущена — настроим её.\n", *hySvc)
+		requireHysteria(*hySvc)
 		opts = askHyOpts(p, *hyPort, *host)
 		if opts.Domain != "" && !set["host"] {
 			*host = opts.Domain
@@ -141,9 +143,7 @@ func runInstall(args []string) {
 	if *ui != "" {
 		_, _, err = panelCert(filepath.Dir(dataPath), *host)
 		step("panel HTTPS certificate", err)
-		if out, err := exec.Command("ufw", "status").Output(); err == nil && strings.Contains(string(out), "Status: active") {
-			step("ufw allow "+*ui+"/tcp", exec.Command("ufw", "allow", *ui+"/tcp").Run())
-		}
+		ufwAllow(*ui + "/tcp")
 	}
 	step("systemd daemon-reload", systemctl("daemon-reload"))
 	step("start hy-panel", systemctl("enable", "hy-panel"))
@@ -348,6 +348,8 @@ func copySelf(dst string) error {
 	return os.Rename(tmp, dst) // works while the old binary is running
 }
 
+var cgnat = &net.IPNet{IP: net.IP{100, 64, 0, 0}, Mask: net.CIDRMask(10, 32)}
+
 // publicIP returns the source address of the default route if it is public.
 func publicIP() string {
 	c, err := net.Dial("udp", "1.1.1.1:53") // no packet is sent
@@ -356,7 +358,7 @@ func publicIP() string {
 	}
 	defer c.Close()
 	ip := c.LocalAddr().(*net.UDPAddr).IP
-	if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || (ip[0] == 100 && ip[1]&0xc0 == 64) {
+	if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || cgnat.Contains(ip) {
 		return ""
 	}
 	return ip.String()
@@ -380,7 +382,7 @@ func patchHyConfig(path string) (bool, error) {
 	root := doc.Content[0]
 	changed := false
 
-	wantAuth := map[string]any{"type": "http", "http": map[string]any{"url": "http://" + panelAddr + "/auth"}}
+	wantAuth := map[string]any{"type": "http", "http": map[string]any{"url": authURL}}
 	if cur := mapGet(root, "auth"); cur == nil || !sameAuth(cur) {
 		if err := mapSet(root, "auth", wantAuth); err != nil {
 			return false, err
@@ -402,10 +404,8 @@ func patchHyConfig(path string) (bool, error) {
 	if err := enc.Encode(&doc); err != nil {
 		return false, err
 	}
-	if _, err := os.Stat(path + backupExt); errors.Is(err, os.ErrNotExist) {
-		if err := os.WriteFile(path+backupExt, b, 0o600); err != nil {
-			return false, err
-		}
+	if err := backupOnce(path, b); err != nil {
+		return false, err
 	}
 	return true, writeKeepingOwner(path, buf.Bytes())
 }
@@ -416,7 +416,7 @@ func sameAuth(n *yaml.Node) bool {
 		return false
 	}
 	u := mapGet(h, "url")
-	return u != nil && u.Value == "http://"+panelAddr+"/auth"
+	return u != nil && u.Value == authURL
 }
 
 // mapGet finds a key case-insensitively, as Hysteria/viper does.
@@ -453,11 +453,35 @@ func writeKeepingOwner(path string, b []byte) error {
 	if err != nil {
 		return err
 	}
-	if _, err = f.Write(b); err == nil {
+	return writeSync(f, b)
+}
+
+// writeSync writes b, fsyncs and closes f, returning the first error.
+func writeSync(f *os.File, b []byte) error {
+	_, err := f.Write(b)
+	if err == nil {
 		err = f.Sync()
 	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
 	return err
+}
+
+// backupOnce keeps the original of path: later runs don't overwrite it.
+func backupOnce(path string, b []byte) error {
+	if _, err := os.Stat(path + backupExt); !errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return os.WriteFile(path+backupExt, b, 0o600)
+}
+
+// ufwAllow opens the rules when ufw is active.
+func ufwAllow(rules ...string) {
+	if out, err := exec.Command("ufw", "status").Output(); err != nil || !strings.Contains(string(out), "Status: active") {
+		return
+	}
+	for _, r := range rules {
+		step("ufw allow "+r, exec.Command("ufw", "allow", r).Run())
+	}
 }

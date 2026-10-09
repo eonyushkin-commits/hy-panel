@@ -10,12 +10,13 @@ import (
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
 
 func serviceActive(svc string) bool {
-	return exec.Command("systemctl", "is-active", "--quiet", svc).Run() == nil
+	return systemctl("is-active", "--quiet", svc) == nil
 }
 
 func unitExists(svc string) bool {
@@ -40,6 +41,7 @@ const hopRange = "20000-50000"
 // askHyOpts asks for the Hysteria settings; a flag given on the command line
 // (port != "") skips its question.
 func askHyOpts(p *prompter, port, host string) hyOpts {
+	hv := hysteriaVersion()
 	o := hyOpts{Port: port, Obfs: "salamander"}
 	if o.Port == "" {
 		switch p.choose("Порт Hysteria (UDP):", []string{
@@ -55,11 +57,7 @@ func askHyOpts(p *prompter, port, host string) hyOpts {
 		case 2:
 			o.Port = p.port("Порт: ")
 		case 3:
-			o.Port = hopRange
-			if !hysteriaAtLeast(2, 8, 0) {
-				fmt.Println("  ✗ установленная Hysteria старше 2.8 (или версию не определить) и не умеет слушать диапазон — беру 443")
-				o.Port = "443"
-			}
+			o.Port = hv.or(hyVersion{2, 8, 0}, hopRange, "443", "диапазон портов")
 		}
 	}
 	o.Obfs = []string{"salamander", "gecko", ""}[p.choose("Обфускация:", []string{
@@ -67,17 +65,14 @@ func askHyOpts(p *prompter, port, host string) hyOpts {
 		"gecko — salamander + дробление рукопожатия (экспериментальная, Hysteria ≥ 2.9.2, mihomo тоже нужен свежий)",
 		"без обфускации — выглядит как HTTP/3-сайт (маскировка под bing.com)",
 	}, 0)]
-	if o.Obfs == "gecko" && !hysteriaAtLeast(2, 9, 2) {
-		fmt.Println("  ✗ установленная Hysteria старше 2.9.2 (или версию не определить) и не знает gecko — беру salamander")
-		o.Obfs = "salamander"
+	if o.Obfs == "gecko" {
+		o.Obfs = hv.or(hyVersion{2, 9, 2}, "gecko", "salamander", "gecko")
 	}
 	if p.choose("Сертификат:", []string{
 		"self-signed — домен не нужен, клиенты проверяют сертификат по отпечатку",
 		"свой домен через Let's Encrypt — домен должен указывать на этот сервер, TCP 80/443 свободны",
 	}, 0) == 1 {
-		for o.Domain == "" {
-			o.Domain = strings.ToLower(p.line("Домен: ", ""))
-		}
+		o.Domain = strings.ToLower(p.need("Домен: "))
 		o.Email = p.line("E-mail для Let's Encrypt (Enter — без него): ", "")
 		if !resolvesTo(o.Domain, host) && !p.yes(fmt.Sprintf("  %s не указывает на %s. Всё равно продолжить?", o.Domain, host), false) {
 			log.Fatal("✗ сначала направь A-запись домена на сервер")
@@ -92,49 +87,50 @@ func resolvesTo(domain, host string) bool {
 	if strings.EqualFold(domain, host) {
 		return true
 	}
-	want := []string{host}
-	if net.ParseIP(host) == nil {
-		want, _ = net.LookupHost(host)
-	}
+	want, _ := net.LookupHost(host) // an IP comes back as is
 	ips, _ := net.LookupHost(domain)
-	for _, a := range ips {
-		for _, w := range want {
-			if a == w {
-				return true
-			}
-		}
-	}
-	return false
+	return slices.ContainsFunc(ips, func(a string) bool { return slices.Contains(want, a) })
 }
+
+const hysteriaBin = "/usr/local/bin/hysteria"
+
+// requireHysteria stops the install when the official Hysteria is missing.
+func requireHysteria(svc string) {
+	if _, err := os.Stat(hysteriaBin); err != nil || !unitExists(svc) {
+		log.Fatalf("✗ Hysteria не установлена. Сначала официальный установщик:\n    bash <(curl -fsSL https://get.hy2.sh/)\n  затем снова hy-panel install")
+	}
+}
+
+// hyVersion is major.minor.patch of the installed Hysteria; zero if unknown.
+type hyVersion [3]int
 
 var versionRe = regexp.MustCompile(`v(\d+)\.(\d+)\.(\d+)`)
 
-// hysteriaAtLeast compares the installed Hysteria version; false if unknown.
-func hysteriaAtLeast(major, minor, patch int) bool {
-	out, _ := exec.Command("/usr/local/bin/hysteria", "version").Output()
-	m := versionRe.FindStringSubmatch(string(out))
-	if m == nil {
-		return false
-	}
-	have := [3]int{}
-	for i := range have {
-		have[i], _ = strconv.Atoi(m[i+1])
-	}
-	for i, w := range [3]int{major, minor, patch} {
-		if have[i] != w {
-			return have[i] > w
+func hysteriaVersion() hyVersion {
+	out, _ := exec.Command(hysteriaBin, "version").Output()
+	var v hyVersion
+	if m := versionRe.FindStringSubmatch(string(out)); m != nil {
+		for i := range v {
+			v[i], _ = strconv.Atoi(m[i+1])
 		}
 	}
-	return true
+	return v
+}
+
+// or returns want when the installed version is at least min, else tells the
+// user that feature is unavailable and returns fallback.
+func (v hyVersion) or(min hyVersion, want, fallback, feature string) string {
+	if slices.Compare(v[:], min[:]) >= 0 {
+		return want
+	}
+	fmt.Printf("  ✗ %s нужна Hysteria ≥ %d.%d.%d, установлена %d.%d.%d — беру %s\n", feature, min[0], min[1], min[2], v[0], v[1], v[2], fallback)
+	return fallback
 }
 
 // freshSetup writes a working config for an official Hysteria install whose
 // config never ran (the get.hy2.sh template with a placeholder ACME domain).
 // Hysteria itself (binary, user, unit) comes from the official installer.
 func freshSetup(cfgPath, svc string, o hyOpts) {
-	if _, err := os.Stat("/usr/local/bin/hysteria"); err != nil || !unitExists(svc) {
-		log.Fatalf("✗ Hysteria не установлена. Сначала официальный установщик:\n    bash <(curl -fsSL https://get.hy2.sh/)\n  затем снова hy-panel install")
-	}
 	uid, gid := 0, 0
 	if u, err := user.Lookup("hysteria"); err == nil {
 		uid, _ = strconv.Atoi(u.Uid)
@@ -143,8 +139,8 @@ func freshSetup(cfgPath, svc string, o hyOpts) {
 	dir := filepath.Dir(cfgPath)
 	step("directory "+dir, os.MkdirAll(dir, 0o750))
 
-	var tlsBlock, files string
-	files = cfgPath
+	var tlsBlock string
+	files := []string{cfgPath}
 	if o.Domain == "" {
 		crt, key := filepath.Join(dir, "server.crt"), filepath.Join(dir, "server.key")
 		os.Remove(crt)
@@ -152,10 +148,13 @@ func freshSetup(cfgPath, svc string, o hyOpts) {
 		// The name only has to match the SNI (sniGuard); clients pin the cert.
 		step("self-signed certificate", newSelfSigned(crt, key, "bing.com"))
 		tlsBlock = fmt.Sprintf("tls:\n  cert: %s\n  key: %s\n", crt, key)
-		files += " " + crt + " " + key
+		files = append(files, crt, key)
 	} else {
 		// Explicit dir: by default ACME state goes to the unit's working directory.
-		tlsBlock = fmt.Sprintf("acme:\n  domains:\n    - %s\n  dir: %s\n", o.Domain, filepath.Join(dir, "acme"))
+		acmeDir := filepath.Join(dir, "acme")
+		step("directory "+acmeDir, os.MkdirAll(acmeDir, 0o700))
+		os.Chown(acmeDir, uid, gid) // the only place hysteria may write
+		tlsBlock = fmt.Sprintf("acme:\n  domains:\n    - %s\n  dir: %s\n", o.Domain, acmeDir)
 		if o.Email != "" {
 			tlsBlock += fmt.Sprintf("  email: %s\n", o.Email)
 		}
@@ -170,33 +169,23 @@ func freshSetup(cfgPath, svc string, o hyOpts) {
 	}
 
 	if b, err := os.ReadFile(cfgPath); err == nil {
-		if _, err := os.Stat(cfgPath + backupExt); os.IsNotExist(err) {
-			step("backup of the old config → "+cfgPath+backupExt, os.WriteFile(cfgPath+backupExt, b, 0o600))
-		}
+		step("backup of the old config → "+cfgPath+backupExt, backupOnce(cfgPath, b))
 	}
-	conf := fmt.Sprintf("# generated by hy-panel install\nlisten: :%s\n\n%s\n%s\nauth:\n  type: http\n  http:\n    url: http://%s/auth\n\ntrafficStats:\n  listen: %s\n  secret: %s\n",
-		o.Port, tlsBlock, obfsBlock, panelAddr, statsAddr, randStr(32))
+	conf := fmt.Sprintf("# generated by hy-panel install\nlisten: :%s\n\n%s\n%s\nauth:\n  type: http\n  http:\n    url: %s\n\ntrafficStats:\n  listen: %s\n  secret: %s\n",
+		o.Port, tlsBlock, obfsBlock, authURL, statsAddr, randStr(32))
 	step("hysteria config "+cfgPath, os.WriteFile(cfgPath, []byte(conf), 0o640))
 
-	// Files readable by hysteria's group; the directory is writable by hysteria
-	// only when ACME has to keep its state there.
-	if o.Domain == "" {
-		uid = 0
-	}
-	os.Chown(dir, uid, gid)
-	for _, f := range strings.Fields(files) {
+	// Directory and files root-owned, readable by hysteria's group.
+	os.Chown(dir, 0, gid)
+	for _, f := range files {
 		os.Chown(f, 0, gid)
 		os.Chmod(f, 0o640)
 	}
 	step("enable "+svc, systemctl("enable", svc))
 
-	if out, err := exec.Command("ufw", "status").Output(); err == nil && strings.Contains(string(out), "Status: active") {
-		rules := []string{strings.Replace(o.Port, "-", ":", 1) + "/udp"}
-		if o.Domain != "" {
-			rules = append(rules, "80/tcp", "443/tcp") // ACME challenges
-		}
-		for _, r := range rules {
-			step("ufw allow "+r, exec.Command("ufw", "allow", r).Run())
-		}
+	rules := []string{strings.Replace(o.Port, "-", ":", 1) + "/udp"}
+	if o.Domain != "" {
+		rules = append(rules, "80/tcp", "443/tcp") // ACME challenges
 	}
+	ufwAllow(rules...)
 }

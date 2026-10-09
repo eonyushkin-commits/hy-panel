@@ -73,12 +73,12 @@ func main() {
 		}
 	}
 	var (
-		listen    = flag.String("listen", "127.0.0.1:8090", "UI, API and Hysteria auth backend (keep it on loopback)")
+		listen    = flag.String("listen", panelAddr, "UI, API and Hysteria auth backend (keep it on loopback)")
 		subListen = flag.String("sub-listen", "", "optional public listener for subscriptions only, e.g. :2096")
 		uiListen  = flag.String("ui-listen", "", "optional public HTTPS listener for the UI (self-signed cert), e.g. :9443")
 		subURL    = flag.String("sub-url", "", "public base URL of -sub-listen (default http://<host>:<sub port>)")
-		hyCfg     = flag.String("hy-config", "/etc/hysteria/config.yaml", "Hysteria 2 server config")
-		data      = flag.String("data", "/var/lib/hy-panel/users.json", "user database")
+		hyCfg     = flag.String("hy-config", defaultCfg, "Hysteria 2 server config")
+		data      = flag.String("data", dataPath, "user database")
 		host      = flag.String("host", "", "public server IP/domain for client links (default: domain from acme/cert)")
 		port      = flag.String("port", "", "public port or hopping range, e.g. 20000-50000 (default: from listen)")
 		sni       = flag.String("sni", "", "SNI for client links (default: acme domain or cert DNS SAN)")
@@ -184,14 +184,10 @@ func server(addr string, h http.Handler) *http.Server {
 // checkHyConfig warns about Hysteria settings that make the panel ineffective or exposed.
 func checkHyConfig(c *hyConfig, listen string) {
 	want := "http://" + listen + "/auth"
-	switch t := strings.ToLower(c.Auth.Type); {
-	case t != "http":
-		log.Printf("WARN: hysteria auth.type is %q — set auth: {type: http, http: {url: %s}}", t, want)
-	default:
-		u, err := url.Parse(c.Auth.HTTP.URL)
-		if err != nil || u.Host != listen || u.Path != "/auth" {
-			log.Printf("WARN: hysteria auth.http.url is %q, expected %s", c.Auth.HTTP.URL, want)
-		}
+	if c.Auth.Type != "http" {
+		log.Printf("WARN: hysteria auth.type is %q — set auth: {type: http, http: {url: %s}}", c.Auth.Type, want)
+	} else if u, err := url.Parse(c.Auth.HTTP.URL); err != nil || u.Host != listen || u.Path != "/auth" {
+		log.Printf("WARN: hysteria auth.http.url is %q, expected %s", c.Auth.HTTP.URL, want)
 	}
 	if c.TLS.ClientCA != "" {
 		log.Print("WARN: tls.clientCA (mTLS) is set: clients also need a client certificate, links alone will not connect")
@@ -205,7 +201,7 @@ func checkHyConfig(c *hyConfig, listen string) {
 }
 
 func importUsers(s *Store, c *hyConfig) {
-	switch strings.ToLower(c.Auth.Type) {
+	switch c.Auth.Type {
 	case "password":
 		if c.Auth.Password != "" {
 			if _, err := s.Create(User{Name: "default", Password: c.Auth.Password, Enabled: true, Note: "imported"}, true); err == nil {
@@ -249,12 +245,6 @@ func (a *App) syncOnce(now time.Time) {
 	// Counters are cleared on read: account them even if /online fails below.
 	tr, errT := a.stats.TrafficAndClear()
 	on, errO := a.stats.Online()
-	if errT != nil {
-		tr = nil
-	}
-	if errO != nil {
-		on = nil
-	}
 	if err := a.store.Tick(now, tr, on); err != nil {
 		log.Printf("save: %v", err)
 	}
@@ -605,7 +595,7 @@ func (a *App) handleMihomo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	fmt.Fprint(w, "proxies:\n"+a.ep.Mihomo(u))
+	fmt.Fprint(w, a.ep.MihomoDoc(u))
 }
 
 // ---- subscription (public listener, token-protected) ----
@@ -631,7 +621,7 @@ func (a *App) handleSub(w http.ResponseWriter, r *http.Request) {
 	}
 	switch format {
 	case "mihomo", "clash":
-		fmt.Fprint(w, "proxies:\n"+a.ep.Mihomo(u))
+		fmt.Fprint(w, a.ep.MihomoDoc(u))
 	case "raw":
 		fmt.Fprintln(w, a.ep.URI(u))
 	default:

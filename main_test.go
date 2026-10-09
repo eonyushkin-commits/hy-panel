@@ -204,7 +204,7 @@ func TestURIAndMihomo(t *testing.T) {
 		t.Fatalf("hop URI: %s", ep.URI(u))
 	}
 	var doc struct{ Proxies []map[string]any }
-	if err := yaml.Unmarshal([]byte("proxies:\n"+ep.Mihomo(u)), &doc); err != nil || len(doc.Proxies) != 1 {
+	if err := yaml.Unmarshal([]byte(ep.MihomoDoc(u)), &doc); err != nil || len(doc.Proxies) != 1 {
 		t.Fatalf("mihomo yaml: %v\n%s", err, ep.Mihomo(u))
 	}
 	m := doc.Proxies[0]
@@ -475,7 +475,7 @@ func TestReadECH(t *testing.T) {
 		t.Fatalf("URI: %s", ep.URI(u))
 	}
 	var doc struct{ Proxies []map[string]any }
-	yaml.Unmarshal([]byte("proxies:\n"+ep.Mihomo(u)), &doc)
+	yaml.Unmarshal([]byte(ep.MihomoDoc(u)), &doc)
 	if o, _ := doc.Proxies[0]["ech-opts"].(map[string]any); o["enable"] != true || o["config"] != want {
 		t.Fatalf("mihomo ech-opts: %v", doc.Proxies[0])
 	}
