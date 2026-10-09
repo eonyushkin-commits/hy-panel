@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -25,7 +26,11 @@ func (p *prompter) line(q, def string) string {
 		return def
 	}
 	fmt.Print(q)
-	l, _ := p.in.ReadString('\n')
+	l, err := p.in.ReadString('\n')
+	if err != nil && l == "" {
+		// Ctrl-D: questions without a usable default would loop forever.
+		log.Fatal("\n✗ ввод прерван")
+	}
 	if l = strings.TrimSpace(l); l == "" {
 		return def
 	}
@@ -58,11 +63,11 @@ func (p *prompter) choose(title string, opts []string, def int) int {
 }
 
 func (p *prompter) yes(q string, def bool) bool {
-	d := "N"
+	d, hint := "n", "y/N"
 	if def {
-		d = "Y"
+		d, hint = "y", "Y/n"
 	}
-	a := strings.ToLower(p.line(q+" ["+map[bool]string{true: "Y/n", false: "y/N"}[def]+"]: ", d))
+	a := strings.ToLower(p.line(q+" ["+hint+"]: ", d))
 	return strings.HasPrefix(a, "y") || strings.HasPrefix(a, "д")
 }
 

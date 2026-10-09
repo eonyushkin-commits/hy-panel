@@ -56,8 +56,8 @@ func askHyOpts(p *prompter, port, host string) hyOpts {
 			o.Port = p.port("Порт: ")
 		case 3:
 			o.Port = hopRange
-			if !hysteriaAtLeast(2, 8) {
-				fmt.Println("  ✗ установленная Hysteria старше 2.8 и не умеет слушать диапазон — беру 443")
+			if !hysteriaAtLeast(2, 8, 0) {
+				fmt.Println("  ✗ установленная Hysteria старше 2.8 (или версию не определить) и не умеет слушать диапазон — беру 443")
 				o.Port = "443"
 			}
 		}
@@ -67,6 +67,10 @@ func askHyOpts(p *prompter, port, host string) hyOpts {
 		"gecko — salamander + дробление рукопожатия (экспериментальная, Hysteria ≥ 2.9.2, mihomo тоже нужен свежий)",
 		"без обфускации — выглядит как HTTP/3-сайт (маскировка под bing.com)",
 	}, 0)]
+	if o.Obfs == "gecko" && !hysteriaAtLeast(2, 9, 2) {
+		fmt.Println("  ✗ установленная Hysteria старше 2.9.2 (или версию не определить) и не знает gecko — беру salamander")
+		o.Obfs = "salamander"
+	}
 	if p.choose("Сертификат:", []string{
 		"self-signed — домен не нужен, клиенты проверяют сертификат по отпечатку",
 		"свой домен через Let's Encrypt — домен должен указывать на этот сервер, TCP 80/443 свободны",
@@ -82,27 +86,46 @@ func askHyOpts(p *prompter, port, host string) hyOpts {
 	return o
 }
 
-func resolvesTo(domain, ip string) bool {
+// resolvesTo reports whether domain resolves to host (an IP, or a domain whose
+// addresses are compared).
+func resolvesTo(domain, host string) bool {
+	if strings.EqualFold(domain, host) {
+		return true
+	}
+	want := []string{host}
+	if net.ParseIP(host) == nil {
+		want, _ = net.LookupHost(host)
+	}
 	ips, _ := net.LookupHost(domain)
 	for _, a := range ips {
-		if a == ip {
-			return true
+		for _, w := range want {
+			if a == w {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-var versionRe = regexp.MustCompile(`v(\d+)\.(\d+)`)
+var versionRe = regexp.MustCompile(`v(\d+)\.(\d+)\.(\d+)`)
 
-func hysteriaAtLeast(major, minor int) bool {
+// hysteriaAtLeast compares the installed Hysteria version; false if unknown.
+func hysteriaAtLeast(major, minor, patch int) bool {
 	out, _ := exec.Command("/usr/local/bin/hysteria", "version").Output()
 	m := versionRe.FindStringSubmatch(string(out))
 	if m == nil {
 		return false
 	}
-	a, _ := strconv.Atoi(m[1])
-	b, _ := strconv.Atoi(m[2])
-	return a > major || a == major && b >= minor
+	have := [3]int{}
+	for i := range have {
+		have[i], _ = strconv.Atoi(m[i+1])
+	}
+	for i, w := range [3]int{major, minor, patch} {
+		if have[i] != w {
+			return have[i] > w
+		}
+	}
+	return true
 }
 
 // freshSetup writes a working config for an official Hysteria install whose
@@ -131,7 +154,8 @@ func freshSetup(cfgPath, svc string, o hyOpts) {
 		tlsBlock = fmt.Sprintf("tls:\n  cert: %s\n  key: %s\n", crt, key)
 		files += " " + crt + " " + key
 	} else {
-		tlsBlock = fmt.Sprintf("acme:\n  domains:\n    - %s\n", o.Domain)
+		// Explicit dir: by default ACME state goes to the unit's working directory.
+		tlsBlock = fmt.Sprintf("acme:\n  domains:\n    - %s\n  dir: %s\n", o.Domain, filepath.Join(dir, "acme"))
 		if o.Email != "" {
 			tlsBlock += fmt.Sprintf("  email: %s\n", o.Email)
 		}
@@ -154,7 +178,11 @@ func freshSetup(cfgPath, svc string, o hyOpts) {
 		o.Port, tlsBlock, obfsBlock, panelAddr, statsAddr, randStr(32))
 	step("hysteria config "+cfgPath, os.WriteFile(cfgPath, []byte(conf), 0o640))
 
-	// Directory owned by hysteria (ACME writes its state there), files readable by its group.
+	// Files readable by hysteria's group; the directory is writable by hysteria
+	// only when ACME has to keep its state there.
+	if o.Domain == "" {
+		uid = 0
+	}
 	os.Chown(dir, uid, gid)
 	for _, f := range strings.Fields(files) {
 		os.Chown(f, 0, gid)
