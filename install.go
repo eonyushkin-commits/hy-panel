@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	_ "embed"
 	"errors"
@@ -9,10 +8,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	mrand "math/rand/v2"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,11 +43,14 @@ func runInstall(args []string) {
 	hySvc := fs.String("hy-service", "hysteria-server", "Hysteria systemd service")
 	host := fs.String("host", "", "public IP/domain for client links (default: autodetect)")
 	name := fs.String("name", "", "profile name prefix shown in clients")
-	ui := fs.String("ui-port", "9443", "public HTTPS port for the panel UI, \"\" = SSH tunnel only")
-	hyPort := fs.String("hy-port", "443", "UDP port when writing a new Hysteria config")
+	ui := fs.String("ui-port", "", "public HTTPS port for the panel UI, \"off\" = SSH tunnel only (default: ask)")
+	hyPort := fs.String("hy-port", "", "UDP port or range for a new Hysteria config (default: ask)")
 	force := fs.Bool("fresh", false, "write a new Hysteria config even if Hysteria is running")
 	fs.Parse(args)
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
 	log.SetFlags(0)
+	p := newPrompter()
 	if os.Geteuid() != 0 {
 		log.Fatal("run as root: sudo hy-panel install")
 	}
@@ -61,11 +65,40 @@ func runInstall(args []string) {
 	// A running Hysteria is adopted as is; otherwise (bare server, or the
 	// official installer's template that never started) it is set up fresh.
 	fresh := *force || !serviceActive(*hySvc)
+	var opts hyOpts
 	if fresh {
-		fmt.Printf("Hysteria (%s) не запущена — пишу рабочий конфиг (UDP %s)\n", *hySvc, *hyPort)
-		freshSetup(*hyCfg, *hySvc, *hyPort)
+		fmt.Printf("Hysteria (%s) не запущена — настроим её.\n", *hySvc)
+		opts = askHyOpts(p, *hyPort, *host)
+		if opts.Domain != "" && !set["host"] {
+			*host = opts.Domain
+		}
 	} else {
-		fmt.Printf("Hysteria (%s) работает — подключаю панель к ней\n", *hySvc)
+		fmt.Printf("Hysteria (%s) работает — подключаю панель к ней, её настройки не меняю.\n", *hySvc)
+	}
+
+	// Panel access: flag, else what a previous install chose, else ask.
+	if !set["ui-port"] {
+		if old, err := os.ReadFile(unitPath); err == nil {
+			_, *ui, _ = net.SplitHostPort(unitArg(string(old), "-ui-listen"))
+		} else {
+			switch p.choose("Доступ к панели:", []string{
+				"HTTPS на порту 9443",
+				"HTTPS на случайном порту",
+				"только через SSH-туннель",
+			}, 0) {
+			case 0:
+				*ui = "9443"
+			case 1:
+				*ui = strconv.Itoa(10000 + mrand.IntN(50000))
+			}
+		}
+	}
+	if *ui == "off" {
+		*ui = ""
+	}
+	if fresh {
+		fmt.Println()
+		freshSetup(*hyCfg, *hySvc, opts)
 	}
 	cfg, err := loadHyConfig(*hyCfg)
 	if err != nil {
@@ -97,7 +130,7 @@ func runInstall(args []string) {
 		importUsers(store, cfg) // while the config still has the old auth
 	}
 	// Ask now: the store file must be written before the panel service owns it.
-	created := askUsers(store)
+	created := askUsers(store, p)
 
 	changed, err := patchHyConfig(*hyCfg)
 	step("hysteria config: auth → panel, trafficStats (backup: "+*hyCfg+backupExt+")", err)
@@ -124,13 +157,21 @@ func runInstall(args []string) {
 		step("restart "+*hySvc, systemctl("restart", *hySvc))
 	}
 	var verr error
-	for i := 0; i < 20; i++ {
+	tries := 20
+	if opts.Domain != "" {
+		fmt.Println("… жду сертификат Let's Encrypt (до 2 минут)")
+		tries = 240
+	}
+	for i := 0; i < tries; i++ {
 		if _, verr = sc.Online(); verr == nil {
 			break
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	step("hysteria trafficStats reachable", verr)
+	if verr != nil {
+		log.Fatalf("✗ Hysteria не поднялась: %v\n  смотри: journalctl -u %s -n 30 --no-pager\n  откат: hy-panel uninstall", verr, *hySvc)
+	}
+	step("hysteria trafficStats reachable", nil)
 
 	fmt.Println("\nГотово.")
 	printInfo()
@@ -146,34 +187,19 @@ func runInstall(args []string) {
 	}
 }
 
-// askUsers offers to create users interactively (like 3x-ui asks for its
-// settings). Without a terminal it creates nothing.
-func askUsers(store *Store) []User {
-	tty, err := os.Open("/dev/tty")
-	if err != nil {
+// askUsers offers to create users; without a terminal it creates nothing.
+func askUsers(store *Store, p *prompter) []User {
+	if p.in == nil {
 		return nil
 	}
-	defer tty.Close()
-	in := bufio.NewReader(tty)
-	ask := func(q string) string {
-		fmt.Print(q)
-		l, _ := in.ReadString('\n')
-		return strings.TrimSpace(l)
-	}
-	yes := func(a string, def bool) bool {
-		if a == "" {
-			return def
-		}
-		return strings.HasPrefix(strings.ToLower(a), "y") || strings.HasPrefix(strings.ToLower(a), "д")
-	}
 	var out []User
-	q, def := "Создать пользователя? [Y/n]: ", store.Empty()
+	q, def := "\nСоздать пользователя?", store.Empty()
 	if !def {
-		q = "Создать ещё пользователя? [y/N]: "
+		q = "\nСоздать ещё пользователя?"
 	}
-	for yes(ask("\n"+q), def) {
+	for p.yes(q, def) {
 		for {
-			n := ask("Имя (a-z 0-9 _ . -): ")
+			n := p.line("Имя (a-z 0-9 _ . -): ", "")
 			if n == "" {
 				break
 			}
@@ -186,7 +212,7 @@ func askUsers(store *Store) []User {
 			out = append(out, u)
 			break
 		}
-		q, def = "Создать ещё пользователя? [y/N]: ", false
+		q, def = "Создать ещё пользователя?", false
 	}
 	return out
 }
