@@ -1,0 +1,28 @@
+[Unit]
+Description=hy-panel (Hysteria 2 users)
+Wants=network-online.target
+After=network-online.target
+Before=hysteria-server.service
+
+[Service]
+EnvironmentFile=/etc/hy-panel.env
+ExecStart=/usr/local/bin/hy-panel -host 203.0.113.10 -name AMS
+StateDirectory=hy-panel
+StateDirectoryMode=0700
+Restart=always
+RestartSec=2
+
+# Read-only system except /var/lib/hy-panel; may read /etc/hysteria even if owned by another user.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

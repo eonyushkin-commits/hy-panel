@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>hy-panel</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#16181d;--mute:#6b7280;--line:#e5e7eb;--acc:#2563eb;--ok:#16a34a;--bad:#dc2626;--warn:#d97706;--bar:#e5e7eb}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#171a21;--fg:#e6e8ec;--mute:#8b93a1;--line:#262b35;--acc:#3b82f6;--bar:#262b35}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:880px;margin:0 auto;padding:20px 16px 60px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+h1{font-size:18px;margin:0}
+.mute{color:var(--mute)}.small{font-size:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px}
+button,input,select{font:inherit;color:inherit}
+button{background:var(--card);border:1px solid var(--line);border-radius:7px;padding:6px 11px;cursor:pointer}
+button:hover{border-color:var(--mute)}
+button.pri{background:var(--acc);border-color:var(--acc);color:#fff}
+button.danger{color:var(--bad)}
+input,select{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:7px 9px;width:100%}
+.err{background:#dc262615;border:1px solid #dc262655;color:var(--bad);padding:8px 12px;border-radius:8px;margin-bottom:12px}
+.user{display:grid;grid-template-columns:1fr auto;gap:10px;padding:14px 16px;border-top:1px solid var(--line)}
+.user:first-child{border-top:0}
+.name{font-weight:600;display:flex;align-items:center;gap:8px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--line);flex:none}
+.dot.on{background:var(--ok)}
+.tag{font-size:11px;padding:1px 7px;border-radius:99px;border:1px solid currentColor;font-weight:500}
+.tag.bad{color:var(--bad)}.tag.warn{color:var(--warn)}
+.meta{display:flex;gap:14px;flex-wrap:wrap;margin-top:4px}
+.bar{height:4px;background:var(--bar);border-radius:2px;margin-top:8px;overflow:hidden;max-width:320px}
+.bar i{display:block;height:100%;background:var(--acc)}
+.acts{display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end}
+.empty{padding:40px;text-align:center}
+dialog{border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--fg);padding:20px;width:min(440px,calc(100vw - 32px))}
+dialog::backdrop{background:#0007}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid label{display:block}.grid .full{grid-column:1/-1}
+label span{display:block;font-size:12px;color:var(--mute);margin-bottom:3px}
+.chk{display:flex!important;align-items:center;gap:8px;font-size:13px}.chk input{width:auto}
+.row{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+.tabs{display:flex;gap:4px;margin-bottom:12px}
+.tabs button.act{background:var(--acc);border-color:var(--acc);color:#fff}
+.qr{display:block;margin:0 auto 10px;background:#fff;padding:8px;border-radius:8px;width:240px;height:240px}
+textarea{width:100%;font:12px ui-monospace,Menlo,monospace;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:8px;resize:vertical}
+#login{max-width:320px;margin:80px auto;padding:20px}
+@media (max-width:560px){.user{grid-template-columns:1fr}.acts{justify-content:flex-start}}
+</style>
+</head>
+<body>
+<main>
+  <form id="login" class="card" hidden>
+    <h1 style="margin-bottom:12px">hy-panel</h1>
+    <input type="password" name="password" placeholder="Пароль" autofocus>
+    <div class="row"><button class="pri">Войти</button></div>
+  </form>
+
+  <div id="app" hidden>
+    <header>
+      <div>
+        <h1>Hysteria 2</h1>
+        <div class="mute small" id="srv"></div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="pri" onclick="openEdit()">+ Пользователь</button>
+        <button onclick="logout()">Выйти</button>
+      </div>
+    </header>
+    <div id="hyerr" class="err" hidden></div>
+    <div id="list" class="card"></div>
+  </div>
+</main>
+
+<dialog id="edit">
+  <form method="dialog" id="editForm">
+    <h1 id="editTitle" style="margin-bottom:14px"></h1>
+    <div class="grid">
+      <label class="full" id="nameWrap"><span>Имя (a-z 0-9 _ . -)</span><input name="name" required pattern="[A-Za-z0-9_.\-]{1,32}" autocapitalize="off"></label>
+      <label><span>Лимит трафика, ГБ (0 — без лимита)</span><input name="quota" type="number" min="0" step="any"></label>
+      <label><span>Устройств (0 — без лимита; телефону ≥2)</span><input name="devices" type="number" min="0"></label>
+      <label class="full chk"><input type="checkbox" name="monthly"> Сбрасывать трафик 1-го числа</label>
+      <label><span>Действует до</span><input name="expires" type="date"></label>
+      <label><span>Пароль</span><input name="password" autocomplete="off" pattern="[^:\s]{8,128}" title="8–128 символов, без двоеточия и пробелов"></label>
+      <label class="full"><span>Заметка</span><input name="note" maxlength="200"></label>
+    </div>
+    <div class="row">
+      <button type="button" id="rekeyBtn" class="danger" style="margin-right:auto" onclick="rekey()">Новый ключ</button>
+      <button class="pri" value="ok">Сохранить</button>
+      <button type="button" onclick="$('#edit').close()">Отмена</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="share">
+  <h1 id="shareTitle" style="margin-bottom:12px"></h1>
+  <div class="tabs">
+    <button data-t="uri">Ссылка</button><button data-t="sub" id="subTab">Подписка</button><button data-t="mihomo">Mihomo</button>
+  </div>
+  <img class="qr" id="qr" alt="">
+  <textarea id="shareText" rows="4" readonly></textarea>
+  <div class="mute small" id="shareHint"></div>
+  <div class="row"><button onclick="copyShare()">Копировать</button><button class="pri" onclick="$('#share').close()">Готово</button></div>
+</dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+let S = null, editing = null, shareUser = null;
+
+const GB = 1024 ** 3;
+function fmt(b) {
+  const u = ['Б','КБ','МБ','ГБ','ТБ']; let i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++ }
+  return (i ? b.toFixed(b < 10 ? 2 : 1) : b) + ' ' + u[i];
+}
+function ago(t) {
+  if (!t) return 'никогда';
+  const s = Date.now() / 1000 - t;
+  if (s < 60) return 'только что';
+  if (s < 3600) return Math.floor(s / 60) + ' мин назад';
+  if (s < 86400) return Math.floor(s / 3600) + ' ч назад';
+  return new Date(t * 1000).toLocaleDateString('ru-RU');
+}
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function api(method, path, body) {
+  const r = await fetch(path, {method, headers: body ? {'Content-Type': 'application/json'} : {}, body: body ? JSON.stringify(body) : undefined});
+  if (r.status === 401 && path !== '/api/login') { showLogin(); throw new Error('unauthorized'); }
+  if (!r.ok) { const t = await r.text(); alert(t); throw new Error(t); }
+  const ct = r.headers.get('content-type') || '';
+  return ct.includes('json') ? r.json() : r.text();
+}
+
+function showLogin() { $('#app').hidden = true; $('#login').hidden = false; }
+$('#login').onsubmit = async e => {
+  e.preventDefault();
+  try { await api('POST', '/api/login', {password: e.target.password.value}); e.target.reset(); load(); } catch {}
+};
+async function logout() { await api('POST', '/api/logout'); showLogin(); }
+
+async function load() {
+  try { S = await api('GET', '/api/state'); } catch { return; }
+  $('#login').hidden = true; $('#app').hidden = false;
+  const sv = S.server;
+  $('#srv').textContent = `${sv.host}:${sv.port}` + (sv.obfs ? ` · ${sv.obfs}` : '') + (sv.pinned ? ' · self-signed (pin)' : '') + (sv.sni ? ` · sni ${sv.sni}` : '');
+  $('#hyerr').hidden = !S.hyError;
+  $('#hyerr').textContent = 'Нет связи с trafficStats Hysteria: ' + S.hyError;
+  render();
+}
+
+const statusTag = {disabled: ['выключен', 'bad'], expired: ['истёк', 'bad'], quota: ['лимит', 'bad']};
+function render() {
+  const L = $('#list');
+  if (!S.users.length) { L.innerHTML = '<div class="empty mute">Пользователей нет</div>'; return; }
+  L.innerHTML = S.users.map(u => {
+    const used = u.up + u.down, st = statusTag[u.status];
+    const pct = u.quotaBytes ? Math.min(100, used / u.quotaBytes * 100) : 0;
+    const days = u.expiresAt ? Math.ceil((u.expiresAt - Date.now() / 1000) / 86400) : null;
+    return `<div class="user">
+      <div>
+        <div class="name"><span class="dot ${u.online ? 'on' : ''}"></span>${esc(u.name)}
+          ${st ? `<span class="tag ${st[1]}">${st[0]}</span>` : ''}
+          ${!st && days !== null && days <= 3 ? `<span class="tag warn">${days} дн.</span>` : ''}
+        </div>
+        <div class="meta mute small">
+          <span>↓ ${fmt(u.down)} ↑ ${fmt(u.up)}${u.quotaBytes ? ' / ' + fmt(u.quotaBytes) : ''}</span>${u.resetMonthly ? '<span>сброс 1-го</span>' : ''}
+          <span>${u.online ? `онлайн: ${u.online}${u.maxDevices ? '/' + u.maxDevices : ''}` : 'был ' + ago(u.lastSeen)}</span>
+          ${u.expiresAt ? `<span>до ${new Date(u.expiresAt * 1000).toLocaleDateString('ru-RU')}</span>` : ''}
+          ${u.note ? `<span>${esc(u.note)}</span>` : ''}
+        </div>
+        ${u.quotaBytes ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ''}
+      </div>
+      <div class="acts">
+        <button onclick="openShare('${u.name}')">QR</button>
+        <button onclick="openEdit('${u.name}')">Изменить</button>
+        <button onclick="toggle('${u.name}')">${u.enabled ? 'Выкл' : 'Вкл'}</button>
+        <button onclick="resetT('${u.name}')" title="Сбросить счётчик трафика">↺</button>
+        <button class="danger" onclick="del('${u.name}')">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+const find = n => S.users.find(u => u.name === n);
+async function toggle(n) { await api('PATCH', '/api/users/' + n, {enabled: !find(n).enabled}); load(); }
+async function resetT(n) { if (confirm(`Сбросить трафик ${n}?`)) { await api('PATCH', '/api/users/' + n, {resetTraffic: true}); load(); } }
+async function del(n) { if (confirm(`Удалить ${n}? Клиент будет отключён.`)) { await api('DELETE', '/api/users/' + n); load(); } }
+
+function openEdit(n) {
+  editing = n ? find(n) : null;
+  const f = $('#editForm'), u = editing || {};
+  $('#editTitle').textContent = editing ? editing.name : 'Новый пользователь';
+  $('#nameWrap').hidden = !!editing; f.name.required = !editing;
+  f.name.value = u.name || '';
+  f.quota.value = u.quotaBytes ? +(u.quotaBytes / GB).toFixed(2) : 0;
+  f.devices.value = u.maxDevices || 0;
+  f.monthly.checked = !!u.resetMonthly;
+  f.expires.value = u.expiresAt ? localDate(u.expiresAt) : '';
+  f.password.value = ''; f.password.placeholder = editing ? 'не менять' : 'случайный';
+  f.note.value = u.note || '';
+  $('#rekeyBtn').hidden = !editing;
+  $('#edit').returnValue = ''; // returnValue survives between openings; Esc must not re-save
+  $('#edit').showModal();
+}
+$('#edit').onclose = async () => {
+  if ($('#edit').returnValue !== 'ok') return;
+  const f = $('#editForm');
+  const body = {
+    quotaBytes: Math.round((+f.quota.value || 0) * GB),
+    maxDevices: +f.devices.value || 0,
+    resetMonthly: f.monthly.checked,
+    expiresAt: f.expires.value ? Math.floor(new Date(f.expires.value + 'T23:59:59').getTime() / 1000) : 0,
+    note: f.note.value,
+  };
+  if (f.password.value) body.password = f.password.value;
+  try {
+    if (editing) await api('PATCH', '/api/users/' + editing.name, body);
+    else { body.name = f.name.value.toLowerCase(); await api('POST', '/api/users', body); }
+  } catch {}
+  load();
+};
+
+async function rekey() {
+  const n = editing.name;
+  if (!confirm(`Выдать ${n} новый ключ? Старые ссылки, QR и подписка перестанут работать, текущие сессии будут разорваны.`)) return;
+  try { await api('PATCH', '/api/users/' + n, {newKey: true}); } catch { return; }
+  $('#edit').close(); await load(); openShare(n);
+}
+const localDate = t => { const d = new Date(t * 1000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+async function openShare(n) {
+  shareUser = find(n);
+  $('#shareTitle').textContent = n;
+  $('#subTab').hidden = !S.subBase;
+  setTab('uri');
+  $('#share').showModal();
+}
+async function setTab(t) {
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('act', b.dataset.t === t));
+  const u = shareUser, q = '/api/users/' + u.name + '/qr.png?t=' + Date.now();
+  let text, hint = '', qr = q;
+  if (t === 'uri') { text = u.uri; hint = 'Hiddify, v2rayN, Shadowrocket, NekoBox, официальный клиент.'; }
+  if (t === 'sub') {
+    text = S.subBase + u.subPath; qr = q + '&sub=1';
+    hint = 'Клиент сам обновляет конфиг и видит остаток трафика и срок. mihomo получает YAML.';
+  }
+  if (t === 'mihomo') { text = await api('GET', '/api/users/' + u.name + '/mihomo'); qr = ''; hint = 'Вставь в proxies: конфига mihomo.'; }
+  $('#shareText').value = text; $('#shareHint').textContent = hint;
+  $('#qr').hidden = !qr; if (qr) $('#qr').src = qr;
+  $('#shareText').rows = t === 'mihomo' ? 10 : 4;
+}
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => setTab(b.dataset.t));
+function copyShare() { const t = $('#shareText'); t.select(); navigator.clipboard?.writeText(t.value) || document.execCommand('copy'); }
+
+load();
+setInterval(() => { if (!$('#app').hidden && !document.querySelector('dialog[open]')) load(); }, 5000);
+</script>
+</body>
+</html>
