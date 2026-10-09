@@ -28,12 +28,13 @@
 
 ## Установка
 
-На сервере с работающим `hysteria-server`:
+На сервере с работающим `hysteria-server`, от root:
 
 ```bash
-scp hy-panel-linux-amd64 root@<IP>:/tmp/      # из Releases
-ssh root@<IP> 'chmod +x /tmp/hy-panel-linux-amd64 && /tmp/hy-panel-linux-amd64 install'
+bash <(curl -fsSL https://raw.githubusercontent.com/eonyushkin-commits/hy-panel/main/install.sh)
 ```
+
+Флаги передаются после скрипта: `bash <(curl …) -name AMS -host vpn.example.com`. Скрипт берёт бинарник под архитектуру сервера из последнего релиза, сверяет `SHA256SUMS` и запускает `hy-panel install`. Версию можно зафиксировать: `HY_PANEL_VERSION=v0.1.0 bash <(curl …)`. Работает, только если репозиторий публичный и в нём есть релиз. Для приватного — скопировать бинарник вручную и запустить `./hy-panel-linux-amd64 install`.
 
 `install` делает всё сам и проверяет результат:
 - кладёт бинарник в `/usr/local/bin/hy-panel` и генерирует пароль в `/etc/hy-panel.env`;
