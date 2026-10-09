@@ -97,7 +97,12 @@ dialog::backdrop{background:#0b0d1299;backdrop-filter:blur(3px)}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .grid .full{grid-column:1/-1}
 label span{display:block;font-size:12.5px;color:var(--mute);margin-bottom:4px}
-label small{display:block;font-size:11.5px;line-height:1.35;margin-top:4px}
+.tip{position:static;display:inline-flex;vertical-align:-3px;padding:0;margin-left:2px;border:0;background:none;color:var(--mute);cursor:help}
+.tip:hover,.tip:focus-visible{color:var(--acc);background:none}
+.tip svg{width:15px;height:15px}
+.grid label{position:relative}
+.tip::after{content:attr(data-tip);position:absolute;left:0;right:0;top:26px;z-index:2;padding:9px 12px;border-radius:10px;background:var(--fg);color:var(--bg);font-size:12.5px;line-height:1.45;text-align:left;white-space:normal;box-shadow:var(--shadow-lg);opacity:0;visibility:hidden;transition:opacity .15s}
+.tip:hover::after,.tip:focus::after{opacity:1;visibility:visible}
 .chk{display:flex!important;align-items:center;gap:10px;font-size:13.5px;cursor:pointer}
 .row{display:flex;gap:8px;justify-content:flex-end;margin-top:20px}
 .qr{display:block;margin:0 auto 14px;background:#fff;padding:10px;border-radius:12px;width:232px;height:232px;border:1px solid var(--line)}
@@ -133,6 +138,7 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
   <symbol id="i-reset" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></symbol>
   <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></symbol>
 </svg>
 
@@ -184,7 +190,7 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
     <div class="grid">
       <label class="full" id="nameWrap"><span>Имя (a-z 0-9 _ . -)</span><input name="name" required pattern="[A-Za-z0-9_.\-]{1,32}" autocapitalize="off" autocomplete="off"></label>
       <label><span>Лимит трафика, ГБ</span><input name="quota" type="number" min="0" step="any" placeholder="без лимита"></label>
-      <label><span>Устройств одновременно</span><input name="devices" type="number" min="0" placeholder="без лимита"><small class="mute">телефону — от 2: при смене сети старая сессия держится ~30 с</small></label>
+      <label><span>Устройств одновременно <button type="button" class="tip" onclick="this.focus()" aria-label="Подсказка" data-tip="Телефону лучше разрешить не меньше двух устройств. Когда телефон переключается между Wi-Fi и мобильной сетью, прежнее подключение сохраняется ещё около тридцати секунд и тоже учитывается в лимите."><svg class="i"><use href="#i-info"/></svg></button></span><input name="devices" type="number" min="0" placeholder="без лимита"></label>
       <label><span>Действует до</span><input name="expires" type="date"></label>
       <label><span>Пароль</span><input name="password" autocomplete="off" pattern="[^:\s]{8,128}" title="8–128 символов, без двоеточия и пробелов"></label>
       <label class="full chk"><input type="checkbox" name="monthly" class="sw"> Сбрасывать трафик 1-го числа</label>
