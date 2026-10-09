@@ -253,7 +253,8 @@ document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => setTab(
 function copyShare() { const t = $('#shareText'); t.select(); navigator.clipboard?.writeText(t.value) || document.execCommand('copy'); }
 
 load();
-setInterval(() => { if (!$('#app').hidden && !document.querySelector('dialog[open]')) load(); }, 5000);
+// The server syncs every 10s; polling faster or in a hidden tab only repeats data.
+setInterval(() => { if (!document.hidden && !$('#app').hidden && !document.querySelector('dialog[open]')) load(); }, 10000);
 </script>
 </body>
 </html>

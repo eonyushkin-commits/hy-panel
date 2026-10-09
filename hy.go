@@ -2,14 +2,13 @@ package main
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -79,6 +78,8 @@ func loadHyConfig(path string) (*hyConfig, error) {
 	if err := yaml.Unmarshal(norm, &c); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	c.Auth.Type = strings.ToLower(c.Auth.Type)
+	c.Obfs.Type = strings.ToLower(c.Obfs.Type)
 	return &c, nil
 }
 
@@ -113,7 +114,7 @@ func (c *hyConfig) port() string {
 }
 
 func (c *hyConfig) obfs() (typ, pass string) {
-	switch strings.ToLower(c.Obfs.Type) {
+	switch c.Obfs.Type {
 	case "salamander":
 		return "salamander", c.Obfs.Salamander.Password
 	case "gecko":
@@ -153,8 +154,7 @@ func readCert(path string) (certInfo, error) {
 	ci.SelfSigned = bytes.Equal(cert.RawIssuer, cert.RawSubject) &&
 		cert.CheckSignature(cert.SignatureAlgorithm, cert.RawTBSCertificate, cert.Signature) == nil
 	if ci.SelfSigned {
-		sum := sha256.Sum256(cert.Raw)
-		ci.Pin = hex.EncodeToString(sum[:])
+		ci.Pin = certFP(cert.Raw)
 	}
 	return ci, nil
 }
@@ -235,12 +235,10 @@ func newStatsClient(listen, secret string) *statsClient {
 }
 
 func (c *statsClient) do(method, path string, body, out any) error {
-	var rd *bytes.Reader
+	var rd io.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)
 		rd = bytes.NewReader(b)
-	} else {
-		rd = bytes.NewReader(nil)
 	}
 	req, err := http.NewRequest(method, c.base+path, rd)
 	if err != nil {
@@ -263,19 +261,23 @@ func (c *statsClient) do(method, path string, body, out any) error {
 	return nil
 }
 
+// TrafficAndClear and Online return nil on error, never a partial map.
 func (c *statsClient) TrafficAndClear() (map[string]trafficEntry, error) {
-	m := map[string]trafficEntry{}
-	return m, c.do("GET", "/traffic?clear=1", nil, &m)
+	return get[trafficEntry](c, "/traffic?clear=1")
 }
 
 func (c *statsClient) Online() (map[string]int, error) {
-	m := map[string]int{}
-	return m, c.do("GET", "/online", nil, &m)
+	return get[int](c, "/online")
+}
+
+func get[V any](c *statsClient, path string) (map[string]V, error) {
+	m := map[string]V{}
+	if err := c.do("GET", path, nil, &m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 func (c *statsClient) Kick(ids []string) error {
-	if len(ids) == 0 {
-		return nil
-	}
 	return c.do("POST", "/kick", ids, nil)
 }

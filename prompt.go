@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -25,7 +26,11 @@ func (p *prompter) line(q, def string) string {
 		return def
 	}
 	fmt.Print(q)
-	l, _ := p.in.ReadString('\n')
+	l, err := p.in.ReadString('\n')
+	if err != nil && l == "" {
+		fmt.Println()
+		p.in = nil // Ctrl-D: the rest of the questions take their defaults
+	}
 	if l = strings.TrimSpace(l); l == "" {
 		return def
 	}
@@ -58,18 +63,30 @@ func (p *prompter) choose(title string, opts []string, def int) int {
 }
 
 func (p *prompter) yes(q string, def bool) bool {
-	d := "N"
+	d, hint := "n", "y/N"
 	if def {
-		d = "Y"
+		d, hint = "y", "Y/n"
 	}
-	a := strings.ToLower(p.line(q+" ["+map[bool]string{true: "Y/n", false: "y/N"}[def]+"]: ", d))
+	a := strings.ToLower(p.line(q+" ["+hint+"]: ", d))
 	return strings.HasPrefix(a, "y") || strings.HasPrefix(a, "д")
+}
+
+// need asks until the answer is non-empty; closed input aborts.
+func (p *prompter) need(q string) string {
+	for {
+		if a := p.line(q, ""); a != "" {
+			return a
+		}
+		if p.in == nil {
+			log.Fatal("✗ ввод прерван")
+		}
+	}
 }
 
 // port asks for a TCP/UDP port number.
 func (p *prompter) port(q string) string {
 	for {
-		a := p.line(q, "")
+		a := p.need(q)
 		if n, err := strconv.Atoi(a); err == nil && n > 0 && n < 65536 {
 			return a
 		}

@@ -32,8 +32,7 @@ func panelCert(dir, host string) (tls.Certificate, string, error) {
 	if err != nil {
 		return c, "", err
 	}
-	sum := sha256.Sum256(c.Certificate[0])
-	return c, hex.EncodeToString(sum[:]), nil
+	return c, certFP(c.Certificate[0]), nil
 }
 
 func newSelfSigned(crtPath, keyPath, host string) error {
@@ -70,4 +69,10 @@ func newSelfSigned(crtPath, keyPath, host string) error {
 		return err
 	}
 	return os.WriteFile(crtPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644)
+}
+
+// certFP is the hex sha256 of a DER certificate: the pin clients check.
+func certFP(der []byte) string {
+	sum := sha256.Sum256(der)
+	return hex.EncodeToString(sum[:])
 }

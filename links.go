@@ -121,6 +121,9 @@ func (e Endpoint) Mihomo(u User) string {
 	return b.String()
 }
 
+// MihomoDoc is a complete mihomo proxy-provider document for u.
+func (e Endpoint) MihomoDoc(u User) string { return "proxies:\n" + e.Mihomo(u) }
+
 func subscriptionUserinfo(u User) string {
 	return fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", u.Up, u.Down, u.QuotaBytes, u.ExpiresAt)
 }
