@@ -126,7 +126,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>'
 
 async function api(method, path, body) {
   const r = await fetch(path, {method, headers: body ? {'Content-Type': 'application/json'} : {}, body: body ? JSON.stringify(body) : undefined});
-  if (r.status === 401 && path !== '/api/login') { showLogin(); throw new Error('unauthorized'); }
+  if (r.status === 401 && path !== 'api/login') { showLogin(); throw new Error('unauthorized'); }
   if (!r.ok) { const t = await r.text(); alert(t); throw new Error(t); }
   const ct = r.headers.get('content-type') || '';
   return ct.includes('json') ? r.json() : r.text();
@@ -135,12 +135,12 @@ async function api(method, path, body) {
 function showLogin() { $('#app').hidden = true; $('#login').hidden = false; }
 $('#login').onsubmit = async e => {
   e.preventDefault();
-  try { await api('POST', '/api/login', {password: e.target.password.value}); e.target.reset(); load(); } catch {}
+  try { await api('POST', 'api/login', {password: e.target.password.value}); e.target.reset(); load(); } catch {}
 };
-async function logout() { await api('POST', '/api/logout'); showLogin(); }
+async function logout() { await api('POST', 'api/logout'); showLogin(); }
 
 async function load() {
-  try { S = await api('GET', '/api/state'); } catch { return; }
+  try { S = await api('GET', 'api/state'); } catch { return; }
   $('#login').hidden = true; $('#app').hidden = false;
   const sv = S.server;
   $('#srv').textContent = `${sv.host}:${sv.port}` + (sv.obfs ? ` · ${sv.obfs}` : '') + (sv.pinned ? ' · self-signed (pin)' : '') + (sv.sni ? ` · sni ${sv.sni}` : '');
@@ -183,9 +183,9 @@ function render() {
 }
 
 const find = n => S.users.find(u => u.name === n);
-async function toggle(n) { await api('PATCH', '/api/users/' + n, {enabled: !find(n).enabled}); load(); }
-async function resetT(n) { if (confirm(`Сбросить трафик ${n}?`)) { await api('PATCH', '/api/users/' + n, {resetTraffic: true}); load(); } }
-async function del(n) { if (confirm(`Удалить ${n}? Клиент будет отключён.`)) { await api('DELETE', '/api/users/' + n); load(); } }
+async function toggle(n) { await api('PATCH', 'api/users/' + n, {enabled: !find(n).enabled}); load(); }
+async function resetT(n) { if (confirm(`Сбросить трафик ${n}?`)) { await api('PATCH', 'api/users/' + n, {resetTraffic: true}); load(); } }
+async function del(n) { if (confirm(`Удалить ${n}? Клиент будет отключён.`)) { await api('DELETE', 'api/users/' + n); load(); } }
 
 function openEdit(n) {
   editing = n ? find(n) : null;
@@ -215,8 +215,8 @@ $('#edit').onclose = async () => {
   };
   if (f.password.value) body.password = f.password.value;
   try {
-    if (editing) await api('PATCH', '/api/users/' + editing.name, body);
-    else { body.name = f.name.value.toLowerCase(); await api('POST', '/api/users', body); }
+    if (editing) await api('PATCH', 'api/users/' + editing.name, body);
+    else { body.name = f.name.value.toLowerCase(); await api('POST', 'api/users', body); }
   } catch {}
   load();
 };
@@ -224,7 +224,7 @@ $('#edit').onclose = async () => {
 async function rekey() {
   const n = editing.name;
   if (!confirm(`Выдать ${n} новый ключ? Старые ссылки, QR и подписка перестанут работать, текущие сессии будут разорваны.`)) return;
-  try { await api('PATCH', '/api/users/' + n, {newKey: true}); } catch { return; }
+  try { await api('PATCH', 'api/users/' + n, {newKey: true}); } catch { return; }
   $('#edit').close(); await load(); openShare(n);
 }
 const localDate = t => { const d = new Date(t * 1000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
@@ -237,14 +237,14 @@ async function openShare(n) {
 }
 async function setTab(t) {
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('act', b.dataset.t === t));
-  const u = shareUser, q = '/api/users/' + u.name + '/qr.png?t=' + Date.now();
+  const u = shareUser, q = 'api/users/' + u.name + '/qr.png?t=' + Date.now();
   let text, hint = '', qr = q;
   if (t === 'uri') { text = u.uri; hint = 'Hiddify, v2rayN, Shadowrocket, NekoBox, официальный клиент.'; }
   if (t === 'sub') {
     text = S.subBase + u.subPath; qr = q + '&sub=1';
     hint = 'Клиент сам обновляет конфиг и видит остаток трафика и срок. mihomo получает YAML.';
   }
-  if (t === 'mihomo') { text = await api('GET', '/api/users/' + u.name + '/mihomo'); qr = ''; hint = 'Вставь в proxies: конфига mihomo.'; }
+  if (t === 'mihomo') { text = await api('GET', 'api/users/' + u.name + '/mihomo'); qr = ''; hint = 'Вставь в proxies: конфига mihomo.'; }
   $('#shareText').value = text; $('#shareHint').textContent = hint;
   $('#qr').hidden = !qr; if (qr) $('#qr').src = qr;
   $('#shareText').rows = t === 'mihomo' ? 10 : 4;

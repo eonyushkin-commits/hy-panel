@@ -64,6 +64,12 @@ func main() {
 		case "uninstall":
 			runUninstall(os.Args[2:])
 			return
+		case "info":
+			printInfo()
+			return
+		case "passwd":
+			runPasswd()
+			return
 		}
 	}
 	var (
@@ -150,10 +156,10 @@ func main() {
 		if err != nil {
 			log.Fatalf("panel certificate: %v", err)
 		}
-		srv := server(*uiListen, app.routes(false))
+		srv := server(*uiListen, underPath(os.Getenv("HYP_UI_PATH"), app.routes(false)))
 		srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
 		go func() { log.Fatal(srv.ListenAndServeTLS("", "")) }()
-		log.Printf("UI on https://%s (cert sha256 %s)", *uiListen, fp)
+		log.Printf("UI on https://%s%s (cert sha256 %s)", *uiListen, os.Getenv("HYP_UI_PATH"), fp)
 	}
 
 	go app.syncLoop(*interval)
@@ -631,6 +637,26 @@ func (a *App) handleSub(w http.ResponseWriter, r *http.Request) {
 	default:
 		fmt.Fprint(w, b64(a.ep.URI(u)+"\n"))
 	}
+}
+
+// underPath serves h only below a secret path, like 3x-ui's web base path:
+// everything else is a plain 404, so scanners do not find the panel.
+func underPath(p string, h http.Handler) http.Handler {
+	p = "/" + strings.Trim(p, "/")
+	if p == "/" {
+		return h
+	}
+	strip := http.StripPrefix(p, h)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == p:
+			http.Redirect(w, r, p+"/", http.StatusFound)
+		case strings.HasPrefix(r.URL.Path, p+"/"):
+			strip.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
 }
 
 // routes: withAuth adds Hysteria's /auth backend (loopback listener only).

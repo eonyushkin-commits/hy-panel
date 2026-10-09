@@ -515,3 +515,14 @@ func TestPatchHyConfig(t *testing.T) {
 		t.Fatal("second run must be a no-op")
 	}
 }
+
+func TestUnderPath(t *testing.T) {
+	h := underPath("/secret12/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(r.URL.Path)) }))
+	for path, want := range map[string]int{"/": 404, "/api/state": 404, "/secret12": 302, "/secret12/": 200, "/secret12/api/state": 200, "/secret123/": 404} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		if w.Code != want {
+			t.Errorf("%s: %d, want %d", path, w.Code, want)
+		}
+	}
+}

@@ -60,14 +60,15 @@ func runInstall(args []string) {
 
 	step("binary → "+binPath, copySelf(binPath))
 
-	password := ""
-	if b, err := os.ReadFile(envPath); err == nil {
-		password = strings.TrimPrefix(strings.TrimSpace(string(b)), "HYP_PASSWORD=")
-		step("password: keeping "+envPath, nil)
-	} else {
-		password = randStr(16)
-		step("password → "+envPath, os.WriteFile(envPath, []byte("HYP_PASSWORD="+password+"\n"), 0o600))
+	// Like 3x-ui: random password and a secret URL path, kept across re-runs.
+	env := readEnv()
+	if env["HYP_PASSWORD"] == "" {
+		env["HYP_PASSWORD"] = randStr(16)
 	}
+	if env["HYP_UI_PATH"] == "" {
+		env["HYP_UI_PATH"] = "/" + strings.ToLower(randStr(12)) + "/"
+	}
+	step("password and URL path → "+envPath, writeEnv(env))
 
 	// Import users while the config still has the old auth.
 	store, err := OpenStore(dataPath)
@@ -82,9 +83,8 @@ func runInstall(args []string) {
 	unit := strings.Replace(unitTemplate, "-host 203.0.113.10 -name AMS",
 		strings.TrimSpace(fmt.Sprintf("-host %s -hy-config %s %s %s", *host, *hyCfg, uiFlag(*ui), nameFlag(*name))), 1)
 	step("systemd unit → "+unitPath, os.WriteFile(unitPath, []byte(unit), 0o644))
-	fp := ""
 	if *ui != "" {
-		_, fp, err = panelCert(filepath.Dir(dataPath), *host)
+		_, _, err = panelCert(filepath.Dir(dataPath), *host)
 		step("panel HTTPS certificate", err)
 		if out, err := exec.Command("ufw", "status").Output(); err == nil && strings.Contains(string(out), "Status: active") {
 			step("ufw allow "+*ui+"/tcp", exec.Command("ufw", "allow", *ui+"/tcp").Run())
@@ -110,15 +110,63 @@ func runInstall(args []string) {
 	}
 	step("hysteria trafficStats reachable", verr)
 
-	panel := fmt.Sprintf("ssh -L 8090:%s <user>@%s  →  http://localhost:8090", panelAddr, *host)
-	if *ui != "" {
-		panel = fmt.Sprintf("https://%s\n        браузер предупредит о self-signed сертификате — это нормально;\n        отпечаток SHA-256: %s", net.JoinHostPort(*host, *ui), fp)
+	fmt.Println("\nГотово.")
+	printInfo()
+}
+
+// printInfo prints how to open the panel (the `hy-panel info` command).
+func printInfo() {
+	env := readEnv()
+	unit, _ := os.ReadFile(unitPath)
+	host, ui := unitArg(string(unit), "-host"), unitArg(string(unit), "-ui-listen")
+	if ui != "" {
+		_, fp, _ := panelCert(filepath.Dir(dataPath), host)
+		_, port, _ := net.SplitHostPort(ui)
+		fmt.Printf("Панель:  https://%s%s\n", net.JoinHostPort(host, port), env["HYP_UI_PATH"])
+		fmt.Printf("         браузер предупредит о self-signed сертификате, это нормально\n         SHA-256: %s\n", fp)
+	} else {
+		fmt.Printf("Панель:  ssh -L 8090:%s root@%s, затем http://localhost:8090\n", panelAddr, host)
 	}
-	fmt.Printf(`
-Готово. Панель: %s
-Пароль: %s   (лежит в %s)
-Откат:  hy-panel uninstall
-`, panel, password, envPath)
+	fmt.Printf("Пароль:  %s\n\nhy-panel info | passwd | uninstall\n", env["HYP_PASSWORD"])
+}
+
+// runPasswd sets a new random panel password (`hy-panel passwd`).
+func runPasswd() {
+	env := readEnv()
+	env["HYP_PASSWORD"] = randStr(16)
+	step("new password → "+envPath, writeEnv(env))
+	step("restart hy-panel", systemctl("restart", "hy-panel"))
+	printInfo()
+}
+
+func readEnv() map[string]string {
+	env := map[string]string{}
+	b, _ := os.ReadFile(envPath)
+	for _, l := range strings.Split(string(b), "\n") {
+		if k, v, ok := strings.Cut(strings.TrimSpace(l), "="); ok {
+			env[k] = v
+		}
+	}
+	return env
+}
+
+func writeEnv(env map[string]string) error {
+	var b strings.Builder
+	for _, k := range []string{"HYP_PASSWORD", "HYP_UI_PATH"} {
+		fmt.Fprintf(&b, "%s=%s\n", k, env[k])
+	}
+	return os.WriteFile(envPath, []byte(b.String()), 0o600)
+}
+
+// unitArg returns the value of a flag in the unit's ExecStart line.
+func unitArg(unit, flag string) string {
+	f := strings.Fields(unit)
+	for i := 0; i+1 < len(f); i++ {
+		if f[i] == flag {
+			return f[i+1]
+		}
+	}
+	return ""
 }
 
 // runUninstall restores the Hysteria config and removes the service; users.json stays.
