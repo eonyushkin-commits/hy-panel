@@ -5,6 +5,11 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+  workflow_dispatch: # Actions → build → Run workflow: release without pushing a tag
+    inputs:
+      version:
+        description: "Версия релиза, например v0.1.0"
+        required: true
 
 permissions:
   contents: write # gh release create
@@ -26,7 +31,8 @@ jobs:
           done
           (cd dist && sha256sum hy-panel-linux-* > SHA256SUMS)
       - name: release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes
+          VERSION: ${{ inputs.version || github.ref_name }}
+        run: gh release create "$VERSION" dist/* --target "$GITHUB_SHA" --generate-notes
