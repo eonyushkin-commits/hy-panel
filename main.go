@@ -54,6 +54,16 @@ type App struct {
 }
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "install":
+			runInstall(os.Args[2:])
+			return
+		case "uninstall":
+			runUninstall(os.Args[2:])
+			return
+		}
+	}
 	var (
 		listen    = flag.String("listen", "127.0.0.1:8090", "UI, API and Hysteria auth backend (keep it on loopback)")
 		subListen = flag.String("sub-listen", "", "optional public listener for subscriptions only, e.g. :2096")

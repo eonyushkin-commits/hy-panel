@@ -487,3 +487,31 @@ func TestPortRangeListen(t *testing.T) {
 		t.Fatalf("port %q", ep.Port)
 	}
 }
+
+func TestPatchHyConfig(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	orig := "# my server\nlisten: :8443 # port\nobfs:\n  type: salamander\n  salamander:\n    password: ob\nAuth:\n  type: password\n  password: old\n"
+	os.WriteFile(p, []byte(orig), 0o640)
+	changed, err := patchHyConfig(p)
+	if err != nil || !changed {
+		t.Fatal(changed, err)
+	}
+	c, err := loadHyConfig(p)
+	if err != nil || c.Auth.Type != "http" || c.Auth.HTTP.URL != "http://127.0.0.1:8090/auth" ||
+		c.TrafficStats.Listen != "127.0.0.1:25413" || len(c.TrafficStats.Secret) != 32 || c.Obfs.Salamander.Password != "ob" {
+		t.Fatalf("%+v %v", c, err)
+	}
+	b, _ := os.ReadFile(p)
+	if !strings.Contains(string(b), "# my server") || strings.Count(strings.ToLower(string(b)), "auth:") != 1 {
+		t.Fatalf("comments/dup keys:\n%s", b)
+	}
+	if bak, _ := os.ReadFile(p + backupExt); string(bak) != orig {
+		t.Fatal("backup")
+	}
+	if fi, _ := os.Stat(p); fi.Mode().Perm() != 0o640 {
+		t.Fatal("mode changed")
+	}
+	if changed, _ := patchHyConfig(p); changed {
+		t.Fatal("second run must be a no-op")
+	}
+}

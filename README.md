@@ -28,37 +28,23 @@
 
 ## Установка
 
-```bash
-# 1. Бинарник из Releases (amd64 или arm64) или собранный из исходников, см. «Сборка»
-install -m755 hy-panel-linux-amd64 /usr/local/bin/hy-panel
-
-# 2. Пароль панели (обязателен)
-echo "HYP_PASSWORD=$(openssl rand -base64 18)" > /etc/hy-panel.env && chmod 600 /etc/hy-panel.env
-
-# 3. Юнит: поправь -host (публичный IP или домен) и -name
-cp hy-panel.service /etc/systemd/system/ && systemctl daemon-reload
-systemctl enable --now hy-panel
-journalctl -u hy-panel -n 5
-#   imported auth.password as user 'default' — existing clients keep working
-#   links: 1.2.3.4:8443 sni="bing.com" obfs="salamander" pinned=true
-```
-
-Первый запуск делай до правки конфига Hysteria: панель импортирует `auth.password` (как пользователя `default`) или `auth.userpass`.
-
-```yaml
-# 4. /etc/hysteria/config.yaml: заменить auth и добавить trafficStats
-auth:
-  type: http
-  http:
-    url: http://127.0.0.1:8090/auth
-trafficStats:
-  listen: 127.0.0.1:25413
-  secret: <openssl rand -hex 16>
-```
+На сервере с работающим `hysteria-server`:
 
 ```bash
-systemctl restart hy-panel hysteria-server
+scp hy-panel-linux-amd64 root@<IP>:/tmp/      # из Releases
+ssh root@<IP> 'chmod +x /tmp/hy-panel-linux-amd64 && /tmp/hy-panel-linux-amd64 install'
 ```
+
+`install` делает всё сам и проверяет результат:
+- кладёт бинарник в `/usr/local/bin/hy-panel` и генерирует пароль в `/etc/hy-panel.env`;
+- импортирует текущих пользователей из `auth.password` / `auth.userpass` — старые клиенты работают дальше;
+- переключает `auth` в `/etc/hysteria/config.yaml` на панель и добавляет `trafficStats`, остальной конфиг и комментарии не трогает, бэкап — `config.yaml.bak-hy-panel`;
+- ставит и запускает systemd-юнит, перезапускает `hysteria-server`;
+- печатает пароль и команду SSH-туннеля.
+
+Публичный IP определяется сам; если сервер за NAT или нужен домен — `install -host vpn.example.com`. Ещё флаги: `-name AMS` (префикс профиля), `-hy-config`, `-hy-service`. Повторный запуск безопасен (обновление бинарника — тот же `install`).
+
+Откат: `hy-panel uninstall` — возвращает конфиг Hysteria из бэкапа, удаляет юнит; `users.json` остаётся.
 
 ## Доступ
 
