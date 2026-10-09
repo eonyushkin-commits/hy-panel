@@ -65,6 +65,11 @@ func runInstall(args []string) {
 
 	// A configured Hysteria is adopted as is, running or not; only a missing
 	// config or the official installer's untouched template is set up fresh.
+	// A running Hysteria without the config at -hy-config reads another one:
+	// writing a new config here would change nothing it uses.
+	if _, err := os.Stat(*hyCfg); errors.Is(err, os.ErrNotExist) && serviceActive(*hySvc) {
+		log.Fatalf("✗ %s не найден, а Hysteria (%s) запущена — укажи её конфиг: install -hy-config <путь>", *hyCfg, *hySvc)
+	}
 	fresh := *force || needsFreshConfig(*hyCfg)
 	var opts hyOpts
 	if fresh {

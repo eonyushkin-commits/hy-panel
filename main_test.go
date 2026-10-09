@@ -536,6 +536,7 @@ func TestNeedsFreshConfig(t *testing.T) {
 	}
 	cases := map[string]bool{
 		filepath.Join(dir, "missing.yaml"): true,
+		write("empty.yaml", " \n"):         true,
 		write("template.yaml", "# listen: :443\n\nacme:\n  domains:\n    - your.domain.net\n  email: your@email.com\n"): true,
 		write("generated.yaml", generatedMark+"\nlisten: :443\n\nobfs:\n  type: salamander\n"):                          false,
 		write("custom.yaml", "listen: :8443\nacme:\n  domains:\n    - vpn.example.com\n"):                               false,
