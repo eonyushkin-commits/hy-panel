@@ -84,6 +84,13 @@ func main() {
 	if err != nil {
 		log.Printf("WARN: tls.cert: %v (no pin/SNI from cert)", err)
 	}
+	if strings.HasPrefix(cfg.Listen, "realm") {
+		log.Fatal("listen is a realm:// address: Realms (NAT traversal) are not supported, links would point nowhere")
+	}
+	ech, err := readECH(cfg.ECH.KeyPath)
+	if err != nil {
+		log.Fatalf("ech.keyPath: %v", err)
+	}
 	store, err := OpenStore(*data)
 	if err != nil {
 		log.Fatal(err)
@@ -96,7 +103,7 @@ func main() {
 	app := &App{
 		store:    store,
 		stats:    newStatsClient(cfg.TrafficStats.Listen, cfg.TrafficStats.Secret),
-		ep:       buildEndpoint(cfg, ci, *host, *port, *sni, *name),
+		ep:       buildEndpoint(cfg, ci, ech, *host, *port, *sni, *name),
 		password: password,
 		key:      make([]byte, 32),
 		poke:     make(chan struct{}, 1),
@@ -108,7 +115,7 @@ func main() {
 	if app.ep.Host == "" {
 		log.Fatal("-host is required (public IP or domain for client links)")
 	}
-	log.Printf("links: %s:%s sni=%q obfs=%q pinned=%v", app.ep.Host, app.ep.Port, app.ep.SNI, app.ep.ObfsType, app.ep.Pin != "")
+	log.Printf("links: %s:%s sni=%q obfs=%q pinned=%v ech=%v", app.ep.Host, app.ep.Port, app.ep.SNI, app.ep.ObfsType, app.ep.Pin != "", app.ep.ECH != "")
 
 	if *subListen != "" {
 		_, p, err := net.SplitHostPort(*subListen)
@@ -155,6 +162,12 @@ func checkHyConfig(c *hyConfig, listen string) {
 		if err != nil || u.Host != listen || u.Path != "/auth" {
 			log.Printf("WARN: hysteria auth.http.url is %q, expected %s", c.Auth.HTTP.URL, want)
 		}
+	}
+	if c.TLS.ClientCA != "" {
+		log.Print("WARN: tls.clientCA (mTLS) is set: clients also need a client certificate, links alone will not connect")
+	}
+	if c.Mimic.Enabled {
+		log.Print("WARN: mimic is enabled: clients must run Mimic too; links cannot carry it")
 	}
 	if h, _, _ := net.SplitHostPort(c.TrafficStats.Listen); h == "" || !isLoopbackHost(h) {
 		log.Printf("WARN: trafficStats.listen %q is reachable from outside — use 127.0.0.1:<port>", c.TrafficStats.Listen)

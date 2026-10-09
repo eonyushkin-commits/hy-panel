@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -23,8 +25,15 @@ import (
 type hyConfig struct {
 	Listen string `yaml:"listen"`
 	TLS    struct {
-		Cert string `yaml:"cert"`
+		Cert     string `yaml:"cert"`
+		ClientCA string `yaml:"clientca"`
 	} `yaml:"tls"`
+	ECH struct {
+		KeyPath string `yaml:"keypath"`
+	} `yaml:"ech"`
+	Mimic struct {
+		Enabled bool `yaml:"enabled"`
+	} `yaml:"mimic"`
 	ACME struct {
 		Domains []string `yaml:"domains"`
 	} `yaml:"acme"`
@@ -148,6 +157,57 @@ func readCert(path string) (certInfo, error) {
 		ci.Pin = hex.EncodeToString(sum[:])
 	}
 	return ci, nil
+}
+
+// readECH returns the base64 ECHConfigList clients need (URI `ech=`, mihomo
+// ech-opts.config) from the server's ech.keyPath file written by `hysteria ech`:
+// the "ECH CONFIGS" block, or else the configs inside "ECH KEYS"
+// (u16-prefixed private key + u16-prefixed config, repeated), as Hysteria does.
+func readECH(path string) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	var keys []byte
+	for rest := b; ; {
+		var blk *pem.Block
+		if blk, rest = pem.Decode(rest); blk == nil {
+			break
+		}
+		switch blk.Type {
+		case "ECH CONFIGS":
+			return base64.StdEncoding.EncodeToString(blk.Bytes), nil
+		case "ECH KEYS":
+			keys = blk.Bytes
+		}
+	}
+	if keys == nil {
+		return "", fmt.Errorf("%s: no ECH KEYS/ECH CONFIGS PEM block", path)
+	}
+	u16 := func(p []byte) ([]byte, []byte, bool) {
+		if len(p) < 2 || len(p) < 2+int(binary.BigEndian.Uint16(p)) {
+			return nil, nil, false
+		}
+		n := 2 + int(binary.BigEndian.Uint16(p))
+		return p[2:n], p[n:], true
+	}
+	var configs []byte
+	for len(keys) > 0 {
+		_, rest, ok := u16(keys)
+		if !ok {
+			return "", fmt.Errorf("%s: malformed ECH KEYS", path)
+		}
+		cfg, rest, ok := u16(rest)
+		if !ok {
+			return "", fmt.Errorf("%s: malformed ECH KEYS", path)
+		}
+		configs, keys = append(configs, cfg...), rest
+	}
+	list := binary.BigEndian.AppendUint16(nil, uint16(len(configs)))
+	return base64.StdEncoding.EncodeToString(append(list, configs...)), nil
 }
 
 // ---- trafficStats API client ----

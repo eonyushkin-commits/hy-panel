@@ -16,7 +16,11 @@
 | Формат входа | Blitz: `user:pass` | `user:pass` (имя без учёта регистра, как в userpass Hysteria) или голый пароль: старые клиенты на `auth.type: password` работают |
 | Сертификат | Blitz хранит `pinSHA256` в своём конфиге | pin считается из `tls.cert`, только для self-signed (LE-сертификат ротируется, pin бы сломался). SNI берётся из DNS SAN: дефолтный `sniGuard: dns-san` в Hysteria рвёт рукопожатие без него |
 | Подписка | s-ui, H-UI: `Subscription-Userinfo`, `Profile-Title` | так же; base64-URI, для mihomo/clash по UA — YAML. Живёт на отдельном порту, остальная панель не торчит наружу |
+| ECH (Hysteria 2.10+) | — | `ech.keyPath` из конфига → `ech=` в ссылке и `ech-opts` для mihomo |
+| Диапазон портов (2.8+) | — | `listen: :20000-50000` сразу даёт ссылки с port hopping; для iptables-хоппинга есть `-port` |
 | Ежемесячный сброс | H-UI: cron на всех | флаг на пользователя, 1-го числа по времени сервера |
+
+Не поддерживается, панель предупреждает при старте: Realms (2.9+, `listen: realm://…` — старт прерывается), Mimic (2.12+, клиенту нужен Mimic, ссылка его не передаёт), mTLS `tls.clientCA` (2.6.3+, клиенту нужен сертификат). Клиентские опции (`minHopInterval`, `speedTest`, bandwidth) в ссылку не входят и задаются в клиенте.
 
 Не взято: управление процессом и конфигом Hysteria, ACME, MongoDB/SQLite, Telegram-бот, мульти-ноды, WARP, лимит по IP через iptables (Blitz).
 

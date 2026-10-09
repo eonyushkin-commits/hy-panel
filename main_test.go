@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -164,7 +166,7 @@ func TestReadCertAndEndpoint(t *testing.T) {
 	if ci.Pin != hex.EncodeToString(sum[:]) {
 		t.Fatal("pin is not sha256 of leaf DER")
 	}
-	ep := buildEndpoint(cfg, ci, "203.0.113.7", "", "", "AMS")
+	ep := buildEndpoint(cfg, ci, "", "203.0.113.7", "", "", "AMS")
 	if ep.SNI != "bing.com" || ep.Port != "8443" || ep.Pin == "" {
 		t.Fatalf("endpoint: %+v", ep)
 	}
@@ -174,7 +176,7 @@ func TestReadCertAndEndpoint(t *testing.T) {
 	if ci.SelfSigned || ci.Pin != "" {
 		t.Fatalf("CA cert pinned: %+v", ci)
 	}
-	ep = buildEndpoint(cfg, ci, "", "", "", "")
+	ep = buildEndpoint(cfg, ci, "", "", "", "", "")
 	if ep.Host != "vpn.example.com" || ep.SNI != "" {
 		t.Fatalf("CA endpoint: %+v", ep)
 	}
@@ -446,5 +448,42 @@ func TestAuthEndpoint(t *testing.T) {
 	}
 	if code, _ := call("127.0.0.1:4000", "u:"+u.Password, "X-Forwarded-For", "8.8.8.8"); code != 403 {
 		t.Fatalf("proxied: %d", code)
+	}
+}
+
+func TestReadECH(t *testing.T) {
+	dir := t.TempDir()
+	cfg := []byte{0xfe, 0x0d, 0x00, 0x03, 1, 2, 3} // opaque config bytes
+	priv := []byte{9, 9}
+	keys := binary.BigEndian.AppendUint16(nil, uint16(len(priv)))
+	keys = append(keys, priv...)
+	keys = binary.BigEndian.AppendUint16(keys, uint16(len(cfg)))
+	keys = append(keys, cfg...)
+	want := base64.StdEncoding.EncodeToString(append(binary.BigEndian.AppendUint16(nil, uint16(len(cfg))), cfg...))
+
+	p := filepath.Join(dir, "keys.pem")
+	os.WriteFile(p, pem.EncodeToMemory(&pem.Block{Type: "ECH KEYS", Bytes: keys}), 0o600)
+	if got, err := readECH(p); err != nil || got != want {
+		t.Fatalf("from ECH KEYS: %q %v", got, err)
+	}
+	if got, _ := readECH(""); got != "" {
+		t.Fatal("no ech.keyPath must give empty")
+	}
+	ep := Endpoint{Host: "h", Port: "443", ECH: want}
+	u := User{Name: "a", Password: "Pw123456"}
+	if v, _ := url.Parse(ep.URI(u)); v.Query().Get("ech") != want {
+		t.Fatalf("URI: %s", ep.URI(u))
+	}
+	var doc struct{ Proxies []map[string]any }
+	yaml.Unmarshal([]byte("proxies:\n"+ep.Mihomo(u)), &doc)
+	if o, _ := doc.Proxies[0]["ech-opts"].(map[string]any); o["enable"] != true || o["config"] != want {
+		t.Fatalf("mihomo ech-opts: %v", doc.Proxies[0])
+	}
+}
+
+func TestPortRangeListen(t *testing.T) {
+	c := &hyConfig{Listen: ":20000-50000"} // Hysteria 2.8+ listens on a UDP range itself
+	if ep := buildEndpoint(c, certInfo{}, "", "1.2.3.4", "", "", ""); ep.Port != "20000-50000" {
+		t.Fatalf("port %q", ep.Port)
 	}
 }

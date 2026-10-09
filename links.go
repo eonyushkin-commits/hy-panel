@@ -16,14 +16,15 @@ type Endpoint struct {
 	ObfsType string
 	ObfsPass string
 	Pin      string // hex sha256 of a self-signed cert
+	ECH      string // base64 ECHConfigList, "" if ECH is off
 	Name     string // profile/remark prefix
 }
 
 // buildEndpoint fills gaps in the flags from the Hysteria config and certificate.
 // SNI matters: Hysteria's default sniGuard (dns-san) rejects handshakes whose
 // SNI does not match the cert's DNS SANs, and clients dialing an IP send none.
-func buildEndpoint(c *hyConfig, ci certInfo, host, port, sni, name string) Endpoint {
-	e := Endpoint{Host: host, Port: port, SNI: sni, Pin: ci.Pin, Name: name}
+func buildEndpoint(c *hyConfig, ci certInfo, ech, host, port, sni, name string) Endpoint {
+	e := Endpoint{Host: host, Port: port, SNI: sni, Pin: ci.Pin, ECH: ech, Name: name}
 	e.ObfsType, e.ObfsPass = c.obfs()
 	if e.Port == "" {
 		e.Port = c.port()
@@ -69,6 +70,9 @@ func (e Endpoint) URI(u User) string {
 	if e.SNI != "" {
 		q.Set("sni", e.SNI)
 	}
+	if e.ECH != "" {
+		q.Set("ech", e.ECH)
+	}
 	if e.Pin != "" {
 		// A self-signed cert fails normal verification; the pin replaces it.
 		q.Set("insecure", "1")
@@ -110,6 +114,9 @@ func (e Endpoint) Mihomo(u User) string {
 	if e.Pin != "" {
 		// mihomo checks the pin itself and then skips chain verification.
 		q("fingerprint", e.Pin)
+	}
+	if e.ECH != "" {
+		fmt.Fprintf(&b, "    ech-opts: {enable: true, config: %q}\n", e.ECH)
 	}
 	return b.String()
 }
