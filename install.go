@@ -80,14 +80,17 @@ func runInstall(args []string) {
 	unit := strings.Replace(unitTemplate, "-host 203.0.113.10 -name AMS",
 		strings.TrimSpace(fmt.Sprintf("-host %s -hy-config %s %s", *host, *hyCfg, nameFlag(*name))), 1)
 	step("systemd unit → "+unitPath, os.WriteFile(unitPath, []byte(unit), 0o644))
-	step("start hy-panel", systemctl("daemon-reload", "enable", "--now", "hy-panel"))
-	if changed {
-		step("restart "+*hySvc, systemctl("restart", *hySvc))
-	}
+	step("systemd daemon-reload", systemctl("daemon-reload"))
+	step("start hy-panel", systemctl("enable", "hy-panel"))
+	step("restart hy-panel", systemctl("restart", "hy-panel")) // picks up a new binary on re-run
 
-	// Verify the chain: panel up, Hysteria's trafficStats reachable with our secret.
+	// Restart Hysteria if its config changed now, or a previous run stopped
+	// half-way (config patched, Hysteria still running the old one).
 	cfg, _ = loadHyConfig(*hyCfg)
 	sc := newStatsClient(cfg.TrafficStats.Listen, cfg.TrafficStats.Secret)
+	if _, err := sc.Online(); changed || err != nil {
+		step("restart "+*hySvc, systemctl("restart", *hySvc))
+	}
 	var verr error
 	for i := 0; i < 20; i++ {
 		if _, verr = sc.Online(); verr == nil {
