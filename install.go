@@ -78,9 +78,12 @@ func runInstall(args []string) {
 		fmt.Printf("Hysteria (%s) работает — подключаю панель к ней, её настройки не меняю.\n", *hySvc)
 	}
 
-	// Panel access: flag, else what a previous install chose, else ask.
+	// Panel access: flag, else what a previous install chose (kept in the env
+	// file, which survives an uninstall that keeps the data), else ask.
 	if !set["ui-port"] {
-		if old, err := os.ReadFile(unitPath); err == nil {
+		if v := readEnv()["HYP_UI_PORT"]; v != "" {
+			*ui = v
+		} else if old, err := os.ReadFile(unitPath); err == nil {
 			_, *ui, _ = net.SplitHostPort(unitArg(string(old), "-ui-listen"))
 		} else {
 			switch p.choose("Доступ к панели:", []string{
@@ -95,6 +98,10 @@ func runInstall(args []string) {
 			}
 		}
 	}
+	if *ui == "" {
+		*ui = "off"
+	}
+	uiPort := *ui
 	if *ui == "off" {
 		*ui = ""
 	}
@@ -117,6 +124,7 @@ func runInstall(args []string) {
 	if env["HYP_UI_PATH"] == "" {
 		env["HYP_UI_PATH"] = "/" + strings.ToLower(randStr(12)) + "/"
 	}
+	env["HYP_UI_PORT"] = uiPort
 	step("password and URL path → "+envPath, writeEnv(env))
 
 	store, err := OpenStore(dataPath)
@@ -255,7 +263,7 @@ func readEnv() map[string]string {
 
 func writeEnv(env map[string]string) error {
 	var b strings.Builder
-	for _, k := range []string{"HYP_PASSWORD", "HYP_UI_PATH"} {
+	for _, k := range []string{"HYP_PASSWORD", "HYP_UI_PATH", "HYP_UI_PORT"} {
 		fmt.Fprintf(&b, "%s=%s\n", k, env[k])
 	}
 	return os.WriteFile(envPath, []byte(b.String()), 0o600)
@@ -272,29 +280,34 @@ func unitArg(unit, flag string) string {
 	return ""
 }
 
-// runUninstall restores the Hysteria config and removes the service; users.json stays.
+// runUninstall restores the Hysteria config and removes the panel. It asks
+// whether to delete the panel's data too: kept, the next install picks up the
+// users, password and URL; deleted, the next install starts from scratch.
 func runUninstall(args []string) {
 	fs := flag.NewFlagSet("uninstall", flag.ExitOnError)
 	hyCfg := fs.String("hy-config", defaultCfg, "Hysteria 2 server config")
 	hySvc := fs.String("hy-service", "hysteria-server", "Hysteria systemd service")
-	yes := fs.Bool("y", false, "do not ask for confirmation")
+	yes := fs.Bool("y", false, "do not ask; keeps the data unless -purge")
+	purge := fs.Bool("purge", false, "also delete users, traffic, panel password and URL")
 	fs.Parse(args)
 	log.SetFlags(0)
 	if os.Geteuid() != 0 {
 		log.Fatal("run as root: sudo hy-panel uninstall")
 	}
-	// Uninstall is a clean slate: the next install starts from scratch with a
-	// new password, URL and users. Re-running install (an update) keeps them.
 	dataDir := filepath.Dir(dataPath)
-	fmt.Printf("Будут удалены панель и все её данные:\n  пользователи и их трафик (%s)\n  пароль и адрес панели (%s)\n  программа и служба (%s, %s)\nКонфиг Hysteria вернётся к виду до установки панели.\nСохранить пользователей: cp %s ~/\n", dataDir, envPath, binPath, unitPath, dataPath)
+	fmt.Printf("Будет удалена панель: программа и служба (%s, %s).\nКонфиг Hysteria вернётся к виду до установки панели.\n", binPath, unitPath)
 	if !*yes {
 		p := newPrompter()
 		if p.in == nil {
-			log.Fatal("✗ нет терминала: подтверди удаление флагом -y")
+			log.Fatal("✗ нет терминала: подтверди удаление флагом -y (данные удалит только -purge)")
 		}
-		if !p.yes("Удалить?", false) {
+		if !p.yes("Удалить панель?", false) {
 			fmt.Println("Отменено.")
 			return
+		}
+		if !*purge {
+			fmt.Printf("\nДанные панели:\n  пользователи и их трафик (%s)\n  пароль, адрес и порт панели (%s)\nЕсли их оставить, следующая установка подхватит пользователей, пароль и адрес.\nЕсли удалить, следующая установка начнётся с нуля.\n", dataDir, envPath)
+			*purge = p.yes("Удалить и данные?", false)
 		}
 	}
 	b, err := os.ReadFile(*hyCfg + backupExt)
@@ -305,10 +318,14 @@ func runUninstall(args []string) {
 	systemctl("disable", "--now", "hy-panel")
 	os.Remove(unitPath)
 	systemctl("daemon-reload")
-	step("remove "+dataDir, os.RemoveAll(dataDir))
-	os.Remove(envPath)
 	os.Remove(binPath)
-	fmt.Println("Удалено. Следующая установка начнётся с нуля: новые пароль, адрес и пользователи.")
+	if *purge {
+		step("remove "+dataDir, os.RemoveAll(dataDir))
+		step("remove "+envPath, os.RemoveAll(envPath))
+		fmt.Println("Удалено вместе с данными. Следующая установка начнётся с нуля: новые пароль, адрес и пользователи.")
+	} else {
+		fmt.Printf("Панель удалена, данные оставлены в %s и %s.\nСледующая установка подхватит пользователей, пароль и адрес.\n", dataDir, envPath)
+	}
 }
 
 func step(what string, err error) {
