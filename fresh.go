@@ -31,6 +31,11 @@ func needsFreshConfig(cfgPath string) bool {
 // isTemplate: get.hy2.sh writes an ACME config for this placeholder domain.
 func isTemplate(conf []byte) bool { return strings.Contains(string(conf), "your.domain.net") }
 
+func keyPairOK(crt, key string) bool {
+	_, err := tls.LoadX509KeyPair(crt, key)
+	return err == nil
+}
+
 func serviceActive(svc string) bool {
 	return systemctl("is-active", "--quiet", svc) == nil
 }
@@ -143,8 +148,8 @@ func (v hyVersion) or(min hyVersion, want, fallback, feature string) string {
 	return fallback
 }
 
-// freshSetup writes a working config for an official Hysteria install whose
-// config never ran (the get.hy2.sh template with a placeholder ACME domain).
+// freshSetup writes a working config for an official Hysteria install that is
+// not configured yet (no config, or the get.hy2.sh template), or on -fresh.
 // Hysteria itself (binary, user, unit) comes from the official installer.
 func freshSetup(cfgPath, svc string, o hyOpts) {
 	uid, gid := 0, 0
@@ -159,8 +164,10 @@ func freshSetup(cfgPath, svc string, o hyOpts) {
 	files := []string{cfgPath}
 	if o.Domain == "" {
 		crt, key := filepath.Join(dir, "server.crt"), filepath.Join(dir, "server.key")
-		// Keep an existing certificate: clients pin it, a new one breaks their links.
-		if _, err := tls.LoadX509KeyPair(crt, key); err != nil {
+		// Keep an existing self-signed certificate: clients pin it, a new one
+		// breaks their links. Anything else (e.g. a CA-issued cert left there)
+		// would not be pinned, so it is replaced.
+		if ci, err := readCert(crt); err != nil || !ci.SelfSigned || !keyPairOK(crt, key) {
 			// The name only has to match the SNI (sniGuard); clients pin the cert.
 			step("self-signed certificate", newSelfSigned(crt, key, "bing.com"))
 		}

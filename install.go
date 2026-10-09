@@ -46,7 +46,7 @@ func runInstall(args []string) {
 	name := fs.String("name", "", "profile name prefix shown in clients")
 	ui := fs.String("ui-port", "", "public HTTPS port for the panel UI, \"off\" = SSH tunnel only (default: ask)")
 	hyPort := fs.String("hy-port", "", "UDP port or range for a new Hysteria config (default: ask)")
-	force := fs.Bool("fresh", false, "write a new Hysteria config even if Hysteria is running")
+	force := fs.Bool("fresh", false, "write a new Hysteria config even if Hysteria is already configured")
 	fs.Parse(args)
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
@@ -77,6 +77,9 @@ func runInstall(args []string) {
 	} else if serviceActive(*hySvc) {
 		fmt.Printf("Hysteria (%s) работает — подключаю панель к ней, её настройки не меняю.\n", *hySvc)
 	} else {
+		if !unitExists(*hySvc) {
+			log.Fatalf("✗ служба %s не найдена: Hysteria не установлена или задай -hy-service", *hySvc)
+		}
 		fmt.Printf("Hysteria (%s) настроена, но не запущена — подключаю панель к её конфигу и запускаю, настройки не меняю.\n", *hySvc)
 	}
 
