@@ -49,10 +49,12 @@ bash <(curl -fsSL https://raw.githubusercontent.com/eonyushkin-commits/hy-panel/
 
 ## Доступ
 
-Панель слушает `127.0.0.1:8090`:
+`install` открывает панель по HTTPS на порту 9443: `https://<IP>:9443`. Сертификат собственный, self-signed, лежит в `/var/lib/hy-panel/panel.{crt,key}`. Браузер один раз предупредит о нём; сверь отпечаток SHA-256 из вывода `install` и прими. На публичном порту есть только UI и API, `/auth` для Hysteria остаётся на `127.0.0.1:8090`. Если ufw включён, порт откроется сам.
+
+Другой порт — `install -ui-port 8443`. Без публичного порта, только через SSH-туннель — `install -ui-port ""`, потом:
 
 ```bash
-ssh -L 8090:127.0.0.1:8090 evo@vps   # → http://localhost:8090
+ssh -L 8090:127.0.0.1:8090 root@<IP>   # → http://localhost:8090
 ```
 
 Подписки включаются отдельным портом, на нём есть только `/sub/<token>`:
@@ -68,6 +70,7 @@ ssh -L 8090:127.0.0.1:8090 evo@vps   # → http://localhost:8090
 
 ```
 -listen      127.0.0.1:8090                UI, API, /auth для Hysteria
+-ui-listen   (выкл; install ставит :9443)   публичный HTTPS для UI
 -sub-listen  (выкл)                        публичный порт подписок
 -sub-url     http://<host>:<sub-port>      внешний адрес подписок
 -hy-config   /etc/hysteria/config.yaml

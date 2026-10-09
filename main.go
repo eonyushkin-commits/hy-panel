@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"crypto/tls"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -67,6 +69,7 @@ func main() {
 	var (
 		listen    = flag.String("listen", "127.0.0.1:8090", "UI, API and Hysteria auth backend (keep it on loopback)")
 		subListen = flag.String("sub-listen", "", "optional public listener for subscriptions only, e.g. :2096")
+		uiListen  = flag.String("ui-listen", "", "optional public HTTPS listener for the UI (self-signed cert), e.g. :9443")
 		subURL    = flag.String("sub-url", "", "public base URL of -sub-listen (default http://<host>:<sub port>)")
 		hyCfg     = flag.String("hy-config", "/etc/hysteria/config.yaml", "Hysteria 2 server config")
 		data      = flag.String("data", "/var/lib/hy-panel/users.json", "user database")
@@ -142,9 +145,20 @@ func main() {
 		log.Printf("subscriptions on %s (%s)", *subListen, app.subBase)
 	}
 
+	if *uiListen != "" {
+		cert, fp, err := panelCert(filepath.Dir(*data), app.ep.Host)
+		if err != nil {
+			log.Fatalf("panel certificate: %v", err)
+		}
+		srv := server(*uiListen, app.routes(false))
+		srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
+		go func() { log.Fatal(srv.ListenAndServeTLS("", "")) }()
+		log.Printf("UI on https://%s (cert sha256 %s)", *uiListen, fp)
+	}
+
 	go app.syncLoop(*interval)
 	log.Printf("hy-panel on http://%s, users: %d", *listen, len(store.List()))
-	log.Fatal(server(*listen, app.routes()).ListenAndServe())
+	log.Fatal(server(*listen, app.routes(true)).ListenAndServe())
 }
 
 func server(addr string, h http.Handler) *http.Server {
@@ -619,9 +633,12 @@ func (a *App) handleSub(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *App) routes() http.Handler {
+// routes: withAuth adds Hysteria's /auth backend (loopback listener only).
+func (a *App) routes(withAuth bool) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /auth", a.handleAuth)
+	if withAuth {
+		mux.HandleFunc("POST /auth", a.handleAuth)
+	}
 	mux.HandleFunc("POST /api/login", a.handleLogin)
 	mux.HandleFunc("POST /api/logout", func(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, &http.Cookie{Name: cookieName, Path: "/", MaxAge: -1})

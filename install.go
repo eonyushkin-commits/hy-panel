@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -39,6 +40,7 @@ func runInstall(args []string) {
 	hySvc := fs.String("hy-service", "hysteria-server", "Hysteria systemd service")
 	host := fs.String("host", "", "public IP/domain for client links (default: autodetect)")
 	name := fs.String("name", "", "profile name prefix shown in clients")
+	ui := fs.String("ui-port", "9443", "public HTTPS port for the panel UI, \"\" = SSH tunnel only")
 	fs.Parse(args)
 	log.SetFlags(0)
 	if os.Geteuid() != 0 {
@@ -78,8 +80,16 @@ func runInstall(args []string) {
 	step("hysteria config: auth → panel, trafficStats (backup: "+*hyCfg+backupExt+")", err)
 
 	unit := strings.Replace(unitTemplate, "-host 203.0.113.10 -name AMS",
-		strings.TrimSpace(fmt.Sprintf("-host %s -hy-config %s %s", *host, *hyCfg, nameFlag(*name))), 1)
+		strings.TrimSpace(fmt.Sprintf("-host %s -hy-config %s %s %s", *host, *hyCfg, uiFlag(*ui), nameFlag(*name))), 1)
 	step("systemd unit → "+unitPath, os.WriteFile(unitPath, []byte(unit), 0o644))
+	fp := ""
+	if *ui != "" {
+		_, fp, err = panelCert(filepath.Dir(dataPath), *host)
+		step("panel HTTPS certificate", err)
+		if out, err := exec.Command("ufw", "status").Output(); err == nil && strings.Contains(string(out), "Status: active") {
+			step("ufw allow "+*ui+"/tcp", exec.Command("ufw", "allow", *ui+"/tcp").Run())
+		}
+	}
 	step("systemd daemon-reload", systemctl("daemon-reload"))
 	step("start hy-panel", systemctl("enable", "hy-panel"))
 	step("restart hy-panel", systemctl("restart", "hy-panel")) // picks up a new binary on re-run
@@ -100,11 +110,15 @@ func runInstall(args []string) {
 	}
 	step("hysteria trafficStats reachable", verr)
 
+	panel := fmt.Sprintf("ssh -L 8090:%s <user>@%s  →  http://localhost:8090", panelAddr, *host)
+	if *ui != "" {
+		panel = fmt.Sprintf("https://%s\n        браузер предупредит о self-signed сертификате — это нормально;\n        отпечаток SHA-256: %s", net.JoinHostPort(*host, *ui), fp)
+	}
 	fmt.Printf(`
-Готово. Панель: ssh -L 8090:%s <user>@%s  →  http://localhost:8090
+Готово. Панель: %s
 Пароль: %s   (лежит в %s)
 Откат:  hy-panel uninstall
-`, panelAddr, *host, password, envPath)
+`, panel, password, envPath)
 }
 
 // runUninstall restores the Hysteria config and removes the service; users.json stays.
@@ -132,6 +146,13 @@ func step(what string, err error) {
 		log.Fatalf("✗ %s: %v", what, err)
 	}
 	fmt.Println("✓", what)
+}
+
+func uiFlag(port string) string {
+	if port == "" {
+		return ""
+	}
+	return "-ui-listen :" + port
 }
 
 func nameFlag(n string) string {
