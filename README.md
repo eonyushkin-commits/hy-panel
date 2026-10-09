@@ -37,9 +37,11 @@ bash <(curl -fsSL https://raw.githubusercontent.com/eonyushkin-commits/hy-panel/
 
 Флаги передаются после скрипта: `bash <(curl …) -name AMS -host vpn.example.com`. Скрипт берёт бинарник под архитектуру сервера из последнего релиза, сверяет `SHA256SUMS` и запускает `hy-panel install`. Версию можно зафиксировать: `HY_PANEL_VERSION=v0.1.0 bash <(curl …)`.
 
+В конце `install` спрашивает, создать ли пользователей (имя, ещё одного?), и печатает для каждого ссылку и QR прямо в терминале. Ответил «нет» — пользователей добавишь в панели. Без терминала вопросов нет.
+
 Два режима, выбираются сами:
 - **Hysteria уже работает** — панель подключается к ней: импортирует пользователей из `auth.password` / `auth.userpass`, старые клиенты работают дальше.
-- **Hysteria не запущена** (свежий get.hy2.sh с шаблоном `your.domain.net`, который не стартует) — панель пишет рабочий конфиг: UDP 443 (`-hy-port`), self-signed сертификат, obfs salamander; создаёт пользователя `user1` и печатает его ссылку с QR прямо в терминале. Шаблон сохраняется в `config.yaml.bak-hy-panel`. Принудительно — `install -fresh`.
+- **Hysteria не запущена** (свежий get.hy2.sh с шаблоном `your.domain.net`, который не стартует) — панель пишет рабочий конфиг: UDP 443 (`-hy-port`), self-signed сертификат, obfs salamander; Шаблон сохраняется в `config.yaml.bak-hy-panel`. Принудительно — `install -fresh`.
 
 `install` делает всё сам и проверяет результат:
 - кладёт бинарник в `/usr/local/bin/hy-panel` и генерирует пароль в `/etc/hy-panel.env`;

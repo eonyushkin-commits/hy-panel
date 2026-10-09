@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	_ "embed"
 	"errors"
@@ -85,7 +86,6 @@ func runInstall(args []string) {
 
 	store, err := OpenStore(dataPath)
 	step("user database "+dataPath, err)
-	var first *User
 	if fresh {
 		// Users imported earlier from a config that never ran are meaningless.
 		for _, u := range store.List() {
@@ -93,14 +93,11 @@ func runInstall(args []string) {
 				store.Delete(u.Name)
 			}
 		}
-		if store.Empty() {
-			u, err := store.Create(User{Name: "user1", Enabled: true}, false)
-			step("first user user1", err)
-			first = &u
-		}
 	} else if store.Empty() {
 		importUsers(store, cfg) // while the config still has the old auth
 	}
+	// Ask now: the store file must be written before the panel service owns it.
+	created := askUsers(store)
 
 	changed, err := patchHyConfig(*hyCfg)
 	step("hysteria config: auth → panel, trafficStats (backup: "+*hyCfg+backupExt+")", err)
@@ -137,14 +134,61 @@ func runInstall(args []string) {
 
 	fmt.Println("\nГотово.")
 	printInfo()
-	if first != nil {
-		ci, _ := readCert(cfg.TLS.Cert)
-		uri := buildEndpoint(cfg, ci, "", *host, "", "", *name).URI(*first)
-		fmt.Printf("\nПервый пользователь user1 — ссылка для клиента:\n%s\n", uri)
+	ci, _ := readCert(cfg.TLS.Cert)
+	ech, _ := readECH(cfg.ECH.KeyPath)
+	ep := buildEndpoint(cfg, ci, ech, *host, "", "", *name)
+	for _, u := range created {
+		uri := ep.URI(u)
+		fmt.Printf("\n%s — ссылка для клиента:\n%s\n", u.Name, uri)
 		if q, err := qrcode.New(uri, qrcode.Low); err == nil {
 			fmt.Print(q.ToSmallString(false))
 		}
 	}
+}
+
+// askUsers offers to create users interactively (like 3x-ui asks for its
+// settings). Without a terminal it creates nothing.
+func askUsers(store *Store) []User {
+	tty, err := os.Open("/dev/tty")
+	if err != nil {
+		return nil
+	}
+	defer tty.Close()
+	in := bufio.NewReader(tty)
+	ask := func(q string) string {
+		fmt.Print(q)
+		l, _ := in.ReadString('\n')
+		return strings.TrimSpace(l)
+	}
+	yes := func(a string, def bool) bool {
+		if a == "" {
+			return def
+		}
+		return strings.HasPrefix(strings.ToLower(a), "y") || strings.HasPrefix(strings.ToLower(a), "д")
+	}
+	var out []User
+	q, def := "Создать пользователя? [Y/n]: ", store.Empty()
+	if !def {
+		q = "Создать ещё пользователя? [y/N]: "
+	}
+	for yes(ask("\n"+q), def) {
+		for {
+			n := ask("Имя (a-z 0-9 _ . -): ")
+			if n == "" {
+				break
+			}
+			u, err := store.Create(User{Name: n, Enabled: true}, false)
+			if err != nil {
+				fmt.Println("  ✗", err)
+				continue
+			}
+			fmt.Println("✓ пользователь", u.Name)
+			out = append(out, u)
+			break
+		}
+		q, def = "Создать ещё пользователя? [y/N]: ", false
+	}
+	return out
 }
 
 // printInfo prints how to open the panel (the `hy-panel info` command).
