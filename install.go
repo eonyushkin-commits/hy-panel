@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	qrcode "github.com/skip2/go-qrcode"
 	"gopkg.in/yaml.v3"
 )
 
@@ -41,21 +42,33 @@ func runInstall(args []string) {
 	host := fs.String("host", "", "public IP/domain for client links (default: autodetect)")
 	name := fs.String("name", "", "profile name prefix shown in clients")
 	ui := fs.String("ui-port", "9443", "public HTTPS port for the panel UI, \"\" = SSH tunnel only")
+	hyPort := fs.String("hy-port", "443", "UDP port when writing a new Hysteria config")
+	force := fs.Bool("fresh", false, "write a new Hysteria config even if Hysteria is running")
 	fs.Parse(args)
 	log.SetFlags(0)
 	if os.Geteuid() != 0 {
 		log.Fatal("run as root: sudo hy-panel install")
 	}
 
-	cfg, err := loadHyConfig(*hyCfg)
-	if err != nil {
-		log.Fatal(err)
-	}
 	if *host == "" {
 		*host = publicIP()
 		if *host == "" {
 			log.Fatal("cannot detect a public IP (NAT?) — pass -host <IP or domain>")
 		}
+	}
+
+	// A running Hysteria is adopted as is; otherwise (bare server, or the
+	// official installer's template that never started) it is set up fresh.
+	fresh := *force || !serviceActive(*hySvc)
+	if fresh {
+		fmt.Printf("Hysteria (%s) не запущена — пишу рабочий конфиг (UDP %s)\n", *hySvc, *hyPort)
+		freshSetup(*hyCfg, *hySvc, *hyPort)
+	} else {
+		fmt.Printf("Hysteria (%s) работает — подключаю панель к ней\n", *hySvc)
+	}
+	cfg, err := loadHyConfig(*hyCfg)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	step("binary → "+binPath, copySelf(binPath))
@@ -70,11 +83,23 @@ func runInstall(args []string) {
 	}
 	step("password and URL path → "+envPath, writeEnv(env))
 
-	// Import users while the config still has the old auth.
 	store, err := OpenStore(dataPath)
 	step("user database "+dataPath, err)
-	if store.Empty() {
-		importUsers(store, cfg)
+	var first *User
+	if fresh {
+		// Users imported earlier from a config that never ran are meaningless.
+		for _, u := range store.List() {
+			if u.Note == "imported" {
+				store.Delete(u.Name)
+			}
+		}
+		if store.Empty() {
+			u, err := store.Create(User{Name: "user1", Enabled: true}, false)
+			step("first user user1", err)
+			first = &u
+		}
+	} else if store.Empty() {
+		importUsers(store, cfg) // while the config still has the old auth
 	}
 
 	changed, err := patchHyConfig(*hyCfg)
@@ -98,7 +123,7 @@ func runInstall(args []string) {
 	// half-way (config patched, Hysteria still running the old one).
 	cfg, _ = loadHyConfig(*hyCfg)
 	sc := newStatsClient(cfg.TrafficStats.Listen, cfg.TrafficStats.Secret)
-	if _, err := sc.Online(); changed || err != nil {
+	if _, err := sc.Online(); fresh || changed || err != nil {
 		step("restart "+*hySvc, systemctl("restart", *hySvc))
 	}
 	var verr error
@@ -112,6 +137,14 @@ func runInstall(args []string) {
 
 	fmt.Println("\nГотово.")
 	printInfo()
+	if first != nil {
+		ci, _ := readCert(cfg.TLS.Cert)
+		uri := buildEndpoint(cfg, ci, "", *host, "", "", *name).URI(*first)
+		fmt.Printf("\nПервый пользователь user1 — ссылка для клиента:\n%s\n", uri)
+		if q, err := qrcode.New(uri, qrcode.Low); err == nil {
+			fmt.Print(q.ToSmallString(false))
+		}
+	}
 }
 
 // printInfo prints how to open the panel (the `hy-panel info` command).
