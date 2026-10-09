@@ -1,6 +1,6 @@
 # hy-panel
 
-Минимальная панель пользователей для Hysteria 2 в духе wg-easy: один статический бинарник (~7 МБ), JSON-файл вместо БД, без Docker. Работает рядом с официальным `hysteria-server`: не запускает Hysteria и не трогает его конфиг.
+Минимальная панель пользователей для Hysteria 2 в духе wg-easy: один статический бинарник (~7 МБ), JSON-файл вместо БД, без Docker. Работает поверх официального `hysteria-server`: процессом Hysteria панель не управляет, а её конфиг трогает только `hy-panel install` — один раз переключает `auth` на панель (или пишет новый конфиг для свежей установки).
 
 Требования: Hysteria ≥ 2.4.4 (`/online` в trafficStats), Linux amd64/arm64.
 
@@ -22,7 +22,7 @@
 
 Не поддерживается, панель предупреждает при старте: Realms (2.9+, `listen: realm://…` — старт прерывается), Mimic (2.12+, клиенту нужен Mimic, ссылка его не передаёт), mTLS `tls.clientCA` (2.6.3+, клиенту нужен сертификат). Клиентские опции (`minHopInterval`, `speedTest`, bandwidth) в ссылку не входят и задаются в клиенте.
 
-Не взято: управление процессом и конфигом Hysteria, ACME, MongoDB/SQLite, Telegram-бот, мульти-ноды, WARP, лимит по IP через iptables (Blitz).
+Не взято: управление процессом и конфигом Hysteria из панели, свой ACME (при установке с доменом сертификат получает сама Hysteria), MongoDB/SQLite, Telegram-бот, мульти-ноды, WARP, лимит по IP через iptables (Blitz).
 
 Проверено: e2e с Hysteria 2.13 (официальный клиент, legacy-клиент, sniGuard, лимит устройств, kick, новый ключ, падение trafficStats) и mihomo 1.19.32 (сниппет, proxy-provider, base64-подписка, неверный pin отклоняется). `go test -race ./...` включает модель KickMap/OnlineMap Hysteria.
 
@@ -46,8 +46,14 @@ bash <(curl -fsSL https://raw.githubusercontent.com/eonyushkin-commits/hy-panel/
 | Вопрос | Варианты (Enter — первый) |
 |---|---|
 | Порт (UDP) | 443 · случайный · свой · диапазон 20000-50000 (port hopping, Hysteria ≥ 2.8) |
-| Обфускация | salamander · gecko · без (маскировка под HTTP/3-сайт bing.com) |
+| Обфускация | salamander · gecko (Hysteria ≥ 2.9.2, экспериментальная) · без (маскировка под HTTP/3-сайт bing.com) |
 | Сертификат | self-signed (pin в ссылках) · свой домен через Let's Encrypt (проверяет DNS, открывает TCP 80/443 в ufw) |
+
+Если официальная Hysteria не установлена (нет `/usr/local/bin/hysteria` или юнита), `install` сразу останавливается и подсказывает команду get.hy2.sh — до вопросов. Если установленная версия не умеет выбранное, `install` пишет, какая версия нужна и какая стоит, и берёт замену: вместо диапазона — 443, вместо gecko — salamander.
+
+С Let's Encrypt состояние ACME лежит в `/etc/hysteria/acme`: это единственный каталог, куда может писать пользователь `hysteria`, сам `/etc/hysteria` и файлы в нём принадлежат root.
+
+Ctrl-D на любом вопросе — остальные вопросы берут значения по умолчанию; на вопросах без значения по умолчанию (домен, свой порт) установка прерывается.
 
 Всегда спрашивает доступ к панели (HTTPS 9443 · случайный порт · только SSH-туннель; при переустановке берёт прежний) и пользователей. Флаги `-hy-port`, `-ui-port` (`off` — только туннель), `-host` отменяют соответствующие вопросы. Без терминала — значения по умолчанию, пользователей не создаёт.
 
@@ -75,7 +81,7 @@ hy-panel install     обновить (бинарник берётся тот, �
 hy-panel uninstall   откат
 ```
 
-Другой порт — `install -ui-port 8443`. Только через SSH-туннель — `install -ui-port ""` и `ssh -L 8090:127.0.0.1:8090 root@<IP>` → `http://localhost:8090`.
+Другой порт — `install -ui-port 8443`. Только через SSH-туннель — `install -ui-port off` и `ssh -L 8090:127.0.0.1:8090 root@<IP>` → `http://localhost:8090`.
 
 Подписки включаются отдельным портом, на нём есть только `/sub/<token>`:
 
@@ -115,7 +121,7 @@ env HYP_PASSWORD                           пароль панели, ≥8 си�
 
 ## Сборка
 
-CI (`.github/workflows/release.yml`) гоняет vet и тесты на каждый push; push тега `v*` или ручной запуск (Actions → build → Run workflow, указать версию) собирает бинарники и публикует релиз:
+CI (`.github/workflows/release.yml`) гоняет vet и тесты на push в `main` и на каждый PR; push тега `v*` или ручной запуск (Actions → build → Run workflow, указать версию) собирает бинарники и публикует релиз:
 
 ```bash
 git tag v0.1.0 && git push origin v0.1.0
@@ -130,4 +136,4 @@ go test -race ./...
 CGO_ENABLED=0 GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o hy-panel-linux-amd64 .
 ```
 
-Файлы: `main.go` (HTTP, auth, синхронизация и kick), `store.go` (пользователи, `users.json`), `hy.go` (конфиг Hysteria, сертификат, клиент trafficStats), `links.go` (ссылки, mihomo), `index.html` (UI, вшит в бинарник).
+Файлы: `main.go` (HTTP, auth, синхронизация и kick), `store.go` (пользователи, `users.json`), `hy.go` (конфиг Hysteria, сертификат, клиент trafficStats), `links.go` (ссылки, mihomo), `cert.go` (сертификаты, отпечаток), `index.html` (UI, вшит в бинарник; обновляется раз в 10 с, в скрытой вкладке не опрашивает). Установщик: `install.go` (`install` / `uninstall` / `info` / `passwd`, правка конфига Hysteria), `fresh.go` (новый конфиг для свежей Hysteria), `prompt.go` (вопросы в терминале), `install.sh` (скачивание релиза).
