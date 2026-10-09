@@ -169,7 +169,7 @@ func runInstall(args []string) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	if verr != nil {
-		log.Fatalf("✗ Hysteria не поднялась: %v\n  смотри: journalctl -u %s -n 30 --no-pager\n  откат: hy-panel uninstall", verr, *hySvc)
+		log.Fatalf("✗ Hysteria не поднялась: %v\n  смотри: journalctl -u %s -n 30 --no-pager\n  откат: hy-panel uninstall (удалит панель вместе с её данными)", verr, *hySvc)
 	}
 	step("hysteria trafficStats reachable", nil)
 
@@ -277,19 +277,38 @@ func runUninstall(args []string) {
 	fs := flag.NewFlagSet("uninstall", flag.ExitOnError)
 	hyCfg := fs.String("hy-config", defaultCfg, "Hysteria 2 server config")
 	hySvc := fs.String("hy-service", "hysteria-server", "Hysteria systemd service")
+	yes := fs.Bool("y", false, "do not ask for confirmation")
 	fs.Parse(args)
 	log.SetFlags(0)
 	if os.Geteuid() != 0 {
 		log.Fatal("run as root: sudo hy-panel uninstall")
 	}
+	// Uninstall is a clean slate: the next install starts from scratch with a
+	// new password, URL and users. Re-running install (an update) keeps them.
+	dataDir := filepath.Dir(dataPath)
+	fmt.Printf("Будут удалены панель и все её данные:\n  пользователи и их трафик (%s)\n  пароль и адрес панели (%s)\n  программа и служба (%s, %s)\nКонфиг Hysteria вернётся к виду до установки панели.\nСохранить пользователей: cp %s ~/\n", dataDir, envPath, binPath, unitPath, dataPath)
+	if !*yes {
+		p := newPrompter()
+		if p.in == nil {
+			log.Fatal("✗ нет терминала: подтверди удаление флагом -y")
+		}
+		if !p.yes("Удалить?", false) {
+			fmt.Println("Отменено.")
+			return
+		}
+	}
 	b, err := os.ReadFile(*hyCfg + backupExt)
 	step("restore "+*hyCfg+" from backup", err)
 	step("write "+*hyCfg, writeKeepingOwner(*hyCfg, b))
+	os.Remove(*hyCfg + backupExt) // the next install backs up the config afresh
 	step("restart "+*hySvc, systemctl("restart", *hySvc))
 	systemctl("disable", "--now", "hy-panel")
 	os.Remove(unitPath)
 	systemctl("daemon-reload")
-	fmt.Printf("Удалено. Данные остались в %s и %s, бинарник — %s.\n", dataPath, envPath, binPath)
+	step("remove "+dataDir, os.RemoveAll(dataDir))
+	os.Remove(envPath)
+	os.Remove(binPath)
+	fmt.Println("Удалено. Следующая установка начнётся с нуля: новые пароль, адрес и пользователи.")
 }
 
 func step(what string, err error) {
