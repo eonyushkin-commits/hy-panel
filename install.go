@@ -67,7 +67,8 @@ func runInstall(args []string) {
 	// config or the official installer's untouched template is set up fresh.
 	// A running Hysteria without the config at -hy-config reads another one:
 	// writing a new config here would change nothing it uses.
-	if _, err := os.Stat(*hyCfg); errors.Is(err, os.ErrNotExist) && serviceActive(*hySvc) {
+	active := serviceActive(*hySvc)
+	if _, err := os.Stat(*hyCfg); errors.Is(err, os.ErrNotExist) && active {
 		log.Fatalf("✗ %s не найден, а Hysteria (%s) запущена — укажи её конфиг: install -hy-config <путь>", *hyCfg, *hySvc)
 	}
 	fresh := *force || needsFreshConfig(*hyCfg)
@@ -79,19 +80,19 @@ func runInstall(args []string) {
 		if opts.Domain != "" && !set["host"] {
 			*host = opts.Domain
 		}
-	} else if serviceActive(*hySvc) {
+	} else if active {
 		fmt.Printf("Hysteria (%s) работает — подключаю панель к ней, её настройки не меняю.\n", *hySvc)
+	} else if !unitExists(*hySvc) {
+		log.Fatalf("✗ служба %s не найдена: Hysteria не установлена или задай -hy-service", *hySvc)
 	} else {
-		if !unitExists(*hySvc) {
-			log.Fatalf("✗ служба %s не найдена: Hysteria не установлена или задай -hy-service", *hySvc)
-		}
 		fmt.Printf("Hysteria (%s) настроена, но не запущена — подключаю панель к её конфигу и запускаю, настройки не меняю.\n", *hySvc)
 	}
 
 	// Panel access: flag, else what a previous install chose (kept in the env
 	// file, which survives an uninstall that keeps the data), else ask.
+	env := readEnv()
 	if !set["ui-port"] {
-		if v := readEnv()["HYP_UI_PORT"]; v != "" {
+		if v := env["HYP_UI_PORT"]; v != "" {
 			*ui = v
 		} else if old, err := os.ReadFile(unitPath); err == nil {
 			_, *ui, _ = net.SplitHostPort(unitArg(string(old), "-ui-listen"))
@@ -111,10 +112,6 @@ func runInstall(args []string) {
 	if *ui == "" {
 		*ui = "off"
 	}
-	uiPort := *ui
-	if *ui == "off" {
-		*ui = ""
-	}
 	if fresh {
 		fmt.Println()
 		freshSetup(*hyCfg, *hySvc, opts)
@@ -127,14 +124,13 @@ func runInstall(args []string) {
 	step("binary → "+binPath, copySelf(binPath))
 
 	// Like 3x-ui: random password and a secret URL path, kept across re-runs.
-	env := readEnv()
 	if env["HYP_PASSWORD"] == "" {
 		env["HYP_PASSWORD"] = randStr(16)
 	}
 	if env["HYP_UI_PATH"] == "" {
 		env["HYP_UI_PATH"] = "/" + strings.ToLower(randStr(12)) + "/"
 	}
-	env["HYP_UI_PORT"] = uiPort
+	env["HYP_UI_PORT"] = *ui
 	step("password and URL path → "+envPath, writeEnv(env))
 
 	store, err := OpenStore(dataPath)
@@ -158,7 +154,7 @@ func runInstall(args []string) {
 	unit := strings.Replace(unitTemplate, "-host 203.0.113.10 -name AMS",
 		strings.TrimSpace(fmt.Sprintf("-host %s -hy-config %s %s %s", *host, *hyCfg, uiFlag(*ui), nameFlag(*name))), 1)
 	step("systemd unit → "+unitPath, os.WriteFile(unitPath, []byte(unit), 0o644))
-	if *ui != "" {
+	if *ui != "off" {
 		_, _, err = panelCert(filepath.Dir(dataPath), *host)
 		step("panel HTTPS certificate", err)
 		ufwAllow(*ui + "/tcp")
@@ -305,7 +301,8 @@ func runUninstall(args []string) {
 		log.Fatal("run as root: sudo hy-panel uninstall")
 	}
 	dataDir := filepath.Dir(dataPath)
-	fmt.Printf("Будет удалена панель: программа и служба (%s, %s).\nКонфиг Hysteria вернётся к виду до установки панели; если его написала сама панель, он останется, пока не удалишь и данные.\n", binPath, unitPath)
+	fmt.Printf("Будет удалена панель: программа и служба (%s, %s).\n", binPath, unitPath)
+	fmt.Println("Конфиг Hysteria вернётся к виду до установки панели; если его написала сама панель, он останется, пока не удалишь и данные.")
 	if !*yes {
 		p := newPrompter()
 		if p.in == nil {
@@ -316,29 +313,25 @@ func runUninstall(args []string) {
 			return
 		}
 		if !*purge {
-			fmt.Printf("\nДанные панели:\n  пользователи и их трафик (%s)\n  пароль, адрес и порт панели (%s)\nЕсли их оставить, следующая установка подхватит пользователей, пароль и адрес.\nЕсли удалить, следующая установка начнётся с нуля.\n", dataDir, envPath)
+			fmt.Printf("\nДанные панели:\n  пользователи и их трафик (%s)\n  пароль, адрес и порт панели (%s)\n", dataDir, envPath)
+			fmt.Println("Если их оставить, следующая установка подхватит пользователей, пароль и адрес.")
+			fmt.Println("Если удалить, следующая установка начнётся с нуля.")
 			*purge = p.yes("Удалить и данные?", false)
 		}
 	}
-	cur, _ := os.ReadFile(*hyCfg)
-	generated := strings.HasPrefix(string(cur), generatedMark)
 	switch b, err := os.ReadFile(*hyCfg + backupExt); {
 	case err != nil:
 		fmt.Println("• бэкапа конфига Hysteria нет — конфиг не трогаю")
-	case isTemplate(b) && !*purge:
+	case unconfigured(b) && !*purge:
 		// Restoring the official template would only leave Hysteria broken; the
 		// config the panel wrote stays, so a later install keeps the client links.
 		fmt.Println("• конфиг Hysteria, написанный панелью, оставлен: следующая установка подхватит его, ссылки клиентов не изменятся;\n  до неё Hysteria не пускает клиентов: проверять пароли некому")
 	default:
+		cur, _ := os.ReadFile(*hyCfg)
 		step("restore "+*hyCfg+" from backup", writeKeepingOwner(*hyCfg, b))
 		os.Remove(*hyCfg + backupExt) // the next install backs up the config afresh
-		if generated {
-			dir := filepath.Dir(*hyCfg)
-			for _, f := range []string{"server.crt", "server.key", "acme"} {
-				if p := filepath.Join(dir, f); !strings.Contains(string(b), p) { // still used by the restored config
-					os.RemoveAll(p)
-				}
-			}
+		if strings.HasPrefix(string(cur), generatedMark) {
+			removePanelTLS(filepath.Dir(*hyCfg), b)
 		}
 		step("restart "+*hySvc, systemctl("restart", *hySvc))
 	}
@@ -351,7 +344,17 @@ func runUninstall(args []string) {
 		step("remove "+envPath, os.RemoveAll(envPath))
 		fmt.Println("Удалено вместе с данными. Следующая установка начнётся с нуля: новые пароль, адрес и пользователи.")
 	} else {
-		fmt.Printf("Панель удалена, данные оставлены в %s и %s.\nСледующая установка подхватит пользователей, пароль и адрес.\nУдалить их позже: rm -rf %s %s\n", dataDir, envPath, dataDir, envPath)
+		fmt.Printf("Панель удалена, данные оставлены в %[1]s и %[2]s.\nСледующая установка подхватит пользователей, пароль и адрес.\nУдалить их позже: rm -rf %[1]s %[2]s\n", dataDir, envPath)
+	}
+}
+
+// removePanelTLS deletes the certificate and ACME state freshSetup created in
+// dir, unless the restored config still uses them.
+func removePanelTLS(dir string, restored []byte) {
+	for _, f := range []string{"server.crt", "server.key", "acme"} {
+		if p := filepath.Join(dir, f); !strings.Contains(string(restored), p) {
+			os.RemoveAll(p)
+		}
 	}
 }
 
@@ -363,7 +366,7 @@ func step(what string, err error) {
 }
 
 func uiFlag(port string) string {
-	if port == "" {
+	if port == "off" {
 		return ""
 	}
 	return "-ui-listen :" + port
