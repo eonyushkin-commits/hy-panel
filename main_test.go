@@ -540,11 +540,11 @@ func TestClassify(t *testing.T) {
 		"listen: [":                             cfgBroken,
 	}
 	for conf, want := range cases {
-		if got := classify([]byte(conf), nil); got != want {
+		if _, got := classify([]byte(conf), nil); got != want {
 			t.Errorf("classify(%q) = %v, want %v", conf, got, want)
 		}
 	}
-	if classify(nil, os.ErrNotExist) != cfgNone {
+	if _, k := classify(nil, os.ErrNotExist); k != cfgNone {
 		t.Error("missing file")
 	}
 }
@@ -586,7 +586,7 @@ func TestApplyOptsKeepsLinks(t *testing.T) {
 	// A new config from the answers.
 	d, _ := parseDoc(nil)
 	o := hyOpts{Port: "443", Obfs: "salamander"}
-	if err := applyOpts(d, &hyConfig{}, hyOpts{}, o, dir, true); err != nil {
+	if err := applyOpts(d, &hyConfig{}, nil, o, dir); err != nil {
 		t.Fatal(err)
 	}
 	d.connectPanel()
@@ -603,7 +603,7 @@ func TestApplyOptsKeepsLinks(t *testing.T) {
 	d, _ = parseDoc(b)
 	o2 := o
 	o2.Port = hopRange
-	if err := applyOpts(d, c, o, o2, dir, false); err != nil {
+	if err := applyOpts(d, c, &o, o2, dir); err != nil {
 		t.Fatal(err)
 	}
 	b2, _ := d.bytes()
@@ -615,7 +615,7 @@ func TestApplyOptsKeepsLinks(t *testing.T) {
 	// Obfs type change keeps the password; no obfs adds the masquerade.
 	o3 := o2
 	o3.Obfs = ""
-	applyOpts(d, c2, o2, o3, dir, false)
+	applyOpts(d, c2, &o2, o3, dir)
 	b3, _ := d.bytes()
 	c3, _ := parseHyConfig(b3)
 	if c3.Obfs.Type != "" || !strings.Contains(string(b3), "masquerade") {
@@ -691,7 +691,7 @@ func TestApplyOptsEditsInPlace(t *testing.T) {
 	cur := currentOpts(c)
 	o := cur
 	o.Port, o.Domain = "8443", "b.example"
-	if err := applyOpts(d, c, cur, o, dir, false); err != nil {
+	if err := applyOpts(d, c, &cur, o, dir); err != nil {
 		t.Fatal(err)
 	}
 	b, _ := d.bytes()
@@ -702,5 +702,18 @@ func TestApplyOptsEditsInPlace(t *testing.T) {
 	// A comment-only file is edited like an empty one.
 	if d, err := parseDoc([]byte("# nothing yet\n")); err != nil || d.root == nil {
 		t.Fatalf("comment-only: %v", err)
+	}
+}
+
+func TestKindErr(t *testing.T) {
+	for _, k := range []cfgKind{cfgBroken, cfgRealm, cfgOther} {
+		if kindErr(k) == nil {
+			t.Errorf("kind %v must be refused", k)
+		}
+	}
+	for _, k := range []cfgKind{cfgNone, cfgPanel, cfgOwnAuth} {
+		if kindErr(k) != nil {
+			t.Errorf("kind %v refused", k)
+		}
 	}
 }

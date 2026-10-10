@@ -43,7 +43,7 @@ func main() {
 	case "settings":
 		runSettings()
 	case "info":
-		printInfo()
+		printInfo(readEnv())
 	case "passwd":
 		runPasswd()
 	case "version":
@@ -58,10 +58,7 @@ func main() {
 // start the process exits; any other problem is shown in the panel instead.
 func serve() {
 	log.SetFlags(0) // journald adds timestamps
-	env := map[string]string{}
-	for _, k := range envKeys {
-		env[k] = os.Getenv(k)
-	}
+	env := readEnv()
 	if len(env["HYP_PASSWORD"]) < 8 {
 		log.Fatal("HYP_PASSWORD (8+ chars) is not set — run hy-panel install")
 	}
@@ -69,7 +66,7 @@ func serve() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	cfgPath := envOr(env, "HYP_HY_CONFIG", defaultCfg)
+	cfgPath, _ := hyPaths(env)
 	cfg, err := loadHyConfig(cfgPath)
 	if err == nil && cfg.TrafficStats.Listen == "" {
 		err = fmt.Errorf("%s: no trafficStats — run hy-panel install", cfgPath)

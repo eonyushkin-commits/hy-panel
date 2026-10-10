@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	mrand "math/rand/v2"
 	"net"
@@ -55,15 +54,12 @@ type plan struct {
 }
 
 func planInstall(f facts) (plan, error) {
+	if err := kindErr(f.kind); err != nil {
+		return plan{}, err
+	}
 	switch {
 	case f.v01:
 		return plan{}, errors.New("стоит прежняя hy-panel v0.1 — сначала удали её: hy-panel uninstall")
-	case f.kind == cfgBroken:
-		return plan{}, errors.New("конфиг Hysteria не читается как YAML — поправь его вручную")
-	case f.kind == cfgRealm:
-		return plan{}, errors.New("listen: realm:// (Realms) не поддерживается: ссылки вели бы в никуда")
-	case f.kind == cfgOther:
-		return plan{}, errors.New("auth в конфиге Hysteria указывает на другую панель — сначала отключи её")
 	case f.kind == cfgNone && !f.hysteria:
 		return plan{}, errors.New("Hysteria не установлена. Сначала официальный установщик:\n    bash <(curl -fsSL https://get.hy2.sh/)\n  затем снова установи панель")
 	case f.kind == cfgNone:
@@ -95,13 +91,14 @@ func runInstall(args []string) {
 	}
 	setIf("HYP_HY_CONFIG", *hyCfg)
 	setIf("HYP_HY_SERVICE", *hySvc)
-	cfgPath, svc := envOr(env, "HYP_HY_CONFIG", defaultCfg), envOr(env, "HYP_HY_SERVICE", defaultSvc)
+	cfgPath, svc := hyPaths(env)
 	orig, readErr := os.ReadFile(cfgPath)
+	cfg, kind := classify(orig, readErr)
 	unit, _ := os.ReadFile(unitPath)
 	pl, err := planInstall(facts{
-		installed: env["HYP_PASSWORD"] != "" && env["HYP_HOST"] != "", // v0.1 kept the host in its unit
+		installed: installed(env),
 		v01:       bytes.Contains(unit, []byte("hy-panel -")),
-		kind:      classify(orig, readErr),
+		kind:      kind,
 		hysteria:  fileExists(hysteriaBin) && unitExists(svc),
 	})
 	if err != nil {
@@ -130,20 +127,18 @@ func runInstall(args []string) {
 	default:
 		fmt.Printf("Hysteria (%s) настроена — подключаю к ней панель: меняю в конфиге только auth и trafficStats.\n", svc)
 	}
-	if !pl.update {
-		if env["HYP_UI_PORT"] == "" {
-			switch p.choose("Доступ к панели:", []string{
-				"HTTPS на порту 9443",
-				"HTTPS на случайном порту",
-				"только через SSH-туннель",
-			}, 0) {
-			case 0:
-				env["HYP_UI_PORT"] = "9443"
-			case 1:
-				env["HYP_UI_PORT"] = strconv.Itoa(10000 + mrand.IntN(50000))
-			default:
-				env["HYP_UI_PORT"] = "off"
-			}
+	if !pl.update && env["HYP_UI_PORT"] == "" {
+		switch p.choose("Доступ к панели:", []string{
+			"HTTPS на порту 9443",
+			"HTTPS на случайном порту",
+			"только через SSH-туннель",
+		}, 0) {
+		case 0:
+			env["HYP_UI_PORT"] = "9443"
+		case 1:
+			env["HYP_UI_PORT"] = strconv.Itoa(10000 + mrand.IntN(50000))
+		default:
+			env["HYP_UI_PORT"] = "off"
 		}
 	}
 	// Like 3x-ui: random password and a secret URL path, kept across re-runs.
@@ -161,34 +156,17 @@ func runInstall(args []string) {
 
 	// Hysteria config: only what the plan says. An existing setup keeps its
 	// port, obfs and certificate, so client links never change here.
-	d, err := parseDoc(orig)
-	step("read "+cfgPath, err)
-	cfg, _ := parseHyConfig(orig)
-	if cfg == nil {
-		cfg = &hyConfig{}
-	}
-	changed := false
-	if pl.fresh {
-		step("directory "+filepath.Dir(cfgPath), hysteriaDir(filepath.Dir(cfgPath)))
-		step("hysteria settings", applyOpts(d, cfg, hyOpts{}, opts, filepath.Dir(cfgPath), true))
-		changed = true
-	}
-	if pl.connect {
+	var edit func(*yamlDoc) error
+	switch old := cfg; {
+	case pl.fresh:
+		edit = func(d *yamlDoc) error { return applyOpts(d, old, nil, opts, filepath.Dir(cfgPath)) }
+	case pl.connect:
 		// The config's current auth is Hysteria's own: keep it for -purge
 		// and bring its users over (existing panel users stay as they are).
-		step("keep Hysteria's own auth → "+authPath, saveOwnAuth(d, authPath))
-		importUsers(store, cfg)
+		importUsers(store, old)
+		edit = func(d *yamlDoc) error { return saveOwnAuth(d, authPath) }
 	}
-	c, err := d.connectPanel()
-	step("hysteria config: auth → panel, trafficStats", err)
-	if changed = changed || c; changed {
-		out, err := d.bytes()
-		step("render "+cfgPath, err)
-		if len(orig) > 0 {
-			step("backup → "+cfgPath+backupExt, backupOnce(cfgPath, orig))
-		}
-		step("hysteria config "+cfgPath, writeHysteriaConfig(cfgPath, out, pl.fresh))
-	}
+	cfg, changed := rewriteHyConfig(cfgPath, orig, pl.fresh, edit)
 	var created []User
 	if !pl.update {
 		created = askUsers(store, p) // before the service owns the file
@@ -210,15 +188,13 @@ func runInstall(args []string) {
 	}
 	// Restart Hysteria only if its config changed now, or it does not run
 	// that config yet (a previous run stopped half-way, or Hysteria is down).
-	cfg, err = loadHyConfig(cfgPath)
-	step("read "+cfgPath, err)
-	if _, err := newStatsClient(cfg.TrafficStats.Listen, cfg.TrafficStats.Secret).Online(); changed || err != nil {
+	if changed || !reachable(cfg) {
 		step("restart "+svc, systemctl("restart", svc))
 	}
-	waitHysteria(cfgPath, svc, opts.Domain != "")
+	waitHysteria(cfg, svc, opts.Domain != "")
 
 	fmt.Println("\nГотово.")
-	printInfo()
+	printInfo(env)
 	ep := endpointFor(cfg, env)
 	for _, u := range created {
 		uri := ep.URI(u)
@@ -325,6 +301,7 @@ func runUninstall(args []string) {
 		}
 	}
 	env := readEnv()
+	cfgPath, svc := hyPaths(env)
 	systemctl("disable", "--now", "hy-panel")
 	os.Remove(unitPath)
 	systemctl("daemon-reload")
@@ -336,7 +313,6 @@ func runUninstall(args []string) {
 		fmt.Println("Установить снова — всё вернётся как было:\n    " + installCmd)
 		return
 	}
-	cfgPath, svc := envOr(env, "HYP_HY_CONFIG", defaultCfg), envOr(env, "HYP_HY_SERVICE", defaultSvc)
 	if restored, err := restoreOwnAuth(cfgPath, authPath); err != nil {
 		fmt.Printf("  ✗ вернуть auth в %s: %v\n", cfgPath, err)
 	} else if restored {
@@ -387,8 +363,7 @@ func restoreOwnAuth(cfgPath, savedPath string) (bool, error) {
 }
 
 // printInfo prints how to open the panel (the `hy-panel info` command).
-func printInfo() {
-	env := readEnv()
+func printInfo(env map[string]string) {
 	host := env["HYP_HOST"]
 	if port := env["HYP_UI_PORT"]; port != "" && port != "off" {
 		_, fp, _ := panelCert(dataDir, host)
@@ -407,7 +382,7 @@ func runPasswd() {
 	env["HYP_PASSWORD"] = randStr(16)
 	step("new password → "+envPath, writeEnv(env))
 	step("restart hy-panel", systemctl("restart", "hy-panel"))
-	printInfo()
+	printInfo(env)
 }
 
 // ---- /etc/hy-panel.env ----
@@ -433,6 +408,22 @@ func writeEnv(env map[string]string) error {
 		}
 	}
 	return writeAtomic(envPath, []byte(b.String()), 0o600)
+}
+
+// installed: this version's settings exist (v0.1 kept the host in its unit,
+// so its leftover env file has no HYP_HOST).
+func installed(env map[string]string) bool {
+	return env["HYP_PASSWORD"] != "" && env["HYP_HOST"] != ""
+}
+
+// hyPaths returns the Hysteria config path and service name.
+func hyPaths(env map[string]string) (cfg, svc string) {
+	return envOr(env, "HYP_HY_CONFIG", defaultCfg), envOr(env, "HYP_HY_SERVICE", defaultSvc)
+}
+
+func reachable(cfg *hyConfig) bool {
+	_, err := statsFor(cfg).Online()
+	return err == nil
 }
 
 func envOr(env map[string]string, key, def string) string {
@@ -488,23 +479,11 @@ func copySelf(dst string) error {
 	if src == dst {
 		return nil
 	}
-	in, err := os.Open(src)
+	b, err := os.ReadFile(src)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
-	tmp := dst + ".new"
-	out, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
-	if err != nil {
-		return err
-	}
-	if _, err = io.Copy(out, in); err == nil {
-		err = out.Close()
-	}
-	if err != nil {
-		return err
-	}
-	return os.Rename(tmp, dst) // works while the old binary is running
+	return writeAtomic(dst, b, 0o755) // rename: works while the old binary is running
 }
 
 var cgnat = &net.IPNet{IP: net.IP{100, 64, 0, 0}, Mask: net.CIDRMask(10, 32)}

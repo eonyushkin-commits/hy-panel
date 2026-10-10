@@ -158,34 +158,73 @@ const (
 	cfgBroken                 // not parseable
 )
 
-// classify decides by the file's content only — never by whether Hysteria
-// runs — so re-running install cannot rewrite a working config.
-func classify(b []byte, readErr error) cfgKind {
+// classify parses the config and decides by its content only — never by
+// whether Hysteria runs — so re-running install cannot rewrite a working
+// config. The returned config is never nil.
+func classify(b []byte, readErr error) (*hyConfig, cfgKind) {
 	if readErr != nil {
-		return cfgNone
+		return &hyConfig{}, cfgNone
 	}
 	var raw any
 	if err := yaml.Unmarshal(b, &raw); err != nil {
-		return cfgBroken
+		return &hyConfig{}, cfgBroken
 	}
 	if raw == nil { // empty, comments only, or null
-		return cfgNone
+		return &hyConfig{}, cfgNone
 	}
 	c, err := parseHyConfig(b)
 	if err != nil {
-		return cfgBroken
+		return &hyConfig{}, cfgBroken
 	}
 	switch {
 	case slices.Contains(c.ACME.Domains, "your.domain.net"): // get.hy2.sh writes this placeholder
-		return cfgNone
+		return c, cfgNone
 	case strings.HasPrefix(c.Listen, "realm"):
-		return cfgRealm
+		return c, cfgRealm
 	case c.Auth.Type == "http" && c.Auth.HTTP.URL == authURL:
-		return cfgPanel
+		return c, cfgPanel
 	case c.Auth.Type == "http":
-		return cfgOther
+		return c, cfgOther
 	}
-	return cfgOwnAuth
+	return c, cfgOwnAuth
+}
+
+// kindErr explains why a config cannot be used at all.
+func kindErr(k cfgKind) error {
+	switch k {
+	case cfgBroken:
+		return errors.New("конфиг Hysteria не читается как YAML — поправь его вручную")
+	case cfgRealm:
+		return errors.New("listen: realm:// (Realms) не поддерживается: ссылки вели бы в никуда")
+	case cfgOther:
+		return errors.New("auth в конфиге Hysteria указывает на другую панель — сначала отключи её")
+	}
+	return nil
+}
+
+// rewriteHyConfig applies edit (may be nil) and points auth at the panel,
+// writing the file only if something changed: an untouched config stays
+// byte for byte. Returns the resulting config and whether it was written.
+func rewriteHyConfig(path string, orig []byte, fresh bool, edit func(*yamlDoc) error) (*hyConfig, bool) {
+	d, err := parseDoc(orig)
+	step("read "+path, err)
+	if edit != nil {
+		step("hysteria settings", edit(d))
+	}
+	c, err := d.connectPanel()
+	step("hysteria config: auth → panel, trafficStats", err)
+	out := orig
+	if changed := edit != nil || c; changed {
+		out, err = d.bytes()
+		step("render "+path, err)
+		if len(orig) > 0 {
+			step("backup → "+path+backupExt, backupOnce(path, orig))
+		}
+		step("hysteria config "+path, writeHysteriaConfig(path, out, fresh))
+	}
+	cfg, err := parseHyConfig(out)
+	step("read "+path, err)
+	return cfg, edit != nil || c
 }
 
 // ---- editing the config as a YAML tree (comments and other keys stay) ----
@@ -298,18 +337,9 @@ func scalar(n *yaml.Node) string {
 }
 
 // writeKeepingOwner rewrites a file in place so owner and mode stay (Hysteria
-// may run as its own user); a new file is created root:hysteria 0640.
+// may run as its own user); a missing file is created 0640.
 func writeKeepingOwner(path string, b []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0)
-	if errors.Is(err, os.ErrNotExist) {
-		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-			return err
-		}
-		f, err = os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0o640)
-		if err == nil {
-			chownHysteria(path)
-		}
-	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o640)
 	if err != nil {
 		return err
 	}

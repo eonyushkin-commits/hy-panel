@@ -54,23 +54,16 @@ func (o hyOpts) obfsLabel() string {
 // command) every question starts with "keep as is"; port != "" (the -hy-port
 // flag) skips the port question.
 func askHyOpts(p *prompter, cur *hyOpts, port, host string) hyOpts {
-	hv := hysteriaVersion()
 	var o hyOpts
-	keep := func(opts []string, label string) []string {
-		if cur == nil {
-			return opts
-		}
-		return append([]string{"оставить как есть: " + label}, opts...)
-	}
-	pick := func(title string, opts []string, label string) int {
-		i := p.choose(title, keep(opts, label), 0)
-		if cur != nil {
-			i-- // -1 = keep
-		}
-		return i
-	}
 	if cur != nil {
 		o = *cur
+	}
+	// pick returns the chosen option; -1 = "keep as is".
+	pick := func(title string, opts []string, label string) int {
+		if cur == nil {
+			return p.choose(title, opts, 0)
+		}
+		return p.choose(title, append([]string{"оставить как есть: " + label}, opts...), 0) - 1
 	}
 
 	if port != "" {
@@ -89,7 +82,7 @@ func askHyOpts(p *prompter, cur *hyOpts, port, host string) hyOpts {
 		case 2:
 			o.Port = p.port("Порт: ")
 		case 3:
-			o.Port = needVersion(hv, hyVersion{2, 8, 0}, "диапазон портов", hopRange, "443")
+			o.Port = needVersion(hyVersion{2, 8, 0}, "диапазон портов", hopRange, "443")
 		}
 	}
 
@@ -101,7 +94,7 @@ func askHyOpts(p *prompter, cur *hyOpts, port, host string) hyOpts {
 	case 0:
 		o.Obfs = "salamander"
 	case 1:
-		o.Obfs = needVersion(hv, hyVersion{2, 9, 2}, "gecko", "gecko", "salamander")
+		o.Obfs = needVersion(hyVersion{2, 9, 2}, "gecko", "gecko", "salamander")
 	case 2:
 		o.Obfs = ""
 	}
@@ -122,9 +115,10 @@ func askHyOpts(p *prompter, cur *hyOpts, port, host string) hyOpts {
 	return o
 }
 
-// needVersion returns want if Hysteria is new enough for the feature, else
-// says why and returns fallback.
-func needVersion(v, min hyVersion, feature, want, fallback string) string {
+// needVersion returns want if the installed Hysteria is new enough for the
+// feature, else says why and returns fallback.
+func needVersion(min hyVersion, feature, want, fallback string) string {
+	v := hysteriaVersion()
 	if v.atLeast(min) {
 		return want
 	}
@@ -144,9 +138,16 @@ func resolvesTo(domain, host string) bool {
 }
 
 // applyOpts edits the config tree from cur to o, touching only what changed
-// (everything when all is set, for a new config). The obfs password and an
+// (everything when cur is nil: a new config). The obfs password and an
 // existing self-signed certificate are kept: they are in every client link.
-func applyOpts(d *yamlDoc, cfg *hyConfig, cur, o hyOpts, cfgDir string, all bool) error {
+func applyOpts(d *yamlDoc, cfg *hyConfig, curp *hyOpts, o hyOpts, cfgDir string) error {
+	all, cur := curp == nil, hyOpts{}
+	if curp != nil {
+		cur = *curp
+	}
+	if err := hysteriaDir(cfgDir); err != nil {
+		return err
+	}
 	if all || o.Port != cur.Port {
 		host, _, _ := net.SplitHostPort(cfg.Listen) // keep a listen address, change only the port
 		if err := d.set("listen", net.JoinHostPort(host, o.Port)); err != nil {
@@ -209,9 +210,6 @@ func applyOpts(d *yamlDoc, cfg *hyConfig, cur, o hyOpts, cfgDir string, all bool
 	return nil
 }
 
-// linksChange reports whether moving from cur to o changes the client links.
-func linksChange(cur, o hyOpts) bool { return cur != o }
-
 // firewallRules are the ufw rules a Hysteria setup needs.
 func (o hyOpts) firewallRules() []string {
 	rules := []string{strings.Replace(o.Port, "-", ":", 1) + "/udp"}
@@ -226,21 +224,17 @@ func (o hyOpts) firewallRules() []string {
 func runSettings() {
 	needRoot("settings")
 	env := readEnv()
-	if env["HYP_PASSWORD"] == "" {
+	if !installed(env) {
 		log.Fatal("✗ панель не установлена: сначала hy-panel install")
 	}
-	cfgPath, svc := envOr(env, "HYP_HY_CONFIG", defaultCfg), envOr(env, "HYP_HY_SERVICE", defaultSvc)
+	cfgPath, svc := hyPaths(env)
 	b, err := os.ReadFile(cfgPath)
-	kind := classify(b, err)
-	switch kind {
-	case cfgBroken:
-		log.Fatalf("✗ %s не читается как YAML — поправь его вручную", cfgPath)
-	case cfgRealm:
-		log.Fatal("✗ listen: realm:// не поддерживается")
+	cfg, kind := classify(b, err)
+	if err := kindErr(kind); err != nil {
+		log.Fatal("✗ ", err)
 	}
-	cfg, _ := parseHyConfig(b)
-	if cfg == nil {
-		cfg = &hyConfig{}
+	if kind == cfgOwnAuth {
+		log.Fatal("✗ пароли в конфиге Hysteria проверяет не панель — сначала hy-panel install")
 	}
 	p := newPrompter()
 	if p.in == nil {
@@ -255,11 +249,7 @@ func runSettings() {
 		fmt.Println("Конфиг Hysteria не настроен — настроим его.")
 	}
 	o := askHyOpts(p, cur, "", env["HYP_HOST"])
-	before := hyOpts{}
-	if cur != nil {
-		before = *cur
-	}
-	if cur != nil && !linksChange(before, o) {
+	if cur != nil && *cur == o {
 		fmt.Println("\nНичего не изменилось.")
 		return
 	}
@@ -269,32 +259,24 @@ func runSettings() {
 		return
 	}
 	// Links name the domain when there is one, else the server's IP.
-	if o.Domain != before.Domain {
+	if oldDomain := currentOpts(cfg).Domain; o.Domain != oldDomain {
 		if o.Domain != "" {
 			env["HYP_HOST"] = o.Domain
-		} else if ip := publicIP(); ip != "" && env["HYP_HOST"] == before.Domain {
+		} else if ip := publicIP(); ip != "" && env["HYP_HOST"] == oldDomain {
 			env["HYP_HOST"] = ip
 		}
 		step("settings → "+envPath, writeEnv(env))
 	}
-	d, err := parseDoc(b)
-	step("read "+cfgPath, err)
-	step("directory "+filepath.Dir(cfgPath), hysteriaDir(filepath.Dir(cfgPath)))
-	step("settings", applyOpts(d, cfg, before, o, filepath.Dir(cfgPath), cur == nil))
-	_, err = d.connectPanel()
-	step("auth → panel", err)
-	out, err := d.bytes()
-	step("render config", err)
-	if len(b) > 0 {
-		step("backup → "+cfgPath+backupExt, backupOnce(cfgPath, b))
-	}
-	step("hysteria config "+cfgPath, writeHysteriaConfig(cfgPath, out, cur == nil))
+	old := cfg
+	cfg, _ = rewriteHyConfig(cfgPath, b, cur == nil, func(d *yamlDoc) error {
+		return applyOpts(d, old, cur, o, filepath.Dir(cfgPath))
+	})
 	// Links come from the config file: the panel shows the new ones right
 	// away, whatever happens to Hysteria's restart below.
 	step("restart hy-panel", systemctl("restart", "hy-panel"))
 	ufwAllow(o.firewallRules()...)
 	step("restart "+svc, systemctl("restart", svc))
-	waitHysteria(cfgPath, svc, o.Domain != "")
+	waitHysteria(cfg, svc, o.Domain != "")
 	fmt.Println("\nГотово. Новые ссылки — в панели (кнопка QR).")
 }
 
@@ -334,12 +316,14 @@ func hysteriaIDs() (int, int) {
 	return uid, gid
 }
 
+func statsFor(cfg *hyConfig) *statsClient {
+	return newStatsClient(cfg.TrafficStats.Listen, cfg.TrafficStats.Secret)
+}
+
 // waitHysteria waits until Hysteria's trafficStats answers (up to 2 minutes
 // with Let's Encrypt, which first has to get the certificate).
-func waitHysteria(cfgPath, svc string, acme bool) {
-	cfg, err := loadHyConfig(cfgPath)
-	step("read "+cfgPath, err)
-	sc := newStatsClient(cfg.TrafficStats.Listen, cfg.TrafficStats.Secret)
+func waitHysteria(cfg *hyConfig, svc string, acme bool) {
+	sc := statsFor(cfg)
 	tries := 20
 	if acme {
 		fmt.Println("… жду сертификат Let's Encrypt (до 2 минут)")
