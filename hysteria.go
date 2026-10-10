@@ -150,12 +150,12 @@ func (c *hyConfig) obfs() (typ, pass string) {
 type cfgKind int
 
 const (
-	cfgNone     cfgKind = iota // missing, empty or the get.hy2.sh template: set up from scratch
-	cfgPanel                   // auth already points at this panel
-	cfgOwnAuth                 // a working config with its own auth: connect the panel to it
-	cfgOther                   // auth http to some other backend (another panel)
-	cfgRealm                   // listen: realm:// — not supported
-	cfgBroken                  // not parseable
+	cfgNone    cfgKind = iota // missing, empty or the get.hy2.sh template: set up from scratch
+	cfgPanel                  // auth already points at this panel
+	cfgOwnAuth                // a working config with its own auth: connect the panel to it
+	cfgOther                  // auth http to some other backend (another panel)
+	cfgRealm                  // listen: realm:// — not supported
+	cfgBroken                 // not parseable
 )
 
 // classify decides by the file's content only — never by whether Hysteria
