@@ -83,9 +83,11 @@ hy-panel uninstall   удалить панель; пользователи и н
 Подписки включаются отдельным портом, на нём есть только `/sub/<token>`. Строки в `/etc/hy-panel.env`, затем `systemctl restart hy-panel`:
 
 ```
-HYP_SUB_LISTEN=:2096                       # ссылка: http://<host>:2096/sub/...
-HYP_SUB_URL=https://vpn.example.com        # если подписка за reverse-proxy с TLS (HYP_SUB_LISTEN=127.0.0.1:2096)
+# ссылка будет http://<host>:2096/sub/...
+HYP_SUB_LISTEN=:2096
 ```
+
+За reverse-proxy с TLS: `HYP_SUB_LISTEN=127.0.0.1:2096` и `HYP_SUB_URL=https://vpn.example.com`. Комментарии — только отдельной строкой: systemd считает `# …` в конце строки частью значения.
 
 По голому HTTP содержимое подписки (сервер, obfs-пароль, ключ) видно провайдеру и DPI. Без домена и TLS лучше раздавать QR и ссылки, а подписку не включать.
 

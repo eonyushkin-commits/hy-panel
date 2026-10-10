@@ -161,7 +161,14 @@ const (
 // classify decides by the file's content only — never by whether Hysteria
 // runs — so re-running install cannot rewrite a working config.
 func classify(b []byte, readErr error) cfgKind {
-	if readErr != nil || strings.TrimSpace(string(b)) == "" {
+	if readErr != nil {
+		return cfgNone
+	}
+	var raw any
+	if err := yaml.Unmarshal(b, &raw); err != nil {
+		return cfgBroken
+	}
+	if raw == nil { // empty, comments only, or null
 		return cfgNone
 	}
 	c, err := parseHyConfig(b)
@@ -191,15 +198,16 @@ type yamlDoc struct {
 
 func parseDoc(b []byte) (*yamlDoc, error) {
 	d := &yamlDoc{}
-	if strings.TrimSpace(string(b)) == "" {
+	if err := yaml.Unmarshal(b, &d.doc); err != nil {
+		return nil, err
+	}
+	if len(d.doc.Content) == 0 || d.doc.Content[0].Tag == "!!null" {
+		// Empty or comments only: start a new mapping.
 		d.root = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 		d.doc = yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{d.root}}
 		return d, nil
 	}
-	if err := yaml.Unmarshal(b, &d.doc); err != nil {
-		return nil, err
-	}
-	if len(d.doc.Content) == 0 || d.doc.Content[0].Kind != yaml.MappingNode {
+	if d.doc.Content[0].Kind != yaml.MappingNode {
 		return nil, errors.New("config is not a YAML mapping")
 	}
 	d.root = d.doc.Content[0]
@@ -233,7 +241,9 @@ func mapGet(m *yaml.Node, key string) *yaml.Node {
 
 // set replaces the value of key (keeping its position) or appends it; v is a
 // Go value or a *yaml.Node.
-func (d *yamlDoc) set(key string, v any) error {
+func (d *yamlDoc) set(key string, v any) error { return mapSet(d.root, key, v) }
+
+func mapSet(m *yaml.Node, key string, v any) error {
 	val, ok := v.(*yaml.Node)
 	if !ok {
 		val = &yaml.Node{}
@@ -241,7 +251,6 @@ func (d *yamlDoc) set(key string, v any) error {
 			return err
 		}
 	}
-	m := d.root
 	for i := 0; i+1 < len(m.Content); i += 2 {
 		if strings.EqualFold(m.Content[i].Value, key) {
 			m.Content[i+1] = val

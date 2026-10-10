@@ -41,7 +41,7 @@ const (
 // facts is what install finds on the host. Whether Hysteria runs is not a
 // fact here on purpose: it may only decide whether to restart it.
 type facts struct {
-	installed bool    // /etc/hy-panel.env exists: this is an update
+	installed bool    // /etc/hy-panel.env of this version exists: this is an update
 	v01       bool    // a v0.1 unit (ExecStart with flags)
 	kind      cfgKind // Hysteria config, by content
 	hysteria  bool    // official Hysteria binary and unit are present
@@ -49,7 +49,7 @@ type facts struct {
 
 // plan is what install does.
 type plan struct {
-	update  bool // re-run: no questions, only the program is replaced
+	update  bool // re-run: panel settings and users stay, nothing is asked about them
 	fresh   bool // write the Hysteria config from the answers
 	connect bool // point the config's own auth at the panel, import its users
 }
@@ -64,16 +64,14 @@ func planInstall(f facts) (plan, error) {
 		return plan{}, errors.New("listen: realm:// (Realms) не поддерживается: ссылки вели бы в никуда")
 	case f.kind == cfgOther:
 		return plan{}, errors.New("auth в конфиге Hysteria указывает на другую панель — сначала отключи её")
-	case f.installed && f.kind == cfgNone:
-		return plan{}, errors.New("конфиг Hysteria пропал или сброшен к шаблону — настрой его заново: hy-panel settings")
-	case f.installed:
-		return plan{update: true, connect: f.kind == cfgOwnAuth}, nil
-	case !f.hysteria:
+	case f.kind == cfgNone && !f.hysteria:
 		return plan{}, errors.New("Hysteria не установлена. Сначала официальный установщик:\n    bash <(curl -fsSL https://get.hy2.sh/)\n  затем снова установи панель")
 	case f.kind == cfgNone:
-		return plan{fresh: true}, nil
+		// No working config (first install, or it was deleted or reset to
+		// the template): ask and write one. Panel settings stay as they are.
+		return plan{update: f.installed, fresh: true}, nil
 	}
-	return plan{connect: f.kind == cfgOwnAuth}, nil
+	return plan{update: f.installed, connect: f.kind == cfgOwnAuth}, nil
 }
 
 // runInstall: `hy-panel install`. The first run connects the panel to
@@ -101,7 +99,7 @@ func runInstall(args []string) {
 	orig, readErr := os.ReadFile(cfgPath)
 	unit, _ := os.ReadFile(unitPath)
 	pl, err := planInstall(facts{
-		installed: env["HYP_PASSWORD"] != "",
+		installed: env["HYP_PASSWORD"] != "" && env["HYP_HOST"] != "", // v0.1 kept the host in its unit
 		v01:       bytes.Contains(unit, []byte("hy-panel -")),
 		kind:      classify(orig, readErr),
 		hysteria:  fileExists(hysteriaBin) && unitExists(svc),
@@ -115,23 +113,24 @@ func runInstall(args []string) {
 	setIf("HYP_HOST", *host)
 	setIf("HYP_NAME", *name)
 	setIf("HYP_UI_PORT", *ui)
-	if pl.update {
-		fmt.Println("Панель уже установлена — обновляю программу, настройки и пользователи не меняются.")
-	} else {
-		if env["HYP_HOST"] == "" {
-			if env["HYP_HOST"] = publicIP(); env["HYP_HOST"] == "" {
-				log.Fatal("✗ не удалось определить публичный IP (NAT?) — укажи -host <IP или домен>")
-			}
+	if env["HYP_HOST"] == "" {
+		if env["HYP_HOST"] = publicIP(); env["HYP_HOST"] == "" {
+			log.Fatal("✗ не удалось определить публичный IP (NAT?) — укажи -host <IP или домен>")
 		}
-		if pl.fresh {
-			fmt.Printf("Hysteria (%s) ещё не настроена — настроим её.\n", svc)
-			opts = askHyOpts(p, nil, *hyPort, env["HYP_HOST"])
-			if opts.Domain != "" && *host == "" {
-				env["HYP_HOST"] = opts.Domain
-			}
-		} else {
-			fmt.Printf("Hysteria (%s) настроена — подключаю к ней панель: меняю в конфиге только auth и trafficStats.\n", svc)
+	}
+	switch {
+	case pl.fresh:
+		fmt.Printf("Hysteria (%s) ещё не настроена — настроим её.\n", svc)
+		opts = askHyOpts(p, nil, *hyPort, env["HYP_HOST"])
+		if opts.Domain != "" && *host == "" {
+			env["HYP_HOST"] = opts.Domain
 		}
+	case pl.update:
+		fmt.Println("Панель уже установлена — обновляю программу; настройки, пользователи и ссылки не меняются.")
+	default:
+		fmt.Printf("Hysteria (%s) настроена — подключаю к ней панель: меняю в конфиге только auth и trafficStats.\n", svc)
+	}
+	if !pl.update {
 		if env["HYP_UI_PORT"] == "" {
 			switch p.choose("Доступ к панели:", []string{
 				"HTTPS на порту 9443",
@@ -170,14 +169,15 @@ func runInstall(args []string) {
 	}
 	changed := false
 	if pl.fresh {
+		step("directory "+filepath.Dir(cfgPath), hysteriaDir(filepath.Dir(cfgPath)))
 		step("hysteria settings", applyOpts(d, cfg, hyOpts{}, opts, filepath.Dir(cfgPath), true))
 		changed = true
 	}
 	if pl.connect {
+		// The config's current auth is Hysteria's own: keep it for -purge
+		// and bring its users over (existing panel users stay as they are).
 		step("keep Hysteria's own auth → "+authPath, saveOwnAuth(d, authPath))
-		if store.Empty() {
-			importUsers(store, cfg)
-		}
+		importUsers(store, cfg)
 	}
 	c, err := d.connectPanel()
 	step("hysteria config: auth → panel, trafficStats", err)
@@ -187,7 +187,7 @@ func runInstall(args []string) {
 		if len(orig) > 0 {
 			step("backup → "+cfgPath+backupExt, backupOnce(cfgPath, orig))
 		}
-		step("hysteria config "+cfgPath, writeKeepingOwner(cfgPath, out))
+		step("hysteria config "+cfgPath, writeHysteriaConfig(cfgPath, out, pl.fresh))
 	}
 	var created []User
 	if !pl.update {
@@ -229,12 +229,9 @@ func runInstall(args []string) {
 	}
 }
 
-// saveOwnAuth keeps the config's auth (and trafficStats, if any) as it was
-// before the panel, once, so `uninstall -purge` can give it back.
+// saveOwnAuth keeps the config's own auth (and trafficStats, if any), so
+// `uninstall -purge` can give it back.
 func saveOwnAuth(d *yamlDoc, path string) error {
-	if fileExists(path) {
-		return nil
-	}
 	keep, _ := parseDoc(nil)
 	for _, k := range []string{"auth", "trafficStats"} {
 		if n := d.get(k); n != nil {
@@ -253,6 +250,9 @@ func saveOwnAuth(d *yamlDoc, path string) error {
 
 func importUsers(s *Store, c *hyConfig) {
 	add := func(name, pass string) {
+		if _, ok := s.Get(strings.ToLower(name)); ok {
+			return // already in the panel
+		}
 		if _, err := s.Create(User{Name: name, Password: pass, Enabled: true, Note: "imported"}, true); err != nil {
 			fmt.Printf("  ✗ импорт %q: %v\n", name, err)
 		} else {

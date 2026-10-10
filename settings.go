@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // hyOpts are the Hysteria settings the panel asks about. They live only in
@@ -146,7 +148,8 @@ func resolvesTo(domain, host string) bool {
 // existing self-signed certificate are kept: they are in every client link.
 func applyOpts(d *yamlDoc, cfg *hyConfig, cur, o hyOpts, cfgDir string, all bool) error {
 	if all || o.Port != cur.Port {
-		if err := d.set("listen", ":"+o.Port); err != nil {
+		host, _, _ := net.SplitHostPort(cfg.Listen) // keep a listen address, change only the port
+		if err := d.set("listen", net.JoinHostPort(host, o.Port)); err != nil {
 			return err
 		}
 	}
@@ -190,9 +193,15 @@ func applyOpts(d *yamlDoc, cfg *hyConfig, cur, o hyOpts, cfgDir string, all bool
 		}
 		uid, gid := hysteriaIDs()
 		os.Chown(dir, uid, gid) // the only place hysteria may write
-		acme := map[string]any{"domains": []string{o.Domain}, "dir": dir}
+		// Edit acme in place: keep the rest (DNS challenge, ca, …).
+		acme := d.get("acme")
+		if acme == nil || acme.Kind != yaml.MappingNode {
+			acme = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+			mapSet(acme, "dir", dir)
+		}
+		mapSet(acme, "domains", []string{o.Domain})
 		if o.Email != "" {
-			acme["email"] = o.Email
+			mapSet(acme, "email", o.Email)
 		}
 		d.del("tls")
 		return d.set("acme", acme)
@@ -270,6 +279,7 @@ func runSettings() {
 	}
 	d, err := parseDoc(b)
 	step("read "+cfgPath, err)
+	step("directory "+filepath.Dir(cfgPath), hysteriaDir(filepath.Dir(cfgPath)))
 	step("settings", applyOpts(d, cfg, before, o, filepath.Dir(cfgPath), cur == nil))
 	_, err = d.connectPanel()
 	step("auth → panel", err)
@@ -278,12 +288,39 @@ func runSettings() {
 	if len(b) > 0 {
 		step("backup → "+cfgPath+backupExt, backupOnce(cfgPath, b))
 	}
-	step("hysteria config "+cfgPath, writeKeepingOwner(cfgPath, out))
+	step("hysteria config "+cfgPath, writeHysteriaConfig(cfgPath, out, cur == nil))
+	// Links come from the config file: the panel shows the new ones right
+	// away, whatever happens to Hysteria's restart below.
+	step("restart hy-panel", systemctl("restart", "hy-panel"))
 	ufwAllow(o.firewallRules()...)
 	step("restart "+svc, systemctl("restart", svc))
 	waitHysteria(cfgPath, svc, o.Domain != "")
-	step("restart hy-panel", systemctl("restart", "hy-panel")) // links come from the new config
 	fmt.Println("\nГотово. Новые ссылки — в панели (кнопка QR).")
+}
+
+// hysteriaDir makes sure the config directory exists and Hysteria can enter it.
+func hysteriaDir(dir string) error {
+	if fileExists(dir) {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return err
+	}
+	chownHysteria(dir)
+	return nil
+}
+
+// writeHysteriaConfig writes the config; a config the panel creates (fresh)
+// is root:hysteria 0640, since it holds the obfs password and stats secret.
+func writeHysteriaConfig(path string, b []byte, fresh bool) error {
+	if err := writeKeepingOwner(path, b); err != nil {
+		return err
+	}
+	if fresh {
+		chownHysteria(path)
+		return os.Chmod(path, 0o640)
+	}
+	return nil
 }
 
 // hysteriaIDs returns the uid and gid of the hysteria user, 0 if absent.

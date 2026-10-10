@@ -31,6 +31,7 @@ type App struct {
 	ep       Endpoint
 	password string
 	subBase  string // public base URL of the subscription listener, "" = disabled
+	cfgErr   string // Hysteria config unreadable: no links are handed out
 	key      []byte
 	loginMu  sync.Mutex // serializes logins: ~1 guess/s total, not per connection
 	poke     chan struct{}
@@ -143,14 +144,19 @@ type userView struct {
 func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 	a.mu.RLock()
 	on, last := a.online, a.lastSync
-	var problems []string
+	var listen []string
 	for name, e := range a.listenErr {
-		problems = append(problems, name+": "+e)
+		listen = append(listen, name+": "+e)
 	}
-	sort.Strings(problems)
+	sort.Strings(listen)
+	var problems []string
+	if a.cfgErr != "" {
+		problems = append(problems, a.cfgErr)
+	}
 	if a.hyErr != "" {
-		problems = append([]string{"Нет связи с trafficStats Hysteria: " + a.hyErr}, problems...)
+		problems = append(problems, "Нет связи с trafficStats Hysteria: "+a.hyErr)
 	}
+	problems = append(problems, listen...)
 	a.mu.RUnlock()
 	now := time.Now()
 	users := a.store.List()
@@ -284,6 +290,9 @@ func (a *App) handleDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleQR(w http.ResponseWriter, r *http.Request) {
+	if a.noLinks(w) {
+		return
+	}
 	u, ok := a.store.Get(r.PathValue("name"))
 	if !ok {
 		http.NotFound(w, r)
@@ -304,6 +313,9 @@ func (a *App) handleQR(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleMihomo(w http.ResponseWriter, r *http.Request) {
+	if a.noLinks(w) {
+		return
+	}
 	u, ok := a.store.Get(r.PathValue("name"))
 	if !ok {
 		http.NotFound(w, r)
@@ -315,7 +327,20 @@ func (a *App) handleMihomo(w http.ResponseWriter, r *http.Request) {
 
 // ---- subscription (public listener, token-protected) ----
 
+// noLinks answers 503 while the Hysteria config is unreadable, so clients
+// keep their working profile instead of fetching a broken one.
+func (a *App) noLinks(w http.ResponseWriter) bool {
+	if a.cfgErr != "" {
+		http.Error(w, a.cfgErr, http.StatusServiceUnavailable)
+		return true
+	}
+	return false
+}
+
 func (a *App) handleSub(w http.ResponseWriter, r *http.Request) {
+	if a.noLinks(w) {
+		return
+	}
 	u, ok := a.store.BySubToken(r.PathValue("token"))
 	if !ok {
 		http.NotFound(w, r)

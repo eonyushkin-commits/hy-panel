@@ -224,7 +224,8 @@ func (s *Store) Create(u User, legacy bool) (User, error) {
 				return nil, err
 			}
 		}
-		s.users[u.Name] = &u
+		nu := u // the stored copy is the store's; u is returned
+		s.users[u.Name] = &nu
 		return func() { delete(s.users, u.Name) }, nil
 	})
 	return u, err

@@ -534,8 +534,10 @@ func TestClassify(t *testing.T) {
 		"listen: :443\nauth:\n  type: http\n  http: {url: 'http://127.0.0.1:8090/auth'}\n":                                              cfgPanel,
 		"listen: :443\nAuth: {Type: HTTP, http: {url: 'http://127.0.0.1:8090/auth'}}\n":                                                 cfgPanel,
 		"listen: :443\nauth:\n  type: http\n  http: {url: 'http://127.0.0.1:9999/other'}\n":                                             cfgOther,
-		"listen: realm://x\n": cfgRealm,
-		"listen: [":           cfgBroken,
+		"listen: realm://x\n":                   cfgRealm,
+		"# all commented out\n# listen: :443\n": cfgNone,
+		"---\n":                                 cfgNone,
+		"listen: [":                             cfgBroken,
 	}
 	for conf, want := range cases {
 		if got := classify([]byte(conf), nil); got != want {
@@ -561,7 +563,8 @@ func TestPlanInstall(t *testing.T) {
 		{facts{kind: cfgPanel, hysteria: true}, plan{}, false}, // after uninstall -purge: keep port/obfs/cert
 		{facts{installed: true, kind: cfgPanel}, plan{update: true}, false},
 		{facts{installed: true, kind: cfgOwnAuth}, plan{update: true, connect: true}, false},
-		{facts{installed: true, kind: cfgNone}, plan{}, true}, // never rewrite silently
+		{facts{installed: true, kind: cfgNone, hysteria: true}, plan{update: true, fresh: true}, false}, // config deleted/reset: ask again, panel settings stay
+		{facts{kind: cfgOwnAuth}, plan{connect: true}, false},                                           // connecting needs no official binary/unit
 		{facts{kind: cfgOther, hysteria: true}, plan{}, true},
 		{facts{kind: cfgRealm, hysteria: true}, plan{}, true},
 		{facts{kind: cfgBroken, hysteria: true}, plan{}, true},
@@ -572,8 +575,8 @@ func TestPlanInstall(t *testing.T) {
 		if (err != nil) != c.err || got != c.want {
 			t.Errorf("planInstall(%+v) = %+v, %v; want %+v, err=%v", c.f, got, err, c.want, c.err)
 		}
-		if got.update && got.fresh {
-			t.Errorf("an update must never write a new Hysteria config: %+v", c.f)
+		if got.fresh && c.f.kind != cfgNone {
+			t.Errorf("a working Hysteria config must never be rewritten: %+v", c.f)
 		}
 	}
 }
@@ -677,5 +680,27 @@ func TestDeviceLimitUsesSnapshot(t *testing.T) {
 	a.syncOnce(time.Now())
 	if ok, _, why := a.authorize("u:" + u.Password); ok || why != "device limit 1" {
 		t.Fatalf("limit not applied: %v %q", ok, why)
+	}
+}
+
+func TestApplyOptsEditsInPlace(t *testing.T) {
+	dir := t.TempDir()
+	conf := "listen: 203.0.113.5:443\nacme:\n  domains: [a.example]\n  type: dns\n  dns: {name: cloudflare}\n"
+	d, _ := parseDoc([]byte(conf))
+	c, _ := parseHyConfig([]byte(conf))
+	cur := currentOpts(c)
+	o := cur
+	o.Port, o.Domain = "8443", "b.example"
+	if err := applyOpts(d, c, cur, o, dir, false); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := d.bytes()
+	c2, _ := parseHyConfig(b)
+	if c2.Listen != "203.0.113.5:8443" || c2.ACME.Domains[0] != "b.example" || !strings.Contains(string(b), "cloudflare") {
+		t.Fatalf("lost settings the admin did not pick:\n%s", b)
+	}
+	// A comment-only file is edited like an empty one.
+	if d, err := parseDoc([]byte("# nothing yet\n")); err != nil || d.root == nil {
+		t.Fatalf("comment-only: %v", err)
 	}
 }

@@ -71,14 +71,21 @@ func serve() {
 	}
 	cfgPath := envOr(env, "HYP_HY_CONFIG", defaultCfg)
 	cfg, err := loadHyConfig(cfgPath)
+	if err == nil && cfg.TrafficStats.Listen == "" {
+		err = fmt.Errorf("%s: no trafficStats — run hy-panel install", cfgPath)
+	}
+	cfgErr := ""
 	if err != nil {
+		// Keep /auth up, but hand out no links built from a config we could not read.
 		log.Printf("WARN: %v", err)
+		cfgErr = "конфиг Hysteria: " + err.Error()
 		cfg = &hyConfig{}
 	}
 	checkHyConfig(cfg)
 	key := make([]byte, 32)
 	rand.Read(key)
 	app := newApp(store, newStatsClient(cfg.TrafficStats.Listen, cfg.TrafficStats.Secret), endpointFor(cfg, env), env["HYP_PASSWORD"], key)
+	app.cfgErr = cfgErr
 	log.Printf("hy-panel %s; links: %s:%s sni=%q obfs=%q pinned=%v ech=%v", version,
 		app.ep.Host, app.ep.Port, app.ep.SNI, app.ep.ObfsType, app.ep.Pin != "", app.ep.ECH != "")
 
