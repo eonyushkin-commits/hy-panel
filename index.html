@@ -268,7 +268,7 @@ async function load() {
   $('#srv').innerHTML = [`${sv.host}:${sv.port}`, sv.obfs, sv.pinned && 'self-signed · pin', sv.sni && 'sni ' + sv.sni]
     .filter(Boolean).map(c => `<span class="chip">${esc(c)}</span>`).join('');
   $('#hyerr').hidden = !S.hyError;
-  $('#hyerr').innerHTML = icon('alert') + '<span>Нет связи с trafficStats Hysteria: ' + esc(S.hyError) + '</span>';
+  $('#hyerr').innerHTML = icon('alert') + '<span>' + esc(S.hyError) + '</span>';
   stats();
   render();
 }
@@ -410,7 +410,7 @@ async function setTab(t) {
   $('#tabs').querySelectorAll('button').forEach(b => b.classList.toggle('act', b.dataset.t === t));
   const u = shareUser, q = 'api/users/' + u.name + '/qr.png?t=' + Date.now();
   let text, hint = '', qr = q;
-  if (t === 'uri') { text = u.uri; hint = 'Hiddify, v2rayN, Shadowrocket, NekoBox, официальный клиент.'; }
+  if (t === 'uri') { text = u.uri; hint = 'Hiddify, v2RayTun, Happ, Shadowrocket, v2rayN, официальный клиент.'; }
   if (t === 'sub') {
     text = S.subBase + u.subPath; qr = q + '&sub=1';
     hint = 'Клиент сам обновляет конфиг и видит остаток трафика и срок. mihomo получает YAML.';

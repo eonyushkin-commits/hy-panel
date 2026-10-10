@@ -166,7 +166,7 @@ func TestReadCertAndEndpoint(t *testing.T) {
 	if ci.Pin != hex.EncodeToString(sum[:]) {
 		t.Fatal("pin is not sha256 of leaf DER")
 	}
-	ep := buildEndpoint(cfg, ci, "", "203.0.113.7", "", "", "AMS")
+	ep := buildEndpoint(cfg, ci, "", "203.0.113.7", "AMS")
 	if ep.SNI != "bing.com" || ep.Port != "8443" || ep.Pin == "" {
 		t.Fatalf("endpoint: %+v", ep)
 	}
@@ -176,7 +176,7 @@ func TestReadCertAndEndpoint(t *testing.T) {
 	if ci.SelfSigned || ci.Pin != "" {
 		t.Fatalf("CA cert pinned: %+v", ci)
 	}
-	ep = buildEndpoint(cfg, ci, "", "", "", "", "")
+	ep = buildEndpoint(cfg, ci, "", "", "")
 	if ep.Host != "vpn.example.com" || ep.SNI != "" {
 		t.Fatalf("CA endpoint: %+v", ep)
 	}
@@ -199,8 +199,10 @@ func TestURIAndMihomo(t *testing.T) {
 		t.Fatalf("URI: %s", ep.URI(u))
 	}
 
+	// A range: one port in the address (Xray apps cannot parse a range there),
+	// the range itself in mport.
 	ep.Port = "20000-50000"
-	if !strings.Contains(ep.URI(u), "@203.0.113.7:20000-50000/") {
+	if v, _ := url.Parse(ep.URI(u)); v.Host != "203.0.113.7:20000" || v.Query().Get("mport") != "20000-50000" {
 		t.Fatalf("hop URI: %s", ep.URI(u))
 	}
 	var doc struct{ Proxies []map[string]any }
@@ -312,14 +314,13 @@ func (f *fakeHy) state() (conns, kicks int, flag bool) {
 	return n, f.kicks, len(f.kick) > 0
 }
 
-func newApp(t *testing.T, sc *statsClient) *App {
-	return &App{store: newStore(t), stats: sc, online: map[string]int{}, revoked: map[string]revocation{},
-		kicked: map[string]int{}, poke: make(chan struct{}, 1)}
+func testApp(t *testing.T, sc *statsClient) *App {
+	return newApp(newStore(t), sc, Endpoint{}, "", make([]byte, 32))
 }
 
 func TestEnforceLeavesNoStaleKicks(t *testing.T) {
 	f, sc := newFakeHy(t)
-	a := newApp(t, sc)
+	a := testApp(t, sc)
 	mustCreate(t, a.store, User{Name: "u"}, false)
 	tick := func() { a.syncOnce(time.Now()) }
 
@@ -376,7 +377,7 @@ func TestEnforceLeavesNoStaleKicks(t *testing.T) {
 
 func TestPasswordChangeRevokesSessions(t *testing.T) {
 	f, sc := newFakeHy(t)
-	a := newApp(t, sc)
+	a := testApp(t, sc)
 	mustCreate(t, a.store, User{Name: "u"}, false)
 	mustCreate(t, a.store, User{Name: "off"}, false)
 	f.connect("u")
@@ -410,7 +411,7 @@ func TestPasswordChangeRevokesSessions(t *testing.T) {
 
 func TestTrafficKeptWhenOnlineFails(t *testing.T) {
 	f, sc := newFakeHy(t)
-	a := newApp(t, sc)
+	a := testApp(t, sc)
 	mustCreate(t, a.store, User{Name: "u"}, false)
 	f.connect("u")
 	f.send("u")
@@ -426,7 +427,7 @@ func TestTrafficKeptWhenOnlineFails(t *testing.T) {
 
 func TestAuthEndpoint(t *testing.T) {
 	_, sc := newFakeHy(t)
-	a := newApp(t, sc)
+	a := testApp(t, sc)
 	u := mustCreate(t, a.store, User{Name: "u", MaxDevices: 1}, false)
 	call := func(remote, auth string, hdr ...string) (int, map[string]any) {
 		r := httptest.NewRequest("POST", "/auth", strings.NewReader(`{"addr":"1.2.3.4:5","auth":"`+auth+`","tx":0}`))
@@ -483,35 +484,31 @@ func TestReadECH(t *testing.T) {
 
 func TestPortRangeListen(t *testing.T) {
 	c := &hyConfig{Listen: ":20000-50000"} // Hysteria 2.8+ listens on a UDP range itself
-	if ep := buildEndpoint(c, certInfo{}, "", "1.2.3.4", "", "", ""); ep.Port != "20000-50000" {
+	if ep := buildEndpoint(c, certInfo{}, "", "1.2.3.4", ""); ep.Port != "20000-50000" {
 		t.Fatalf("port %q", ep.Port)
 	}
 }
 
-func TestPatchHyConfig(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "config.yaml")
+func TestConnectPanel(t *testing.T) {
 	orig := "# my server\nlisten: :8443 # port\nobfs:\n  type: salamander\n  salamander:\n    password: ob\nAuth:\n  type: password\n  password: old\n"
-	os.WriteFile(p, []byte(orig), 0o640)
-	changed, err := patchHyConfig(p)
-	if err != nil || !changed {
+	d, err := parseDoc([]byte(orig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := d.connectPanel(); err != nil || !changed {
 		t.Fatal(changed, err)
 	}
-	c, err := loadHyConfig(p)
-	if err != nil || c.Auth.Type != "http" || c.Auth.HTTP.URL != "http://127.0.0.1:8090/auth" ||
-		c.TrafficStats.Listen != "127.0.0.1:25413" || len(c.TrafficStats.Secret) != 32 || c.Obfs.Salamander.Password != "ob" {
+	b, _ := d.bytes()
+	c, err := parseHyConfig(b)
+	if err != nil || c.Auth.Type != "http" || c.Auth.HTTP.URL != authURL ||
+		c.TrafficStats.Listen != statsAddr || len(c.TrafficStats.Secret) != 32 || c.Obfs.Salamander.Password != "ob" {
 		t.Fatalf("%+v %v", c, err)
 	}
-	b, _ := os.ReadFile(p)
 	if !strings.Contains(string(b), "# my server") || strings.Count(strings.ToLower(string(b)), "auth:") != 1 {
 		t.Fatalf("comments/dup keys:\n%s", b)
 	}
-	if bak, _ := os.ReadFile(p + backupExt); string(bak) != orig {
-		t.Fatal("backup")
-	}
-	if fi, _ := os.Stat(p); fi.Mode().Perm() != 0o640 {
-		t.Fatal("mode changed")
-	}
-	if changed, _ := patchHyConfig(p); changed {
+	d2, _ := parseDoc(b)
+	if changed, _ := d2.connectPanel(); changed {
 		t.Fatal("second run must be a no-op")
 	}
 }
@@ -527,23 +524,196 @@ func TestUnderPath(t *testing.T) {
 	}
 }
 
-func TestNeedsFreshConfig(t *testing.T) {
+func TestClassify(t *testing.T) {
+	cases := map[string]cfgKind{
+		"":    cfgNone,
+		" \n": cfgNone,
+		"# listen: :443\n\nacme:\n  domains:\n    - your.domain.net\n  email: your@email.com\nauth:\n  type: password\n  password: x\n": cfgNone,
+		"# acme: your.domain.net in a comment only\nlisten: :443\nauth: {type: password, password: x}\n":                                cfgOwnAuth,
+		"listen: :8443\nauth:\n  type: userpass\n  userpass: {a: b}\n":                                                                  cfgOwnAuth,
+		"listen: :443\nauth:\n  type: http\n  http: {url: 'http://127.0.0.1:8090/auth'}\n":                                              cfgPanel,
+		"listen: :443\nAuth: {Type: HTTP, http: {url: 'http://127.0.0.1:8090/auth'}}\n":                                                 cfgPanel,
+		"listen: :443\nauth:\n  type: http\n  http: {url: 'http://127.0.0.1:9999/other'}\n":                                             cfgOther,
+		"listen: realm://x\n":                   cfgRealm,
+		"# all commented out\n# listen: :443\n": cfgNone,
+		"---\n":                                 cfgNone,
+		"listen: [":                             cfgBroken,
+	}
+	for conf, want := range cases {
+		if _, got := classify([]byte(conf), nil); got != want {
+			t.Errorf("classify(%q) = %v, want %v", conf, got, want)
+		}
+	}
+	if _, k := classify(nil, os.ErrNotExist); k != cfgNone {
+		t.Error("missing file")
+	}
+}
+
+// The install decision never depends on whether Hysteria runs (facts has no
+// such field), and a re-run is always an update that leaves Hysteria alone.
+func TestPlanInstall(t *testing.T) {
+	cases := []struct {
+		f    facts
+		want plan
+		err  bool
+	}{
+		{facts{kind: cfgNone, hysteria: true}, plan{fresh: true}, false},
+		{facts{kind: cfgNone}, plan{}, true}, // no Hysteria installed
+		{facts{kind: cfgOwnAuth, hysteria: true}, plan{connect: true}, false},
+		{facts{kind: cfgPanel, hysteria: true}, plan{}, false}, // after uninstall -purge: keep port/obfs/cert
+		{facts{installed: true, kind: cfgPanel}, plan{update: true}, false},
+		{facts{installed: true, kind: cfgOwnAuth}, plan{update: true, connect: true}, false},
+		{facts{installed: true, kind: cfgNone, hysteria: true}, plan{update: true, fresh: true}, false}, // config deleted/reset: ask again, panel settings stay
+		{facts{kind: cfgOwnAuth}, plan{connect: true}, false},                                           // connecting needs no official binary/unit
+		{facts{kind: cfgOther, hysteria: true}, plan{}, true},
+		{facts{kind: cfgRealm, hysteria: true}, plan{}, true},
+		{facts{kind: cfgBroken, hysteria: true}, plan{}, true},
+		{facts{v01: true, installed: true, kind: cfgPanel}, plan{}, true},
+	}
+	for _, c := range cases {
+		got, err := planInstall(c.f)
+		if (err != nil) != c.err || got != c.want {
+			t.Errorf("planInstall(%+v) = %+v, %v; want %+v, err=%v", c.f, got, err, c.want, c.err)
+		}
+		if got.fresh && c.f.kind != cfgNone {
+			t.Errorf("a working Hysteria config must never be rewritten: %+v", c.f)
+		}
+	}
+}
+
+func TestApplyOptsKeepsLinks(t *testing.T) {
 	dir := t.TempDir()
-	write := func(name, s string) string {
-		p := filepath.Join(dir, name)
-		os.WriteFile(p, []byte(s), 0o600)
-		return p
+	// A new config from the answers.
+	d, _ := parseDoc(nil)
+	o := hyOpts{Port: "443", Obfs: "salamander"}
+	if err := applyOpts(d, &hyConfig{}, nil, o, dir); err != nil {
+		t.Fatal(err)
 	}
-	cases := map[string]bool{
-		filepath.Join(dir, "missing.yaml"): true,
-		write("empty.yaml", " \n"):         true,
-		write("template.yaml", "# listen: :443\n\nacme:\n  domains:\n    - your.domain.net\n  email: your@email.com\n"): true,
-		write("generated.yaml", generatedMark+"\nlisten: :443\n\nobfs:\n  type: salamander\n"):                          false,
-		write("custom.yaml", "listen: :8443\nacme:\n  domains:\n    - vpn.example.com\n"):                               false,
+	d.connectPanel()
+	b, _ := d.bytes()
+	c, _ := parseHyConfig(b)
+	if currentOpts(c) != o || c.TLS.Cert == "" || len(c.Obfs.Salamander.Password) != 24 {
+		t.Fatalf("new config:\n%s", b)
 	}
-	for p, want := range cases {
-		if got := needsFreshConfig(p); got != want {
-			t.Errorf("needsFreshConfig(%s) = %v, want %v", filepath.Base(p), got, want)
+	ci, _ := readCert(c.TLS.Cert)
+	pass, pin := c.Obfs.Salamander.Password, ci.Pin
+
+	// settings: only the port changes; obfs password, certificate and comments stay.
+	b = append([]byte("# mine\n"), b...)
+	d, _ = parseDoc(b)
+	o2 := o
+	o2.Port = hopRange
+	if err := applyOpts(d, c, &o, o2, dir); err != nil {
+		t.Fatal(err)
+	}
+	b2, _ := d.bytes()
+	c2, _ := parseHyConfig(b2)
+	ci2, _ := readCert(c2.TLS.Cert)
+	if c2.Listen != ":"+hopRange || c2.Obfs.Salamander.Password != pass || ci2.Pin != pin || !strings.Contains(string(b2), "# mine") {
+		t.Fatalf("settings changed more than the port:\n%s", b2)
+	}
+	// Obfs type change keeps the password; no obfs adds the masquerade.
+	o3 := o2
+	o3.Obfs = ""
+	applyOpts(d, c2, &o2, o3, dir)
+	b3, _ := d.bytes()
+	c3, _ := parseHyConfig(b3)
+	if c3.Obfs.Type != "" || !strings.Contains(string(b3), "masquerade") {
+		t.Fatalf("no obfs:\n%s", b3)
+	}
+}
+
+func TestOwnAuthRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath, saved := filepath.Join(dir, "config.yaml"), filepath.Join(dir, "data", "auth.yaml")
+	orig := "listen: :8443\nauth:\n  type: userpass\n  userpass:\n    evo: secret12\n"
+	d, _ := parseDoc([]byte(orig))
+	if err := saveOwnAuth(d, saved); err != nil {
+		t.Fatal(err)
+	}
+	d.connectPanel()
+	b, _ := d.bytes()
+	os.WriteFile(cfgPath, b, 0o640)
+	if ok, err := restoreOwnAuth(cfgPath, saved); !ok || err != nil {
+		t.Fatal(ok, err)
+	}
+	c, _ := loadHyConfig(cfgPath)
+	if c.Auth.Type != "userpass" || c.Auth.UserPass["evo"] != "secret12" || c.TrafficStats.Listen != "" || c.Listen != ":8443" {
+		t.Fatalf("restored: %+v", c)
+	}
+	if ok, _ := restoreOwnAuth(cfgPath, filepath.Join(dir, "none")); ok {
+		t.Fatal("nothing saved must restore nothing")
+	}
+}
+
+func TestCountersFlushedLater(t *testing.T) {
+	s := newStore(t)
+	mustCreate(t, s, User{Name: "u"}, false)
+	disk := func() int64 {
+		s2, _ := OpenStore(s.path)
+		u, _ := s2.Get("u")
+		return u.Down
+	}
+	s.Tick(time.Now(), map[string]trafficEntry{"u": {Rx: 500}}, nil)
+	if disk() != 0 {
+		t.Fatal("counters written on every tick")
+	}
+	if err := s.Flush(); err != nil || disk() != 500 {
+		t.Fatalf("flush: %v %d", err, disk())
+	}
+	// An admin change is written at once, with the counters.
+	s.Tick(time.Now(), map[string]trafficEntry{"u": {Rx: 1}}, nil)
+	s.Update("u", func(u *User) error { u.Note = "x"; return nil })
+	if disk() != 501 {
+		t.Fatal("admin change not written with counters")
+	}
+}
+
+func TestDeviceLimitUsesSnapshot(t *testing.T) {
+	f, sc := newFakeHy(t)
+	a := testApp(t, sc)
+	u := mustCreate(t, a.store, User{Name: "u", MaxDevices: 1}, false)
+	if ok, _, _ := a.authorize("u:" + u.Password); !ok {
+		t.Fatal("first device refused")
+	}
+	f.connect("u")
+	a.syncOnce(time.Now())
+	if ok, _, why := a.authorize("u:" + u.Password); ok || why != "device limit 1" {
+		t.Fatalf("limit not applied: %v %q", ok, why)
+	}
+}
+
+func TestApplyOptsEditsInPlace(t *testing.T) {
+	dir := t.TempDir()
+	conf := "listen: 203.0.113.5:443\nacme:\n  domains: [a.example]\n  type: dns\n  dns: {name: cloudflare}\n"
+	d, _ := parseDoc([]byte(conf))
+	c, _ := parseHyConfig([]byte(conf))
+	cur := currentOpts(c)
+	o := cur
+	o.Port, o.Domain = "8443", "b.example"
+	if err := applyOpts(d, c, &cur, o, dir); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := d.bytes()
+	c2, _ := parseHyConfig(b)
+	if c2.Listen != "203.0.113.5:8443" || c2.ACME.Domains[0] != "b.example" || !strings.Contains(string(b), "cloudflare") {
+		t.Fatalf("lost settings the admin did not pick:\n%s", b)
+	}
+	// A comment-only file is edited like an empty one.
+	if d, err := parseDoc([]byte("# nothing yet\n")); err != nil || d.root == nil {
+		t.Fatalf("comment-only: %v", err)
+	}
+}
+
+func TestKindErr(t *testing.T) {
+	for _, k := range []cfgKind{cfgBroken, cfgRealm, cfgOther} {
+		if kindErr(k) == nil {
+			t.Errorf("kind %v must be refused", k)
+		}
+	}
+	for _, k := range []cfgKind{cfgNone, cfgPanel, cfgOwnAuth} {
+		if kindErr(k) != nil {
+			t.Errorf("kind %v refused", k)
 		}
 	}
 }

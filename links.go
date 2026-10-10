@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"fmt"
+	"log"
 	"net"
 	"net/url"
 	"strings"
@@ -20,15 +21,26 @@ type Endpoint struct {
 	Name     string // profile/remark prefix
 }
 
-// buildEndpoint fills gaps in the flags from the Hysteria config and certificate.
+// endpointFor builds the link parameters from the Hysteria config and the
+// panel settings (HYP_HOST, HYP_NAME); certificate problems only lose the pin.
+func endpointFor(c *hyConfig, env map[string]string) Endpoint {
+	ci, err := readCert(c.TLS.Cert)
+	if err != nil {
+		log.Printf("WARN: tls.cert: %v (no pin/SNI from cert)", err)
+	}
+	ech, err := readECH(c.ECH.KeyPath)
+	if err != nil {
+		log.Printf("WARN: ech.keyPath: %v (links without ECH)", err)
+	}
+	return buildEndpoint(c, ci, ech, env["HYP_HOST"], env["HYP_NAME"])
+}
+
+// buildEndpoint fills the link parameters from the Hysteria config and certificate.
 // SNI matters: Hysteria's default sniGuard (dns-san) rejects handshakes whose
 // SNI does not match the cert's DNS SANs, and clients dialing an IP send none.
-func buildEndpoint(c *hyConfig, ci certInfo, ech, host, port, sni, name string) Endpoint {
-	e := Endpoint{Host: host, Port: port, SNI: sni, Pin: ci.Pin, ECH: ech, Name: name}
+func buildEndpoint(c *hyConfig, ci certInfo, ech, host, name string) Endpoint {
+	e := Endpoint{Host: host, Port: c.port(), Pin: ci.Pin, ECH: ech, Name: name}
 	e.ObfsType, e.ObfsPass = c.obfs()
-	if e.Port == "" {
-		e.Port = c.port()
-	}
 	domain := ""
 	if len(c.ACME.Domains) > 0 {
 		domain = c.ACME.Domains[0]
@@ -38,13 +50,11 @@ func buildEndpoint(c *hyConfig, ci certInfo, ech, host, port, sni, name string) 
 	if e.Host == "" {
 		e.Host = domain
 	}
-	if e.SNI == "" {
-		switch {
-		case domain != "":
-			e.SNI = domain
-		case ci.DNSName != "":
-			e.SNI = strings.Replace(ci.DNSName, "*", "www", 1)
-		}
+	switch {
+	case domain != "":
+		e.SNI = domain
+	case ci.DNSName != "":
+		e.SNI = strings.Replace(ci.DNSName, "*", "www", 1)
 	}
 	if e.SNI == e.Host {
 		e.SNI = "" // implied by the host
@@ -59,10 +69,25 @@ func (e Endpoint) remark(u User) string {
 	return e.Name + "-" + u.Name
 }
 
+// firstPort is the first port of a hopping range ("20000-50000" → "20000").
+func (e Endpoint) firstPort() string {
+	return strings.FieldsFunc(e.Port, func(r rune) bool { return r == '-' || r == ',' })[0]
+}
+
+func (e Endpoint) hopping() bool { return strings.ContainsAny(e.Port, "-,") }
+
 // URI builds the official hysteria2:// share link
-// (https://v2.hysteria.network/docs/developers/URI-Scheme/).
+// (https://v2.hysteria.network/docs/developers/URI-Scheme/). A hopping range
+// goes into mport with the first port in the address: Xray-based apps
+// (v2RayTun, v2rayN) cannot parse a range there, and the server listens on
+// the whole range, so every app connects.
 func (e Endpoint) URI(u User) string {
 	q := url.Values{}
+	port := e.Port
+	if e.hopping() {
+		port = e.firstPort()
+		q.Set("mport", e.Port)
+	}
 	if e.ObfsType != "" {
 		q.Set("obfs", e.ObfsType)
 		q.Set("obfs-password", e.ObfsPass)
@@ -81,7 +106,7 @@ func (e Endpoint) URI(u User) string {
 	v := url.URL{
 		Scheme:   "hysteria2",
 		User:     url.UserPassword(u.Name, u.Password),
-		Host:     net.JoinHostPort(e.Host, e.Port),
+		Host:     net.JoinHostPort(e.Host, port),
 		Path:     "/",
 		RawQuery: q.Encode(),
 		Fragment: e.remark(u),
@@ -97,8 +122,8 @@ func (e Endpoint) Mihomo(u User) string {
 	fmt.Fprintf(&b, "  - name: %q\n", e.remark(u))
 	w("type", "hysteria2")
 	q("server", e.Host)
-	if strings.ContainsAny(e.Port, "-,") {
-		w("port", strings.FieldsFunc(e.Port, func(r rune) bool { return r == '-' || r == ',' })[0])
+	if e.hopping() {
+		w("port", e.firstPort())
 		q("ports", e.Port)
 	} else {
 		w("port", e.Port)

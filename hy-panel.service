@@ -6,7 +6,7 @@ Before=hysteria-server.service
 
 [Service]
 EnvironmentFile=/etc/hy-panel.env
-ExecStart=/usr/local/bin/hy-panel -host 203.0.113.10 -name AMS
+ExecStart=/usr/local/bin/hy-panel serve
 StateDirectory=hy-panel
 StateDirectoryMode=0700
 Restart=always

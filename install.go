@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	mrand "math/rand/v2"
 	"net"
@@ -15,114 +14,133 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	qrcode "github.com/skip2/go-qrcode"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed hy-panel.service
-var unitTemplate string
+var unitFile string
 
 const (
 	binPath    = "/usr/local/bin/hy-panel"
-	envPath    = "/etc/hy-panel.env"
+	envPath    = "/etc/hy-panel.env" // the panel's only settings file
 	unitPath   = "/etc/systemd/system/hy-panel.service"
-	dataPath   = "/var/lib/hy-panel/users.json"
+	dataDir    = "/var/lib/hy-panel"
+	dataPath   = dataDir + "/users.json"
+	authPath   = dataDir + "/hysteria-auth.yaml" // Hysteria's own auth before the panel, for -purge
 	panelAddr  = "127.0.0.1:8090"
 	authURL    = "http://" + panelAddr + "/auth"
 	statsAddr  = "127.0.0.1:25413"
 	backupExt  = ".bak-hy-panel"
 	defaultCfg = "/etc/hysteria/config.yaml"
+	defaultSvc = "hysteria-server"
+	installCmd = "bash <(curl -fsSL https://raw.githubusercontent.com/eonyushkin-commits/hy-panel/main/install.sh)"
 )
 
-// runInstall: `hy-panel install` sets everything up on a host with a working
-// hysteria-server: binary, password, users import, config switch, systemd.
+// facts is what install finds on the host. Whether Hysteria runs is not a
+// fact here on purpose: it may only decide whether to restart it.
+type facts struct {
+	installed bool    // /etc/hy-panel.env of this version exists: this is an update
+	v01       bool    // a v0.1 unit (ExecStart with flags)
+	kind      cfgKind // Hysteria config, by content
+	hysteria  bool    // official Hysteria binary and unit are present
+}
+
+// plan is what install does.
+type plan struct {
+	update  bool // re-run: panel settings and users stay, nothing is asked about them
+	fresh   bool // write the Hysteria config from the answers
+	connect bool // point the config's own auth at the panel, import its users
+}
+
+func planInstall(f facts) (plan, error) {
+	if err := kindErr(f.kind); err != nil {
+		return plan{}, err
+	}
+	switch {
+	case f.v01:
+		return plan{}, errors.New("стоит прежняя hy-panel v0.1 — сначала удали её: hy-panel uninstall")
+	case f.kind == cfgNone && !f.hysteria:
+		return plan{}, errors.New("Hysteria не установлена. Сначала официальный установщик:\n    bash <(curl -fsSL https://get.hy2.sh/)\n  затем снова установи панель")
+	case f.kind == cfgNone:
+		// No working config (first install, or it was deleted or reset to
+		// the template): ask and write one. Panel settings stay as they are.
+		return plan{update: f.installed, fresh: true}, nil
+	}
+	return plan{update: f.installed, connect: f.kind == cfgOwnAuth}, nil
+}
+
+// runInstall: `hy-panel install`. The first run connects the panel to
+// Hysteria (or sets Hysteria up); every later run only updates the program.
 func runInstall(args []string) {
 	fs := flag.NewFlagSet("install", flag.ExitOnError)
-	hyCfg := fs.String("hy-config", defaultCfg, "Hysteria 2 server config")
-	hySvc := fs.String("hy-service", "hysteria-server", "Hysteria systemd service")
+	hyCfg := fs.String("hy-config", "", "Hysteria 2 server config (default "+defaultCfg+")")
+	hySvc := fs.String("hy-service", "", "Hysteria systemd service (default "+defaultSvc+")")
 	host := fs.String("host", "", "public IP/domain for client links (default: autodetect)")
 	name := fs.String("name", "", "profile name prefix shown in clients")
 	ui := fs.String("ui-port", "", "public HTTPS port for the panel UI, \"off\" = SSH tunnel only (default: ask)")
 	hyPort := fs.String("hy-port", "", "UDP port or range for a new Hysteria config (default: ask)")
-	force := fs.Bool("fresh", false, "write a new Hysteria config even if Hysteria is already configured")
 	fs.Parse(args)
-	set := map[string]bool{}
-	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
-	log.SetFlags(0)
-	p := newPrompter()
-	if os.Geteuid() != 0 {
-		log.Fatal("run as root: sudo hy-panel install")
-	}
+	needRoot("install")
 
-	if *host == "" {
-		*host = publicIP()
-		if *host == "" {
-			log.Fatal("cannot detect a public IP (NAT?) — pass -host <IP or domain>")
-		}
-	}
-
-	// A configured Hysteria is adopted as is, running or not; only a missing
-	// config or the official installer's untouched template is set up fresh.
-	// A running Hysteria without the config at -hy-config reads another one:
-	// writing a new config here would change nothing it uses.
-	active := serviceActive(*hySvc)
-	if _, err := os.Stat(*hyCfg); errors.Is(err, os.ErrNotExist) && active {
-		log.Fatalf("✗ %s не найден, а Hysteria (%s) запущена — укажи её конфиг: install -hy-config <путь>", *hyCfg, *hySvc)
-	}
-	fresh := *force || needsFreshConfig(*hyCfg)
-	var opts hyOpts
-	if fresh {
-		fmt.Printf("Hysteria (%s) ещё не настроена — настроим её.\n", *hySvc)
-		requireHysteria(*hySvc)
-		opts = askHyOpts(p, *hyPort, *host)
-		if opts.Domain != "" && !set["host"] {
-			*host = opts.Domain
-		}
-	} else if active {
-		fmt.Printf("Hysteria (%s) работает — подключаю панель к ней, её настройки не меняю.\n", *hySvc)
-	} else if !unitExists(*hySvc) {
-		log.Fatalf("✗ служба %s не найдена: Hysteria не установлена или задай -hy-service", *hySvc)
-	} else {
-		fmt.Printf("Hysteria (%s) настроена, но не запущена — подключаю панель к её конфигу и запускаю, настройки не меняю.\n", *hySvc)
-	}
-
-	// Panel access: flag, else what a previous install chose (kept in the env
-	// file, which survives an uninstall that keeps the data), else ask.
 	env := readEnv()
-	if !set["ui-port"] {
-		if v := env["HYP_UI_PORT"]; v != "" {
-			*ui = v
-		} else if old, err := os.ReadFile(unitPath); err == nil {
-			_, *ui, _ = net.SplitHostPort(unitArg(string(old), "-ui-listen"))
-		} else {
-			switch p.choose("Доступ к панели:", []string{
-				"HTTPS на порту 9443",
-				"HTTPS на случайном порту",
-				"только через SSH-туннель",
-			}, 0) {
-			case 0:
-				*ui = "9443"
-			case 1:
-				*ui = strconv.Itoa(10000 + mrand.IntN(50000))
-			}
+	setIf := func(key, v string) {
+		if v != "" {
+			env[key] = v
 		}
 	}
-	if *ui == "" {
-		*ui = "off"
-	}
-	if fresh {
-		fmt.Println()
-		freshSetup(*hyCfg, *hySvc, opts)
-	}
-	cfg, err := loadHyConfig(*hyCfg)
+	setIf("HYP_HY_CONFIG", *hyCfg)
+	setIf("HYP_HY_SERVICE", *hySvc)
+	cfgPath, svc := hyPaths(env)
+	orig, readErr := os.ReadFile(cfgPath)
+	cfg, kind := classify(orig, readErr)
+	unit, _ := os.ReadFile(unitPath)
+	pl, err := planInstall(facts{
+		installed: installed(env),
+		v01:       bytes.Contains(unit, []byte("hy-panel -")),
+		kind:      kind,
+		hysteria:  fileExists(hysteriaBin) && unitExists(svc),
+	})
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("✗ ", err)
 	}
 
-	step("binary → "+binPath, copySelf(binPath))
-
+	p := newPrompter()
+	var opts hyOpts
+	setIf("HYP_HOST", *host)
+	setIf("HYP_NAME", *name)
+	setIf("HYP_UI_PORT", *ui)
+	if env["HYP_HOST"] == "" {
+		if env["HYP_HOST"] = publicIP(); env["HYP_HOST"] == "" {
+			log.Fatal("✗ не удалось определить публичный IP (NAT?) — укажи -host <IP или домен>")
+		}
+	}
+	switch {
+	case pl.fresh:
+		fmt.Printf("Hysteria (%s) ещё не настроена — настроим её.\n", svc)
+		opts = askHyOpts(p, nil, *hyPort, env["HYP_HOST"])
+		if opts.Domain != "" && *host == "" {
+			env["HYP_HOST"] = opts.Domain
+		}
+	case pl.update:
+		fmt.Println("Панель уже установлена — обновляю программу; настройки, пользователи и ссылки не меняются.")
+	default:
+		fmt.Printf("Hysteria (%s) настроена — подключаю к ней панель: меняю в конфиге только auth и trafficStats.\n", svc)
+	}
+	if !pl.update && env["HYP_UI_PORT"] == "" {
+		switch p.choose("Доступ к панели:", []string{
+			"HTTPS на порту 9443",
+			"HTTPS на случайном порту",
+			"только через SSH-туннель",
+		}, 0) {
+		case 0:
+			env["HYP_UI_PORT"] = "9443"
+		case 1:
+			env["HYP_UI_PORT"] = strconv.Itoa(10000 + mrand.IntN(50000))
+		default:
+			env["HYP_UI_PORT"] = "off"
+		}
+	}
 	// Like 3x-ui: random password and a secret URL path, kept across re-runs.
 	if env["HYP_PASSWORD"] == "" {
 		env["HYP_PASSWORD"] = randStr(16)
@@ -130,73 +148,101 @@ func runInstall(args []string) {
 	if env["HYP_UI_PATH"] == "" {
 		env["HYP_UI_PATH"] = "/" + strings.ToLower(randStr(12)) + "/"
 	}
-	env["HYP_UI_PORT"] = *ui
-	step("password and URL path → "+envPath, writeEnv(env))
 
+	step("binary → "+binPath, copySelf(binPath))
+	step("settings → "+envPath, writeEnv(env))
 	store, err := OpenStore(dataPath)
 	step("user database "+dataPath, err)
-	if fresh {
-		// Users imported earlier from a config that never ran are meaningless.
-		for _, u := range store.List() {
-			if u.Note == "imported" {
-				store.Delete(u.Name)
-			}
-		}
-	} else if store.Empty() {
-		importUsers(store, cfg) // while the config still has the old auth
+
+	// Hysteria config: only what the plan says. An existing setup keeps its
+	// port, obfs and certificate, so client links never change here.
+	var edit func(*yamlDoc) error
+	switch old := cfg; {
+	case pl.fresh:
+		edit = func(d *yamlDoc) error { return applyOpts(d, old, nil, opts, filepath.Dir(cfgPath)) }
+	case pl.connect:
+		// The config's current auth is Hysteria's own: keep it for -purge
+		// and bring its users over (existing panel users stay as they are).
+		importUsers(store, old)
+		edit = func(d *yamlDoc) error { return saveOwnAuth(d, authPath) }
 	}
-	// Ask now: the store file must be written before the panel service owns it.
-	created := askUsers(store, p)
+	cfg, changed := rewriteHyConfig(cfgPath, orig, pl.fresh, edit)
+	var created []User
+	if !pl.update {
+		created = askUsers(store, p) // before the service owns the file
+	}
 
-	changed, err := patchHyConfig(*hyCfg)
-	step("hysteria config: auth → panel, trafficStats (backup: "+*hyCfg+backupExt+")", err)
-
-	unit := strings.Replace(unitTemplate, "-host 203.0.113.10 -name AMS",
-		strings.TrimSpace(fmt.Sprintf("-host %s -hy-config %s %s %s", *host, *hyCfg, uiFlag(*ui), nameFlag(*name))), 1)
-	step("systemd unit → "+unitPath, os.WriteFile(unitPath, []byte(unit), 0o644))
-	if *ui != "off" {
-		_, _, err = panelCert(filepath.Dir(dataPath), *host)
+	step("systemd unit → "+unitPath, os.WriteFile(unitPath, []byte(unitFile), 0o644))
+	if port := env["HYP_UI_PORT"]; port != "off" {
+		_, _, err = panelCert(dataDir, env["HYP_HOST"])
 		step("panel HTTPS certificate", err)
-		ufwAllow(*ui + "/tcp")
+		ufwAllow(port + "/tcp")
 	}
 	step("systemd daemon-reload", systemctl("daemon-reload"))
-	step("start hy-panel", systemctl("enable", "hy-panel"))
-	step("restart hy-panel", systemctl("restart", "hy-panel")) // picks up a new binary on re-run
+	step("enable hy-panel", systemctl("enable", "hy-panel"))
+	step("restart hy-panel", systemctl("restart", "hy-panel")) // picks up the new binary
 
-	// Restart Hysteria if its config changed now, or a previous run stopped
-	// half-way (config patched, Hysteria still running the old one).
-	cfg, _ = loadHyConfig(*hyCfg)
-	sc := newStatsClient(cfg.TrafficStats.Listen, cfg.TrafficStats.Secret)
-	if _, err := sc.Online(); fresh || changed || err != nil {
-		step("restart "+*hySvc, systemctl("restart", *hySvc))
+	if pl.fresh {
+		ufwAllow(opts.firewallRules()...)
+		step("enable "+svc, systemctl("enable", svc))
 	}
-	var verr error
-	tries := 20
-	if opts.Domain != "" {
-		fmt.Println("… жду сертификат Let's Encrypt (до 2 минут)")
-		tries = 240
+	// Restart Hysteria only if its config changed now, or it does not run
+	// that config yet (a previous run stopped half-way, or Hysteria is down).
+	if changed || !reachable(cfg) {
+		step("restart "+svc, systemctl("restart", svc))
 	}
-	for i := 0; i < tries; i++ {
-		if _, verr = sc.Online(); verr == nil {
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	if verr != nil {
-		log.Fatalf("✗ Hysteria не поднялась: %v\n  смотри: journalctl -u %s -n 30 --no-pager\n  откат: hy-panel uninstall (удалит панель вместе с её данными)", verr, *hySvc)
-	}
-	step("hysteria trafficStats reachable", nil)
+	waitHysteria(cfg, svc, opts.Domain != "")
 
 	fmt.Println("\nГотово.")
-	printInfo()
-	ci, _ := readCert(cfg.TLS.Cert)
-	ech, _ := readECH(cfg.ECH.KeyPath)
-	ep := buildEndpoint(cfg, ci, ech, *host, "", "", *name)
+	printInfo(env)
+	ep := endpointFor(cfg, env)
 	for _, u := range created {
 		uri := ep.URI(u)
 		fmt.Printf("\n%s — ссылка для клиента:\n%s\n", u.Name, uri)
 		if q, err := qrcode.New(uri, qrcode.Low); err == nil {
 			fmt.Print(q.ToSmallString(false))
+		}
+	}
+}
+
+// saveOwnAuth keeps the config's own auth (and trafficStats, if any), so
+// `uninstall -purge` can give it back.
+func saveOwnAuth(d *yamlDoc, path string) error {
+	keep, _ := parseDoc(nil)
+	for _, k := range []string{"auth", "trafficStats"} {
+		if n := d.get(k); n != nil {
+			keep.set(k, n)
+		}
+	}
+	b, err := keep.bytes()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, b, 0o600)
+}
+
+func importUsers(s *Store, c *hyConfig) {
+	add := func(name, pass string) {
+		if _, ok := s.Get(strings.ToLower(name)); ok {
+			return // already in the panel
+		}
+		if _, err := s.Create(User{Name: name, Password: pass, Enabled: true, Note: "imported"}, true); err != nil {
+			fmt.Printf("  ✗ импорт %q: %v\n", name, err)
+		} else {
+			fmt.Printf("✓ пользователь %q перенесён из конфига Hysteria — его клиенты работают дальше\n", name)
+		}
+	}
+	switch c.Auth.Type {
+	case "password":
+		if c.Auth.Password != "" {
+			add("default", c.Auth.Password)
+		}
+	case "userpass":
+		for n, p := range c.Auth.UserPass {
+			add(n, p)
 		}
 	}
 }
@@ -231,36 +277,123 @@ func askUsers(store *Store, p *prompter) []User {
 	return out
 }
 
-// printInfo prints how to open the panel (the `hy-panel info` command).
-func printInfo() {
+// runUninstall removes the panel. Users and settings stay, so installing
+// again brings everything back with the same links; -purge deletes them too.
+// Hysteria's port, obfs and certificate are never touched.
+func runUninstall(args []string) {
+	fs := flag.NewFlagSet("uninstall", flag.ExitOnError)
+	yes := fs.Bool("y", false, "do not ask")
+	purge := fs.Bool("purge", false, "also delete users, panel password and URL")
+	fs.Parse(args)
+	needRoot("uninstall")
+	q := "Удалить панель? Пользователи и настройки сохранятся — после повторной установки всё вернётся как было"
+	if *purge {
+		q = "Удалить панель вместе с пользователями, паролем и адресом панели?"
+	}
+	if !*yes {
+		p := newPrompter()
+		if p.in == nil {
+			log.Fatal("✗ нет терминала: подтверди флагом -y")
+		}
+		if !p.yes(q, false) {
+			fmt.Println("Отменено.")
+			return
+		}
+	}
 	env := readEnv()
-	unit, _ := os.ReadFile(unitPath)
-	host, ui := unitArg(string(unit), "-host"), unitArg(string(unit), "-ui-listen")
-	if ui != "" {
-		_, fp, _ := panelCert(filepath.Dir(dataPath), host)
-		_, port, _ := net.SplitHostPort(ui)
+	cfgPath, svc := hyPaths(env)
+	systemctl("disable", "--now", "hy-panel")
+	os.Remove(unitPath)
+	systemctl("daemon-reload")
+	os.Remove(binPath)
+	fmt.Println("✓ панель удалена")
+	if !*purge {
+		fmt.Printf("Пользователи и настройки остались (%s, %s).\n", dataDir, envPath)
+		fmt.Println("Пока панели нет, Hysteria не пускает новых клиентов: проверять пароли некому.")
+		fmt.Println("Установить снова — всё вернётся как было:\n    " + installCmd)
+		return
+	}
+	if restored, err := restoreOwnAuth(cfgPath, authPath); err != nil {
+		fmt.Printf("  ✗ вернуть auth в %s: %v\n", cfgPath, err)
+	} else if restored {
+		step("restart "+svc, systemctl("restart", svc))
+		fmt.Println("✓ в конфиге Hysteria снова её собственный auth — прежние клиенты работают без панели")
+	} else {
+		fmt.Printf("• своего auth до панели у Hysteria не было: %s остаётся как есть\n", cfgPath)
+	}
+	step("remove "+dataDir, os.RemoveAll(dataDir))
+	step("remove "+envPath, os.RemoveAll(envPath))
+	fmt.Println("Удалено вместе с пользователями. Порт, obfs и сертификат Hysteria остались прежними.")
+}
+
+// restoreOwnAuth puts back the auth saved by saveOwnAuth and drops the
+// trafficStats the panel added. Returns false if nothing was saved.
+func restoreOwnAuth(cfgPath, savedPath string) (bool, error) {
+	saved, err := os.ReadFile(savedPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	keep, err := parseDoc(saved)
+	if err != nil {
+		return false, err
+	}
+	b, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return false, err
+	}
+	d, err := parseDoc(b)
+	if err != nil {
+		return false, err
+	}
+	for _, k := range []string{"auth", "trafficStats"} {
+		if n := keep.get(k); n != nil {
+			d.set(k, n)
+		} else {
+			d.del(k)
+		}
+	}
+	out, err := d.bytes()
+	if err != nil {
+		return false, err
+	}
+	return true, writeKeepingOwner(cfgPath, out)
+}
+
+// printInfo prints how to open the panel (the `hy-panel info` command).
+func printInfo(env map[string]string) {
+	host := env["HYP_HOST"]
+	if port := env["HYP_UI_PORT"]; port != "" && port != "off" {
+		_, fp, _ := panelCert(dataDir, host)
 		fmt.Printf("Панель:  https://%s%s\n", net.JoinHostPort(host, port), env["HYP_UI_PATH"])
 		fmt.Printf("         браузер предупредит о self-signed сертификате, это нормально\n         SHA-256: %s\n", fp)
 	} else {
 		fmt.Printf("Панель:  ssh -L 8090:%s root@%s, затем http://localhost:8090\n", panelAddr, host)
 	}
-	fmt.Printf("Пароль:  %s\n\nhy-panel info | passwd | uninstall\n", env["HYP_PASSWORD"])
+	fmt.Printf("Пароль:  %s\n\nhy-panel info | passwd | settings | uninstall\n", env["HYP_PASSWORD"])
 }
 
 // runPasswd sets a new random panel password (`hy-panel passwd`).
 func runPasswd() {
+	needRoot("passwd")
 	env := readEnv()
 	env["HYP_PASSWORD"] = randStr(16)
 	step("new password → "+envPath, writeEnv(env))
 	step("restart hy-panel", systemctl("restart", "hy-panel"))
-	printInfo()
+	printInfo(env)
 }
+
+// ---- /etc/hy-panel.env ----
+
+var envKeys = []string{"HYP_PASSWORD", "HYP_UI_PATH", "HYP_UI_PORT", "HYP_HOST", "HYP_NAME", "HYP_HY_CONFIG", "HYP_HY_SERVICE", "HYP_SUB_LISTEN", "HYP_SUB_URL"}
 
 func readEnv() map[string]string {
 	env := map[string]string{}
 	b, _ := os.ReadFile(envPath)
 	for _, l := range strings.Split(string(b), "\n") {
-		if k, v, ok := strings.Cut(strings.TrimSpace(l), "="); ok {
+		if k, v, ok := strings.Cut(strings.TrimSpace(l), "="); ok && !strings.HasPrefix(k, "#") {
 			env[k] = v
 		}
 	}
@@ -269,92 +402,43 @@ func readEnv() map[string]string {
 
 func writeEnv(env map[string]string) error {
 	var b strings.Builder
-	for _, k := range []string{"HYP_PASSWORD", "HYP_UI_PATH", "HYP_UI_PORT"} {
-		fmt.Fprintf(&b, "%s=%s\n", k, env[k])
-	}
-	return os.WriteFile(envPath, []byte(b.String()), 0o600)
-}
-
-// unitArg returns the value of a flag in the unit's ExecStart line.
-func unitArg(unit, flag string) string {
-	f := strings.Fields(unit)
-	for i := 0; i+1 < len(f); i++ {
-		if f[i] == flag {
-			return f[i+1]
+	for _, k := range envKeys {
+		if env[k] != "" {
+			fmt.Fprintf(&b, "%s=%s\n", k, env[k])
 		}
 	}
-	return ""
+	return writeAtomic(envPath, []byte(b.String()), 0o600)
 }
 
-// runUninstall restores the Hysteria config and removes the panel. It asks
-// whether to delete the panel's data too: kept, the next install picks up the
-// users, password and URL; deleted, the next install starts from scratch.
-func runUninstall(args []string) {
-	fs := flag.NewFlagSet("uninstall", flag.ExitOnError)
-	hyCfg := fs.String("hy-config", defaultCfg, "Hysteria 2 server config")
-	hySvc := fs.String("hy-service", "hysteria-server", "Hysteria systemd service")
-	yes := fs.Bool("y", false, "do not ask; keeps the data unless -purge")
-	purge := fs.Bool("purge", false, "also delete users, traffic, panel password and URL")
-	fs.Parse(args)
+// installed: this version's settings exist (v0.1 kept the host in its unit,
+// so its leftover env file has no HYP_HOST).
+func installed(env map[string]string) bool {
+	return env["HYP_PASSWORD"] != "" && env["HYP_HOST"] != ""
+}
+
+// hyPaths returns the Hysteria config path and service name.
+func hyPaths(env map[string]string) (cfg, svc string) {
+	return envOr(env, "HYP_HY_CONFIG", defaultCfg), envOr(env, "HYP_HY_SERVICE", defaultSvc)
+}
+
+func reachable(cfg *hyConfig) bool {
+	_, err := statsFor(cfg).Online()
+	return err == nil
+}
+
+func envOr(env map[string]string, key, def string) string {
+	if v := env[key]; v != "" {
+		return v
+	}
+	return def
+}
+
+// ---- system helpers ----
+
+func needRoot(cmd string) {
 	log.SetFlags(0)
 	if os.Geteuid() != 0 {
-		log.Fatal("run as root: sudo hy-panel uninstall")
-	}
-	dataDir := filepath.Dir(dataPath)
-	fmt.Printf("Будет удалена панель: программа и служба (%s, %s).\n", binPath, unitPath)
-	fmt.Println("Конфиг Hysteria вернётся к виду до установки панели; если его написала сама панель, он останется, пока не удалишь и данные.")
-	if !*yes {
-		p := newPrompter()
-		if p.in == nil {
-			log.Fatal("✗ нет терминала: подтверди удаление флагом -y (данные удалит только -purge)")
-		}
-		if !p.yes("Удалить панель?", false) {
-			fmt.Println("Отменено.")
-			return
-		}
-		if !*purge {
-			fmt.Printf("\nДанные панели:\n  пользователи и их трафик (%s)\n  пароль, адрес и порт панели (%s)\n", dataDir, envPath)
-			fmt.Println("Если их оставить, следующая установка подхватит пользователей, пароль и адрес.")
-			fmt.Println("Если удалить, следующая установка начнётся с нуля.")
-			*purge = p.yes("Удалить и данные?", false)
-		}
-	}
-	switch b, err := os.ReadFile(*hyCfg + backupExt); {
-	case err != nil:
-		fmt.Println("• бэкапа конфига Hysteria нет — конфиг не трогаю")
-	case unconfigured(b) && !*purge:
-		// Restoring the official template would only leave Hysteria broken; the
-		// config the panel wrote stays, so a later install keeps the client links.
-		fmt.Println("• конфиг Hysteria, написанный панелью, оставлен: следующая установка подхватит его, ссылки клиентов не изменятся;\n  до неё Hysteria не пускает клиентов: проверять пароли некому")
-	default:
-		cur, _ := os.ReadFile(*hyCfg)
-		step("restore "+*hyCfg+" from backup", writeKeepingOwner(*hyCfg, b))
-		os.Remove(*hyCfg + backupExt) // the next install backs up the config afresh
-		if strings.HasPrefix(string(cur), generatedMark) {
-			removePanelTLS(filepath.Dir(*hyCfg), b)
-		}
-		step("restart "+*hySvc, systemctl("restart", *hySvc))
-	}
-	systemctl("disable", "--now", "hy-panel")
-	os.Remove(unitPath)
-	systemctl("daemon-reload")
-	os.Remove(binPath)
-	if *purge {
-		step("remove "+dataDir, os.RemoveAll(dataDir))
-		step("remove "+envPath, os.RemoveAll(envPath))
-		fmt.Println("Удалено вместе с данными. Следующая установка начнётся с нуля: новые пароль, адрес и пользователи.")
-	} else {
-		fmt.Printf("Панель удалена, данные оставлены в %[1]s и %[2]s.\nСледующая установка подхватит пользователей, пароль и адрес.\nУдалить их позже: rm -rf %[1]s %[2]s\n", dataDir, envPath)
-	}
-}
-
-// removePanelTLS deletes the certificate and ACME state freshSetup created in
-// dir, unless the restored config still uses them.
-func removePanelTLS(dir string, restored []byte) {
-	for _, f := range []string{"server.crt", "server.key", "acme"} {
-		if p := filepath.Join(dir, f); !strings.Contains(string(restored), p) {
-			os.RemoveAll(p)
-		}
+		log.Fatalf("run as root: sudo hy-panel %s", cmd)
 	}
 }
 
@@ -365,26 +449,26 @@ func step(what string, err error) {
 	fmt.Println("✓", what)
 }
 
-func uiFlag(port string) string {
-	if port == "off" {
-		return ""
-	}
-	return "-ui-listen :" + port
-}
-
-func nameFlag(n string) string {
-	if n == "" {
-		return ""
-	}
-	return "-name " + n
-}
-
 func systemctl(args ...string) error {
 	out, err := exec.Command("systemctl", args...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("systemctl %s: %v %s", strings.Join(args, " "), err, bytes.TrimSpace(out))
 	}
 	return nil
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func unitExists(svc string) bool {
+	for _, d := range []string{"/etc/systemd/system/", "/lib/systemd/system/", "/usr/lib/systemd/system/"} {
+		if fileExists(d + svc + ".service") {
+			return true
+		}
+	}
+	return false
 }
 
 func copySelf(dst string) error {
@@ -395,23 +479,11 @@ func copySelf(dst string) error {
 	if src == dst {
 		return nil
 	}
-	in, err := os.Open(src)
+	b, err := os.ReadFile(src)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
-	tmp := dst + ".new"
-	out, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
-	if err != nil {
-		return err
-	}
-	if _, err = io.Copy(out, in); err == nil {
-		err = out.Close()
-	}
-	if err != nil {
-		return err
-	}
-	return os.Rename(tmp, dst) // works while the old binary is running
+	return writeAtomic(dst, b, 0o755) // rename: works while the old binary is running
 }
 
 var cgnat = &net.IPNet{IP: net.IP{100, 64, 0, 0}, Mask: net.CIDRMask(10, 32)}
@@ -430,113 +502,9 @@ func publicIP() string {
 	return ip.String()
 }
 
-// patchHyConfig points auth at the panel and adds trafficStats if missing,
-// editing the YAML tree so comments and other settings stay as they are.
-// Returns false if nothing had to change.
-func patchHyConfig(path string) (bool, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return false, err
-	}
-	var doc yaml.Node
-	if err := yaml.Unmarshal(b, &doc); err != nil {
-		return false, err
-	}
-	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
-		return false, errors.New("config is not a YAML mapping")
-	}
-	root := doc.Content[0]
-	changed := false
-
-	wantAuth := map[string]any{"type": "http", "http": map[string]any{"url": authURL}}
-	if cur := mapGet(root, "auth"); cur == nil || !sameAuth(cur) {
-		if err := mapSet(root, "auth", wantAuth); err != nil {
-			return false, err
-		}
-		changed = true
-	}
-	if ts := mapGet(root, "trafficstats"); ts == nil || mapGet(ts, "listen") == nil {
-		if err := mapSet(root, "trafficStats", map[string]any{"listen": statsAddr, "secret": randStr(32)}); err != nil {
-			return false, err
-		}
-		changed = true
-	}
-	if !changed {
-		return false, nil
-	}
-	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(2)
-	if err := enc.Encode(&doc); err != nil {
-		return false, err
-	}
-	if err := backupOnce(path, b); err != nil {
-		return false, err
-	}
-	return true, writeKeepingOwner(path, buf.Bytes())
-}
-
-func sameAuth(n *yaml.Node) bool {
-	t, h := mapGet(n, "type"), mapGet(n, "http")
-	if t == nil || !strings.EqualFold(t.Value, "http") || h == nil {
-		return false
-	}
-	u := mapGet(h, "url")
-	return u != nil && u.Value == authURL
-}
-
-// mapGet finds a key case-insensitively, as Hysteria/viper does.
-func mapGet(m *yaml.Node, key string) *yaml.Node {
-	if m == nil || m.Kind != yaml.MappingNode {
-		return nil
-	}
-	for i := 0; i+1 < len(m.Content); i += 2 {
-		if strings.EqualFold(m.Content[i].Value, key) {
-			return m.Content[i+1]
-		}
-	}
-	return nil
-}
-
-func mapSet(m *yaml.Node, key string, v any) error {
-	var val yaml.Node
-	if err := val.Encode(v); err != nil {
-		return err
-	}
-	for i := 0; i+1 < len(m.Content); i += 2 {
-		if strings.EqualFold(m.Content[i].Value, key) {
-			m.Content[i+1] = &val
-			return nil
-		}
-	}
-	m.Content = append(m.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, &val)
-	return nil
-}
-
-// writeKeepingOwner rewrites a file in place so owner and mode stay (Hysteria may run as its own user).
-func writeKeepingOwner(path string, b []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0)
-	if err != nil {
-		return err
-	}
-	return writeSync(f, b)
-}
-
-// writeSync writes b, fsyncs and closes f, returning the first error.
-func writeSync(f *os.File, b []byte) error {
-	_, err := f.Write(b)
-	if err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	return err
-}
-
 // backupOnce keeps the original of path: later runs don't overwrite it.
 func backupOnce(path string, b []byte) error {
-	if _, err := os.Stat(path + backupExt); !errors.Is(err, os.ErrNotExist) {
+	if fileExists(path + backupExt) {
 		return nil
 	}
 	return os.WriteFile(path+backupExt, b, 0o600)
