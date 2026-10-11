@@ -717,3 +717,17 @@ func TestKindErr(t *testing.T) {
 		}
 	}
 }
+
+func TestPrivateResponsesNotCached(t *testing.T) {
+	a := testApp(t, nil)
+	mustCreate(t, a.store, User{Name: "u"}, false)
+	for _, h := range []http.HandlerFunc{a.handleState, a.handleMihomo} {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.SetPathValue("name", "u")
+		w := httptest.NewRecorder()
+		h(w, r)
+		if w.Code != 200 || w.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("code %d, Cache-Control %q", w.Code, w.Header().Get("Cache-Control"))
+		}
+	}
+}

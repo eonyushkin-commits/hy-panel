@@ -302,10 +302,9 @@ func runUninstall(args []string) {
 	}
 	env := readEnv()
 	cfgPath, svc := hyPaths(env)
-	systemctl("disable", "--now", "hy-panel")
-	os.Remove(unitPath)
-	systemctl("daemon-reload")
-	os.Remove(binPath)
+	if err := removePanel(); err != nil {
+		log.Fatalf("✗ %v\nПанель удалена не полностью; пользователи и настройки не тронуты.", err)
+	}
 	fmt.Println("✓ панель удалена")
 	if !*purge {
 		fmt.Printf("Пользователи и настройки остались (%s, %s).\n", dataDir, envPath)
@@ -324,6 +323,22 @@ func runUninstall(args []string) {
 	step("remove "+dataDir, os.RemoveAll(dataDir))
 	step("remove "+envPath, os.RemoveAll(envPath))
 	fmt.Println("Удалено вместе с пользователями. Порт, obfs и сертификат Hysteria остались прежними.")
+}
+
+// removePanel stops the service and deletes its unit and binary. Things
+// already gone are fine, so a repeated uninstall succeeds.
+func removePanel() error {
+	var errs []error
+	if fileExists(unitPath) {
+		errs = append(errs, systemctl("disable", "--now", "hy-panel"))
+	}
+	for _, f := range []string{unitPath, binPath} {
+		if err := os.Remove(f); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, err)
+		}
+	}
+	errs = append(errs, systemctl("daemon-reload"))
+	return errors.Join(errs...)
 }
 
 // restoreOwnAuth puts back the auth saved by saveOwnAuth and drops the
