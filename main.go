@@ -62,6 +62,9 @@ func serve() {
 	if len(env["HYP_PASSWORD"]) < 8 {
 		log.Fatal("HYP_PASSWORD (8+ chars) is not set — run hy-panel install")
 	}
+	if err := checkEnv(env); err != nil {
+		log.Fatal(err)
+	}
 	store, err := OpenStore(dataPath)
 	if err != nil {
 		log.Fatal(err)

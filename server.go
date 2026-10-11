@@ -322,6 +322,7 @@ func (a *App) handleMihomo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
 	fmt.Fprint(w, a.ep.MihomoDoc(u))
 }
 
@@ -421,6 +422,7 @@ func (a *App) routes(withAuth bool) http.Handler {
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store") // carries passwords and links
 	json.NewEncoder(w).Encode(v)
 }
 

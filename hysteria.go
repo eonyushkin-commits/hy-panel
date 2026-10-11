@@ -150,20 +150,24 @@ func (c *hyConfig) obfs() (typ, pass string) {
 type cfgKind int
 
 const (
-	cfgNone    cfgKind = iota // missing, empty or the get.hy2.sh template: set up from scratch
-	cfgPanel                  // auth already points at this panel
-	cfgOwnAuth                // a working config with its own auth: connect the panel to it
-	cfgOther                  // auth http to some other backend (another panel)
-	cfgRealm                  // listen: realm:// — not supported
-	cfgBroken                 // not parseable
+	cfgNone       cfgKind = iota // missing, empty or the get.hy2.sh template: set up from scratch
+	cfgPanel                     // auth already points at this panel
+	cfgOwnAuth                   // a working config with its own auth: connect the panel to it
+	cfgOther                     // auth http to some other backend (another panel)
+	cfgRealm                     // listen: realm:// — not supported
+	cfgBroken                    // not parseable
+	cfgUnreadable                // exists but cannot be read (permissions, I/O)
 )
 
 // classify parses the config and decides by its content only — never by
 // whether Hysteria runs — so re-running install cannot rewrite a working
 // config. The returned config is never nil.
 func classify(b []byte, readErr error) (*hyConfig, cfgKind) {
-	if readErr != nil {
+	if errors.Is(readErr, os.ErrNotExist) {
 		return &hyConfig{}, cfgNone
+	}
+	if readErr != nil {
+		return &hyConfig{}, cfgUnreadable
 	}
 	var raw any
 	if err := yaml.Unmarshal(b, &raw); err != nil {
@@ -194,6 +198,8 @@ func kindErr(k cfgKind) error {
 	switch k {
 	case cfgBroken:
 		return errors.New("конфиг Hysteria не читается как YAML — поправь его вручную")
+	case cfgUnreadable:
+		return errors.New("конфиг Hysteria не открывается (права доступа или ошибка диска) — проверь файл")
 	case cfgRealm:
 		return errors.New("listen: realm:// (Realms) не поддерживается: ссылки вели бы в никуда")
 	case cfgOther:

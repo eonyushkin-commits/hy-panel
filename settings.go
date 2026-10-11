@@ -227,6 +227,9 @@ func runSettings() {
 	if !installed(env) {
 		log.Fatal("✗ панель не установлена: сначала hy-panel install")
 	}
+	if err := checkEnv(env); err != nil {
+		log.Fatal("✗ ", err)
+	}
 	cfgPath, svc := hyPaths(env)
 	b, err := os.ReadFile(cfgPath)
 	cfg, kind := classify(b, err)
@@ -258,6 +261,7 @@ func runSettings() {
 		fmt.Println("Отменено.")
 		return
 	}
+	noInterrupt()
 	// Links name the domain when there is one, else the server's IP.
 	if oldDomain := currentOpts(cfg).Domain; o.Domain != oldDomain {
 		if o.Domain != "" {
