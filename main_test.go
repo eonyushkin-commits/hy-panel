@@ -763,3 +763,47 @@ func TestCheckEnv(t *testing.T) {
 		}
 	}
 }
+
+func TestUserPasswordLength(t *testing.T) {
+	a := testApp(t, nil)
+	call := func(h http.HandlerFunc, body string) int {
+		r := httptest.NewRequest("POST", "/", strings.NewReader(body))
+		r.SetPathValue("name", "u")
+		w := httptest.NewRecorder()
+		h(w, r)
+		return w.Code
+	}
+	if c := call(a.handleCreate, `{"name":"u","password":"short"}`); c != 400 {
+		t.Fatalf("short password on create: %d", c)
+	}
+	if c := call(a.handleCreate, `{"name":"u","password":""}`); c != 200 {
+		t.Fatalf("generated password: %d", c)
+	}
+	if c := call(a.handlePatch, `{"password":"1234567"}`); c != 400 {
+		t.Fatalf("short password on patch: %d", c)
+	}
+	if c := call(a.handlePatch, `{"password":"12345678"}`); c != 200 {
+		t.Fatalf("8 chars: %d", c)
+	}
+}
+
+func TestLoopbackHost(t *testing.T) {
+	h := loopbackHost(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	for host, want := range map[string]int{
+		"127.0.0.1:8090":    200,
+		"localhost:9000":    200,
+		"[::1]:8090":        200,
+		"evil.example:8090": 403,
+		"evil.example":      403,
+	} {
+		for _, path := range []string{"/auth", "/api/state"} {
+			r := httptest.NewRequest("GET", path, nil)
+			r.Host = host
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code != want {
+				t.Errorf("%s %s: %d, want %d", host, path, w.Code, want)
+			}
+		}
+	}
+}

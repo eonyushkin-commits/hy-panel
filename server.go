@@ -32,6 +32,7 @@ type App struct {
 	password string
 	subBase  string // public base URL of the subscription listener, "" = disabled
 	cfgErr   string // Hysteria config unreadable: no links are handed out
+	warn     string // shown in the panel banner (set once before serving)
 	key      []byte
 	loginMu  sync.Mutex // serializes logins: ~1 guess/s total, not per connection
 	poke     chan struct{}
@@ -153,6 +154,9 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 	if a.cfgErr != "" {
 		problems = append(problems, a.cfgErr)
 	}
+	if a.warn != "" {
+		problems = append(problems, a.warn)
+	}
 	if a.hyErr != "" {
 		problems = append(problems, "Нет связи с trafficStats Hysteria: "+a.hyErr)
 	}
@@ -184,6 +188,15 @@ type userPatch struct {
 	Note         *string `json:"note"`
 	ResetTraffic bool    `json:"resetTraffic"`
 	NewKey       bool    `json:"newKey"` // new password + new subscription link
+}
+
+// check rejects a hand-set password too short for Hysteria, which also
+// accepts a bare password without the user name.
+func (p userPatch) check() error {
+	if p.Password != nil && *p.Password != "" && len(*p.Password) < 8 {
+		return errors.New("пароль: не короче 8 символов (пусто — сгенерировать)")
+	}
+	return nil
 }
 
 func (p userPatch) apply(u *User, now time.Time) {
@@ -223,9 +236,15 @@ func (p userPatch) apply(u *User, now time.Time) {
 	}
 }
 
-func decode(w http.ResponseWriter, r *http.Request, v any) bool {
-	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
-		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+func decode(w http.ResponseWriter, r *http.Request, p *userPatch) bool {
+	err := json.NewDecoder(r.Body).Decode(p)
+	if err != nil {
+		err = errors.New("bad request: " + err.Error())
+	} else {
+		err = p.check()
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return false
 	}
 	return true
@@ -434,6 +453,22 @@ func isLoopbackHost(h string) bool {
 	}
 	ip := net.ParseIP(h)
 	return ip != nil && ip.IsLoopback()
+}
+
+// loopbackHost guards the 127.0.0.1 listener against DNS rebinding: a page
+// in the admin's browser (SSH tunnel) reaches it under a foreign host name.
+func loopbackHost(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.Host)
+		if err != nil {
+			host = r.Host
+		}
+		if !isLoopbackHost(strings.Trim(host, "[]")) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 func isLoopbackReq(r *http.Request) bool {

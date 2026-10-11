@@ -107,6 +107,10 @@ func serve() {
 		if _, p, err := net.SplitHostPort(sub); err == nil && app.subBase == "" {
 			app.subBase = "http://" + net.JoinHostPort(app.ep.Host, p)
 		}
+		if strings.HasPrefix(app.subBase, "http://") {
+			app.warn = "Подписка идёт по открытому HTTP: пароли клиентов видны по пути. Поставь reverse-proxy с TLS и HYP_SUB_URL=https://…"
+			log.Print("WARN: subscriptions over plain HTTP expose client passwords — put a TLS reverse proxy in front and set HYP_SUB_URL=https://…")
+		}
 		mux := http.NewServeMux()
 		mux.HandleFunc("GET /sub/{token}", app.handleSub)
 		go app.keepServing("подписка "+sub, server(sub, mux).ListenAndServe)
@@ -126,7 +130,7 @@ func serve() {
 
 	go app.syncLoop(10 * time.Second)
 	log.Printf("auth backend on http://%s, users: %d", panelAddr, len(store.List()))
-	log.Fatal(server(panelAddr, app.routes(true)).ListenAndServe())
+	log.Fatal(server(panelAddr, loopbackHost(app.routes(true))).ListenAndServe())
 }
 
 // checkHyConfig warns about Hysteria settings that make the panel ineffective or exposed.
