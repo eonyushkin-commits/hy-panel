@@ -547,6 +547,10 @@ func TestClassify(t *testing.T) {
 	if _, k := classify(nil, os.ErrNotExist); k != cfgNone {
 		t.Error("missing file")
 	}
+	// An unreadable file is not a missing one: install must not write a new config over it.
+	if _, k := classify(nil, os.ErrPermission); k != cfgUnreadable {
+		t.Error("unreadable file")
+	}
 }
 
 // The install decision never depends on whether Hysteria runs (facts has no
@@ -706,7 +710,7 @@ func TestApplyOptsEditsInPlace(t *testing.T) {
 }
 
 func TestKindErr(t *testing.T) {
-	for _, k := range []cfgKind{cfgBroken, cfgRealm, cfgOther} {
+	for _, k := range []cfgKind{cfgBroken, cfgUnreadable, cfgRealm, cfgOther} {
 		if kindErr(k) == nil {
 			t.Errorf("kind %v must be refused", k)
 		}
@@ -728,6 +732,34 @@ func TestPrivateResponsesNotCached(t *testing.T) {
 		h(w, r)
 		if w.Code != 200 || w.Header().Get("Cache-Control") != "no-store" {
 			t.Fatalf("code %d, Cache-Control %q", w.Code, w.Header().Get("Cache-Control"))
+		}
+	}
+}
+
+func TestCheckEnv(t *testing.T) {
+	ok := []map[string]string{
+		{},
+		{"HYP_UI_PORT": "off", "HYP_HOST": "vpn.example.com", "HYP_UI_PATH": "/abc/"},
+		{"HYP_UI_PORT": "9443", "HYP_HOST": "203.0.113.7", "HYP_SUB_LISTEN": ":8443", "HYP_SUB_URL": "https://sub.example.com"},
+		{"HYP_HOST": "2001:db8::1"},
+	}
+	for _, env := range ok {
+		if err := checkEnv(env); err != nil {
+			t.Errorf("%v: %v", env, err)
+		}
+	}
+	bad := []map[string]string{
+		{"HYP_UI_PORT": "70000"},
+		{"HYP_UI_PORT": "abc"},
+		{"HYP_HOST": "https://x.com"},
+		{"HYP_HOST": "a b"},
+		{"HYP_UI_PATH": "abc"},
+		{"HYP_SUB_LISTEN": "8443"},
+		{"HYP_SUB_URL": "sub.example.com"},
+	}
+	for _, env := range bad {
+		if checkEnv(env) == nil {
+			t.Errorf("%v accepted", env)
 		}
 	}
 }

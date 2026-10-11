@@ -9,11 +9,14 @@ import (
 	"log"
 	mrand "math/rand/v2"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
 	qrcode "github.com/skip2/go-qrcode"
 )
@@ -115,6 +118,9 @@ func runInstall(args []string) {
 			log.Fatal("✗ не удалось определить публичный IP (NAT?) — укажи -host <IP или домен>")
 		}
 	}
+	if err := checkEnv(env); err != nil {
+		log.Fatal("✗ ", err)
+	}
 	switch {
 	case pl.fresh:
 		fmt.Printf("Hysteria (%s) ещё не настроена — настроим её.\n", svc)
@@ -171,6 +177,7 @@ func runInstall(args []string) {
 	if !pl.update {
 		created = askUsers(store, p) // before the service owns the file
 	}
+	noInterrupt()
 
 	step("systemd unit → "+unitPath, os.WriteFile(unitPath, []byte(unitFile), 0o644))
 	if port := env["HYP_UI_PORT"]; port != "off" {
@@ -182,16 +189,17 @@ func runInstall(args []string) {
 	step("enable hy-panel", systemctl("enable", "hy-panel"))
 	step("restart hy-panel", systemctl("restart", "hy-panel")) // picks up the new binary
 
-	if pl.fresh {
-		ufwAllow(opts.firewallRules()...)
-		step("enable "+svc, systemctl("enable", svc))
-	}
+	// Every run, not only the first: a run that stopped half-way is finished
+	// by the next one. Both are no-ops when already done.
+	hy := currentOpts(cfg)
+	ufwAllow(hy.firewallRules()...)
+	step("enable "+svc, systemctl("enable", svc))
 	// Restart Hysteria only if its config changed now, or it does not run
 	// that config yet (a previous run stopped half-way, or Hysteria is down).
 	if changed || !reachable(cfg) {
 		step("restart "+svc, systemctl("restart", svc))
 	}
-	waitHysteria(cfg, svc, opts.Domain != "")
+	waitHysteria(cfg, svc, hy.Domain != "")
 
 	fmt.Println("\nГотово.")
 	printInfo(env)
@@ -406,7 +414,12 @@ var envKeys = []string{"HYP_PASSWORD", "HYP_UI_PATH", "HYP_UI_PORT", "HYP_HOST",
 
 func readEnv() map[string]string {
 	env := map[string]string{}
-	b, _ := os.ReadFile(envPath)
+	b, err := os.ReadFile(envPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		// Never take an unreadable file for "not installed": install would
+		// then replace the panel password and URL.
+		log.Fatalf("✗ %v", err)
+	}
 	for _, l := range strings.Split(string(b), "\n") {
 		if k, v, ok := strings.Cut(strings.TrimSpace(l), "="); ok && !strings.HasPrefix(k, "#") {
 			env[k] = v
@@ -424,6 +437,58 @@ func writeEnv(env map[string]string) error {
 	}
 	return writeAtomic(envPath, []byte(b.String()), 0o600)
 }
+
+// checkEnv validates the settings before anything is written or served.
+func checkEnv(env map[string]string) error {
+	var errs []error
+	bad := func(k, why string) { errs = append(errs, fmt.Errorf("%s=%q: %s", k, env[k], why)) }
+	if p := env["HYP_UI_PORT"]; p != "" && p != "off" {
+		if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 {
+			bad("HYP_UI_PORT", "нужен порт 1–65535 или off")
+		}
+	}
+	if h := env["HYP_HOST"]; h != "" && net.ParseIP(strings.Trim(h, "[]")) == nil && !validHostname(h) {
+		bad("HYP_HOST", "нужен IP или домен")
+	}
+	if p := env["HYP_UI_PATH"]; p != "" && (!strings.HasPrefix(p, "/") || strings.ContainsAny(p, " ?#%")) {
+		bad("HYP_UI_PATH", "нужен путь вида /secret/")
+	}
+	if s := env["HYP_SUB_LISTEN"]; s != "" {
+		if _, _, err := net.SplitHostPort(s); err != nil {
+			bad("HYP_SUB_LISTEN", "нужен адрес вида :8443 или 127.0.0.1:8443")
+		}
+	}
+	if s := env["HYP_SUB_URL"]; s != "" {
+		if u, err := url.Parse(s); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			bad("HYP_SUB_URL", "нужен адрес вида https://sub.example.com")
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("%s: %w", envPath, err)
+	}
+	return nil
+}
+
+func validHostname(h string) bool {
+	if len(h) > 253 || h == "" {
+		return false
+	}
+	for _, l := range strings.Split(h, ".") {
+		if l == "" || len(l) > 63 || l[0] == '-' || l[len(l)-1] == '-' {
+			return false
+		}
+		for _, c := range l {
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// noInterrupt keeps Ctrl+C or a dropped SSH session from stopping a command
+// between writing the config and restarting the services.
+func noInterrupt() { signal.Ignore(os.Interrupt, syscall.SIGHUP) }
 
 // installed: this version's settings exist (v0.1 kept the host in its unit,
 // so its leftover env file has no HYP_HOST).
