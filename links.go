@@ -100,8 +100,11 @@ func (e Endpoint) URI(u User) string {
 	}
 	if e.Pin != "" {
 		// A self-signed cert fails normal verification; the pin replaces it.
+		// pinSHA256 is Hysteria's name; Xray-based apps (v2RayTun, Happ)
+		// dropped insecure and read the pin as pcs.
 		q.Set("insecure", "1")
 		q.Set("pinSHA256", e.Pin)
+		q.Set("pcs", e.Pin)
 	}
 	v := url.URL{
 		Scheme:   "hysteria2",

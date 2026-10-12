@@ -195,8 +195,15 @@ func TestURIAndMihomo(t *testing.T) {
 	q := v.Query()
 	if v.Scheme != "hysteria2" || v.User.Username()+":"+pw != "phone:Pw123456" || v.Host != "203.0.113.7:8443" ||
 		q.Get("obfs") != "salamander" || q.Get("obfs-password") != "o&b=f" || q.Get("sni") != "bing.com" ||
-		q.Get("insecure") != "1" || q.Get("pinSHA256") != ep.Pin || v.Fragment != "AMS-phone" {
+		q.Get("insecure") != "1" || q.Get("pinSHA256") != ep.Pin || q.Get("pcs") != ep.Pin || v.Fragment != "AMS-phone" {
 		t.Fatalf("URI: %s", ep.URI(u))
+	}
+
+	// A CA-issued cert: nothing to pin, nothing insecure.
+	ca := ep
+	ca.Pin = ""
+	if q := mustQuery(t, ca.URI(u)); q.Has("insecure") || q.Has("pinSHA256") || q.Has("pcs") {
+		t.Fatalf("CA URI: %s", ca.URI(u))
 	}
 
 	// A range: one port in the address (Xray apps cannot parse a range there),
@@ -806,4 +813,13 @@ func TestLoopbackHost(t *testing.T) {
 			}
 		}
 	}
+}
+
+func mustQuery(t *testing.T, raw string) url.Values {
+	t.Helper()
+	v, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v.Query()
 }
