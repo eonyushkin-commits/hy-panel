@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -121,9 +122,16 @@ func runInstall(args []string) {
 	if err := checkEnv(env); err != nil {
 		log.Fatal("✗ ", err)
 	}
+	if pl.connect && !keepOwnConfig(p, cfg) {
+		pl.connect, pl.fresh = false, true
+	}
 	switch {
 	case pl.fresh:
-		fmt.Printf("Hysteria (%s) ещё не настроена — настроим её.\n", svc)
+		if kind == cfgOwnAuth {
+			fmt.Printf("Настраиваю Hysteria (%s) заново.\n", svc)
+		} else {
+			fmt.Printf("Hysteria (%s) ещё не настроена — настроим её.\n", svc)
+		}
 		opts = askHyOpts(p, nil, *hyPort, env["HYP_HOST"])
 		if opts.Domain != "" && *host == "" {
 			env["HYP_HOST"] = opts.Domain
@@ -232,27 +240,58 @@ func saveOwnAuth(d *yamlDoc, path string) error {
 	return os.WriteFile(path, b, 0o600)
 }
 
-func importUsers(s *Store, c *hyConfig) {
-	add := func(name, pass string) {
-		if _, ok := s.Get(strings.ToLower(name)); ok {
-			return // already in the panel
-		}
-		if _, err := s.Create(User{Name: name, Password: pass, Enabled: true, Note: "imported"}, true); err != nil {
-			fmt.Printf("  ✗ импорт %q: %v\n", name, err)
-		} else {
-			fmt.Printf("✓ пользователь %q перенесён из конфига Hysteria — его клиенты работают дальше\n", name)
-		}
-	}
+// ownUsers lists the passwords of Hysteria's own auth by the user name they
+// get in the panel; a single auth.password becomes "default".
+func ownUsers(c *hyConfig) map[string]string {
 	switch c.Auth.Type {
 	case "password":
 		if c.Auth.Password != "" {
-			add("default", c.Auth.Password)
+			return map[string]string{"default": c.Auth.Password}
 		}
 	case "userpass":
-		for n, p := range c.Auth.UserPass {
-			add(n, p)
+		return c.Auth.UserPass
+	}
+	return nil
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func importUsers(s *Store, c *hyConfig) {
+	own := ownUsers(c)
+	for _, name := range sortedKeys(own) {
+		if _, ok := s.Get(strings.ToLower(name)); ok {
+			continue // already in the panel
+		}
+		if _, err := s.Create(User{Name: name, Password: own[name], Enabled: true, Note: "imported"}, true); err != nil {
+			fmt.Printf("  ✗ импорт %q: %v\n", name, err)
+		} else {
+			fmt.Printf("✓ пароль из конфига Hysteria перенесён как пользователь %q — его клиенты работают дальше\n", name)
 		}
 	}
+}
+
+// keepOwnConfig asks, on the first contact with a config that has its own
+// auth, whether to connect the panel to it or set Hysteria up anew. Without
+// a terminal it connects: nothing that works gets rewritten by a script.
+func keepOwnConfig(p *prompter, c *hyConfig) bool {
+	if p.in == nil {
+		return true
+	}
+	o := currentOpts(c)
+	names := sortedKeys(ownUsers(c))
+	fmt.Printf("\nНайден рабочий конфиг Hysteria со своими паролями: порт %s, %s, %s; пароли станут пользователями: %s.\n",
+		o.Port, o.obfsLabel(), o.certLabel(), strings.Join(names, ", "))
+	return p.choose("Что сделать с ним?", []string{
+		"подключить к нему панель — клиенты с этими паролями продолжат работать",
+		"настроить Hysteria заново (порт, обфускация, сертификат) — прежние ссылки перестанут работать",
+	}, 0) == 0
 }
 
 // askUsers offers to create users; without a terminal it creates nothing.
