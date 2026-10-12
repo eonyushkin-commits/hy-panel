@@ -195,8 +195,15 @@ func TestURIAndMihomo(t *testing.T) {
 	q := v.Query()
 	if v.Scheme != "hysteria2" || v.User.Username()+":"+pw != "phone:Pw123456" || v.Host != "203.0.113.7:8443" ||
 		q.Get("obfs") != "salamander" || q.Get("obfs-password") != "o&b=f" || q.Get("sni") != "bing.com" ||
-		q.Get("insecure") != "1" || q.Get("pinSHA256") != ep.Pin || v.Fragment != "AMS-phone" {
+		q.Get("insecure") != "1" || q.Get("pinSHA256") != ep.Pin || q.Get("pcs") != ep.Pin || v.Fragment != "AMS-phone" {
 		t.Fatalf("URI: %s", ep.URI(u))
+	}
+
+	// A CA-issued cert: nothing to pin, nothing insecure.
+	ca := ep
+	ca.Pin = ""
+	if q := mustQuery(t, ca.URI(u)); q.Has("insecure") || q.Has("pinSHA256") || q.Has("pcs") {
+		t.Fatalf("CA URI: %s", ca.URI(u))
 	}
 
 	// A range: one port in the address (Xray apps cannot parse a range there),
@@ -762,4 +769,57 @@ func TestCheckEnv(t *testing.T) {
 			t.Errorf("%v accepted", env)
 		}
 	}
+}
+
+func TestUserPasswordLength(t *testing.T) {
+	a := testApp(t, nil)
+	call := func(h http.HandlerFunc, body string) int {
+		r := httptest.NewRequest("POST", "/", strings.NewReader(body))
+		r.SetPathValue("name", "u")
+		w := httptest.NewRecorder()
+		h(w, r)
+		return w.Code
+	}
+	if c := call(a.handleCreate, `{"name":"u","password":"short"}`); c != 400 {
+		t.Fatalf("short password on create: %d", c)
+	}
+	if c := call(a.handleCreate, `{"name":"u","password":""}`); c != 200 {
+		t.Fatalf("generated password: %d", c)
+	}
+	if c := call(a.handlePatch, `{"password":"1234567"}`); c != 400 {
+		t.Fatalf("short password on patch: %d", c)
+	}
+	if c := call(a.handlePatch, `{"password":"12345678"}`); c != 200 {
+		t.Fatalf("8 chars: %d", c)
+	}
+}
+
+func TestLoopbackHost(t *testing.T) {
+	h := loopbackHost(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	for host, want := range map[string]int{
+		"127.0.0.1:8090":    200,
+		"localhost:9000":    200,
+		"[::1]:8090":        200,
+		"evil.example:8090": 403,
+		"evil.example":      403,
+	} {
+		for _, path := range []string{"/auth", "/api/state"} {
+			r := httptest.NewRequest("GET", path, nil)
+			r.Host = host
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code != want {
+				t.Errorf("%s %s: %d, want %d", host, path, w.Code, want)
+			}
+		}
+	}
+}
+
+func mustQuery(t *testing.T, raw string) url.Values {
+	t.Helper()
+	v, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v.Query()
 }
