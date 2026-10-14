@@ -152,6 +152,22 @@ func (e Endpoint) Mihomo(u User) string {
 // MihomoDoc is a complete mihomo proxy-provider document for u.
 func (e Endpoint) MihomoDoc(u User) string { return "proxies:\n" + e.Mihomo(u) }
 
+// MihomoProfile is a ready-to-use mihomo profile for u. Clash Verge, FlClash
+// and the like import a subscription as the whole profile: proxies alone, with
+// no rules, would send everything DIRECT. A proxy-provider reads only proxies:
+// from the same document, so one format serves both.
+func (e Endpoint) MihomoProfile(u User) string {
+	name := fmt.Sprintf("%q", e.remark(u))
+	return "mode: rule\n" + e.MihomoDoc(u) +
+		"proxy-groups:\n  - name: PROXY\n    type: select\n    proxies: [" + name + ", DIRECT]\n" +
+		"rules:\n" +
+		"  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve\n" +
+		"  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve\n" +
+		"  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve\n" +
+		"  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve\n" +
+		"  - MATCH,PROXY\n"
+}
+
 func subscriptionUserinfo(u User) string {
 	return fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", u.Up, u.Down, u.QuotaBytes, u.ExpiresAt)
 }

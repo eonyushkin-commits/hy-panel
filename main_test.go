@@ -223,6 +223,36 @@ func TestURIAndMihomo(t *testing.T) {
 	}
 }
 
+// Clash Verge and FlClash import the subscription as the whole profile, so it
+// must route through the proxy; mihomo's proxy-provider reads the same proxies.
+func TestSubMihomoProfile(t *testing.T) {
+	a := testApp(t, nil)
+	a.ep = Endpoint{Host: "203.0.113.7", Port: "443", Name: "AMS"}
+	u := mustCreate(t, a.store, User{Name: "mac"}, false)
+	for _, ua := range []string{"clash-verge/v2.4.2", "clash.meta/1.19.32", "FlClash/v0.8 clash-verge Platform/macos"} {
+		r := httptest.NewRequest("GET", "/sub/"+u.SubToken, nil)
+		r.SetPathValue("token", u.SubToken)
+		r.Header.Set("User-Agent", ua)
+		w := httptest.NewRecorder()
+		a.handleSub(w, r)
+		var doc struct {
+			Proxies     []map[string]any
+			ProxyGroups []struct {
+				Name    string
+				Proxies []string
+			} `yaml:"proxy-groups"`
+			Rules []string
+		}
+		if err := yaml.Unmarshal(w.Body.Bytes(), &doc); err != nil || w.Code != 200 {
+			t.Fatalf("%s: %d %v\n%s", ua, w.Code, err, w.Body)
+		}
+		if len(doc.Proxies) != 1 || doc.Proxies[0]["name"] != "AMS-mac" || len(doc.ProxyGroups) != 1 ||
+			doc.ProxyGroups[0].Proxies[0] != "AMS-mac" || doc.Rules[len(doc.Rules)-1] != "MATCH,"+doc.ProxyGroups[0].Name {
+			t.Fatalf("%s: profile does not route through the proxy:\n%s", ua, w.Body)
+		}
+	}
+}
+
 func TestLoadHyConfigKeysCaseInsensitive(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "c.yaml")
 	os.WriteFile(p, []byte(`

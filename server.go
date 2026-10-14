@@ -381,7 +381,7 @@ func (a *App) handleSub(w http.ResponseWriter, r *http.Request) {
 	}
 	switch format {
 	case "mihomo", "clash":
-		fmt.Fprint(w, a.ep.MihomoDoc(u))
+		fmt.Fprint(w, a.ep.MihomoProfile(u))
 	case "raw":
 		fmt.Fprintln(w, a.ep.URI(u))
 	default:

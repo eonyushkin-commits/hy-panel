@@ -15,7 +15,7 @@
 | Лимит устройств | H-UI: по `/online` при auth | так же |
 | Формат входа | Blitz: `user:pass` | `user:pass` (имя без учёта регистра, как в userpass Hysteria) или голый пароль: старые клиенты на `auth.type: password` работают |
 | Сертификат | Blitz хранит `pinSHA256` в своём конфиге | pin считается из `tls.cert`, только для self-signed (LE-сертификат ротируется, pin бы сломался). SNI берётся из DNS SAN: дефолтный `sniGuard: dns-san` в Hysteria рвёт рукопожатие без него |
-| Подписка | s-ui, H-UI: `Subscription-Userinfo`, `Profile-Title` | так же; base64-URI, для mihomo/clash по UA — YAML. Живёт на отдельном порту, остальная панель не торчит наружу |
+| Подписка | s-ui, H-UI: `Subscription-Userinfo`, `Profile-Title` | так же; base64-URI, для mihomo/clash по UA — готовый YAML-профиль (сервер, группа, `MATCH` в прокси, локальные сети напрямую): Clash Verge и FlClash импортируют его как есть, proxy-provider берёт из него `proxies`. Живёт на отдельном порту, остальная панель не торчит наружу |
 | ECH (Hysteria 2.10+) | — | `ech.keyPath` из конфига → `ech=` в ссылке и `ech-opts` для mihomo |
 | Диапазон портов (2.8+) | — | `listen: :20000-50000` сразу даёт ссылки с port hopping; для iptables-хоппинга есть `-port` |
 | Ежемесячный сброс | H-UI: cron на всех | флаг на пользователя, 1-го числа по времени сервера |
