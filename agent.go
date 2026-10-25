@@ -249,24 +249,27 @@ func systemStatus(latest func(proto string) (hyVersion, string)) map[string]prot
 // offers an update only when there is one. It asks a few times a day.
 type releases struct {
 	mu     sync.Mutex
-	latest map[string]hyVersion
-	errs   map[string]string
+	latest map[string]release
+}
+
+// release is what the last check learned: the version, or why it failed.
+type release struct {
+	v   hyVersion
+	err string
 }
 
 func (r *releases) get(proto string) (hyVersion, string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if v, ok := r.latest[proto]; ok {
-		return v, ""
-	}
-	if e, ok := r.errs[proto]; ok {
-		return hyVersion{}, e
+	if l, ok := r.latest[proto]; ok {
+		return l.v, l.err
 	}
 	return hyVersion{}, "ещё не проверено"
 }
 
 // check asks GitHub now, for both servers at once; false if it did not
-// answer for one of them.
+// answer for one of them. A failed check keeps the version learned before:
+// a hiccup is not a reason to forget it.
 func (r *releases) check() bool {
 	ok := true
 	var wg sync.WaitGroup
@@ -278,16 +281,17 @@ func (r *releases) check() bool {
 			r.mu.Lock()
 			defer r.mu.Unlock()
 			if r.latest == nil {
-				r.latest, r.errs = map[string]hyVersion{}, map[string]string{}
+				r.latest = map[string]release{}
 			}
 			if err != nil {
 				log.Printf("latest release: %v", err)
-				delete(r.latest, proto)
-				r.errs[proto], ok = err.Error(), false
+				ok = false
+				if r.latest[proto].v == (hyVersion{}) {
+					r.latest[proto] = release{err: err.Error()}
+				}
 				return
 			}
-			r.latest[proto] = v
-			delete(r.errs, proto)
+			r.latest[proto] = release{v: v}
 		}()
 	}
 	wg.Wait()
@@ -304,6 +308,17 @@ func (r *releases) watch() {
 	}
 }
 
+// releaseClient is shared by every check of the long-running agent: a
+// client per check would leave its idle connection behind each time.
+var releaseClient = &http.Client{Timeout: 20 * time.Second,
+	Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, IdleConnTimeout: time.Minute},
+	CheckRedirect: func(r *http.Request, via []*http.Request) error {
+		if strings.Contains(r.URL.Path, "/releases/tag/") || len(via) >= 5 {
+			return http.ErrUseLastResponse // the tag is in the URL: no need for the page
+		}
+		return nil
+	}}
+
 // latestRelease reads the version off where releases/latest leads, the
 // page the downloads come from (base is its download/ URL): GitHub sends it
 // to .../releases/tag/app/v2.6.1 (Hysteria) or .../tag/v25.9.11 (Xray),
@@ -311,14 +326,7 @@ func (r *releases) watch() {
 // no API rate limit.
 func latestRelease(base string) (hyVersion, error) {
 	page := strings.TrimSuffix(strings.TrimSuffix(base, "/"), "/download")
-	c := &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{Proxy: http.ProxyFromEnvironment},
-		CheckRedirect: func(r *http.Request, via []*http.Request) error {
-			if strings.Contains(r.URL.Path, "/releases/tag/") || len(via) >= 5 {
-				return http.ErrUseLastResponse // the tag is in the URL: no need for the page
-			}
-			return nil
-		}}
-	resp, err := c.Head(page)
+	resp, err := releaseClient.Head(page)
 	if err != nil {
 		return hyVersion{}, err
 	}
