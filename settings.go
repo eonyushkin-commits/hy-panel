@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"math/rand/v2"
@@ -8,6 +10,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -50,14 +53,55 @@ func (o hyOpts) obfsLabel() string {
 	return o.Obfs
 }
 
+// hyFlags are answers given on the command line (by the panel's agent):
+// a set flag skips its question.
+type hyFlags struct {
+	port, obfs, cert, domain, email string
+}
+
+func (f *hyFlags) register(fs *flag.FlagSet) {
+	fs.StringVar(&f.port, "port", "", "UDP port or range 20000-50000")
+	fs.StringVar(&f.obfs, "obfs", "", "salamander, gecko or none")
+	fs.StringVar(&f.cert, "cert", "", "self (self-signed) or acme (Let's Encrypt, needs -domain)")
+	fs.StringVar(&f.domain, "domain", "", "domain for Let's Encrypt")
+	fs.StringVar(&f.email, "email", "", "e-mail for Let's Encrypt")
+}
+
+func (f hyFlags) check() error {
+	var errs []error
+	if p := f.port; p != "" && p != hopRange {
+		if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 {
+			errs = append(errs, fmt.Errorf("-port %q: нужен порт 1–65535 или %s", p, hopRange))
+		}
+	}
+	if f.obfs != "" && !slices.Contains([]string{"salamander", "gecko", "none"}, f.obfs) {
+		errs = append(errs, fmt.Errorf("-obfs %q: salamander, gecko или none", f.obfs))
+	}
+	switch f.cert {
+	case "", "self":
+	case "acme":
+		if !validHostname(f.domain) || !strings.Contains(f.domain, ".") {
+			errs = append(errs, fmt.Errorf("-domain %q: нужен домен", f.domain))
+		}
+		if f.email != "" && !emailRe.MatchString(f.email) {
+			errs = append(errs, fmt.Errorf("-email %q: неверный адрес", f.email))
+		}
+	default:
+		errs = append(errs, fmt.Errorf("-cert %q: self или acme", f.cert))
+	}
+	return errors.Join(errs...)
+}
+
+var emailRe = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
+
 // askHyOpts asks for the Hysteria settings. With cur (the `settings`
-// command) every question starts with "keep as is"; port != "" (the -hy-port
-// flag) skips the port question.
-func askHyOpts(p *prompter, cur *hyOpts, port, host string) hyOpts {
+// command) every question starts with "keep as is"; a flag skips its question.
+func askHyOpts(p *prompter, cur *hyOpts, f hyFlags, host string) hyOpts {
 	var o hyOpts
 	if cur != nil {
 		o = *cur
 	}
+	port := f.port
 	// pick returns the chosen option; -1 = "keep as is".
 	pick := func(title string, opts []string, label string) int {
 		if cur == nil {
@@ -86,17 +130,36 @@ func askHyOpts(p *prompter, cur *hyOpts, port, host string) hyOpts {
 		}
 	}
 
-	switch pick("Обфускация:", []string{
-		"salamander — трафик не похож ни на что, рекомендую для РФ",
-		"gecko — salamander + дробление рукопожатия (экспериментальная, Hysteria ≥ 2.9.2, mihomo тоже нужен свежий)",
-		"без обфускации — выглядит как HTTP/3-сайт (маскировка под bing.com)",
-	}, o.obfsLabel()) {
-	case 0:
-		o.Obfs = "salamander"
-	case 1:
-		o.Obfs = needVersion(hyVersion{2, 9, 2}, "gecko", "gecko", "salamander")
-	case 2:
+	switch f.obfs {
+	case "none":
 		o.Obfs = ""
+	case "":
+		switch pick("Обфускация:", []string{
+			"salamander — трафик не похож ни на что, рекомендую для РФ",
+			"gecko — salamander + дробление рукопожатия (экспериментальная, Hysteria ≥ 2.9.2, mihomo тоже нужен свежий)",
+			"без обфускации — выглядит как HTTP/3-сайт (маскировка под bing.com)",
+		}, o.obfsLabel()) {
+		case 0:
+			o.Obfs = "salamander"
+		case 1:
+			o.Obfs = needVersion(hyVersion{2, 9, 2}, "gecko", "gecko", "salamander")
+		case 2:
+			o.Obfs = ""
+		}
+	default:
+		o.Obfs = f.obfs
+	}
+
+	switch f.cert {
+	case "self":
+		o.Domain, o.Email = "", ""
+		return o
+	case "acme":
+		o.Domain, o.Email = strings.ToLower(f.domain), f.email
+		if !resolvesTo(o.Domain, host) {
+			fmt.Printf("  ✗ %s не указывает на %s: Let's Encrypt не выдаст сертификат, пока A-запись не исправлена\n", o.Domain, host)
+		}
+		return o
 	}
 
 	switch pick("Сертификат:", []string{
@@ -221,8 +284,16 @@ func (o hyOpts) firewallRules() []string {
 
 // runSettings changes the port, obfuscation or certificate of the current
 // Hysteria config (`hy-panel settings`).
-func runSettings() {
+func runSettings(args []string) {
+	fs := flag.NewFlagSet("settings", flag.ExitOnError)
+	var f hyFlags
+	f.register(fs)
+	yes := fs.Bool("y", false, "apply without asking")
+	fs.Parse(args)
 	needRoot("settings")
+	if err := f.check(); err != nil {
+		log.Fatal("✗ ", err)
+	}
 	env := readEnv()
 	if !installed(env) {
 		log.Fatal("✗ панель не установлена: сначала hy-panel install")
@@ -240,8 +311,14 @@ func runSettings() {
 		log.Fatal("✗ пароли в конфиге Hysteria проверяет не панель — сначала hy-panel install")
 	}
 	p := newPrompter()
-	if p.in == nil {
-		log.Fatal("✗ нужен терминал: settings задаёт вопросы")
+	if *yes {
+		p.in = nil // flags and defaults only
+	} else if p.in == nil {
+		log.Fatal("✗ нужен терминал или -y: settings задаёт вопросы")
+	}
+	if !fileExists(hysteriaBin) || !unitExists(svc) {
+		noInterrupt()
+		step("hysteria: официальный релиз", fetchHysteria())
 	}
 	var cur *hyOpts
 	if kind != cfgNone {
@@ -251,13 +328,13 @@ func runSettings() {
 	} else {
 		fmt.Println("Конфиг Hysteria не настроен — настроим его.")
 	}
-	o := askHyOpts(p, cur, "", env["HYP_HOST"])
+	o := askHyOpts(p, cur, f, env["HYP_HOST"])
 	if cur != nil && *cur == o {
 		fmt.Println("\nНичего не изменилось.")
 		return
 	}
 	fmt.Printf("\nБудет: порт %s, %s, %s.\n", o.Port, o.obfsLabel(), o.certLabel())
-	if cur != nil && !p.yes("Ссылки и QR всех клиентов изменятся — им нужно будет выдать новые (подписка обновится сама). Применить?", false) {
+	if cur != nil && !*yes && !p.yes("Ссылки и QR всех клиентов изменятся — им нужно будет выдать новые (подписка обновится сама). Применить?", false) {
 		fmt.Println("Отменено.")
 		return
 	}
@@ -279,6 +356,7 @@ func runSettings() {
 	// away, whatever happens to Hysteria's restart below.
 	step("restart hy-panel", systemctl("restart", "hy-panel"))
 	ufwAllow(o.firewallRules()...)
+	step("enable "+svc, systemctl("enable", svc))
 	step("restart "+svc, systemctl("restart", svc))
 	waitHysteria(cfg, svc, o.Domain != "")
 	fmt.Println("\nГотово. Новые ссылки — в панели (кнопка QR).")

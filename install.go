@@ -52,9 +52,10 @@ type facts struct {
 
 // plan is what install does.
 type plan struct {
-	update  bool // re-run: panel settings and users stay, nothing is asked about them
-	fresh   bool // write the Hysteria config from the answers
-	connect bool // point the config's own auth at the panel, import its users
+	update     bool // re-run: panel settings and users stay, nothing is asked about them
+	fresh      bool // write the Hysteria config from the answers
+	connect    bool // point the config's own auth at the panel, import its users
+	noHysteria bool // panel only: protocols are installed from the panel
 }
 
 func planInstall(f facts) (plan, error) {
@@ -65,7 +66,8 @@ func planInstall(f facts) (plan, error) {
 	case f.v01:
 		return plan{}, errors.New("стоит прежняя hy-panel v0.1 — сначала удали её: hy-panel uninstall")
 	case f.kind == cfgNone && !f.hysteria:
-		return plan{}, errors.New("Hysteria не установлена. Сначала официальный установщик:\n    bash <(curl -fsSL https://get.hy2.sh/)\n  затем снова установи панель")
+		// A clean server: the panel and its agent; protocols are set up in the panel.
+		return plan{update: f.installed, noHysteria: true}, nil
 	case f.kind == cfgNone:
 		// No working config (first install, or it was deleted or reset to
 		// the template): ask and write one. Panel settings stay as they are.
@@ -126,13 +128,15 @@ func runInstall(args []string) {
 		pl.connect, pl.fresh = false, true
 	}
 	switch {
+	case pl.noHysteria && !pl.update:
+		fmt.Println("Ставлю панель. Протоколы (Hysteria 2, VLESS + Reality) — в панели, раздел «Протоколы».")
 	case pl.fresh:
 		if kind == cfgOwnAuth {
 			fmt.Printf("Настраиваю Hysteria (%s) заново.\n", svc)
 		} else {
 			fmt.Printf("Hysteria (%s) ещё не настроена — настроим её.\n", svc)
 		}
-		opts = askHyOpts(p, nil, *hyPort, env["HYP_HOST"])
+		opts = askHyOpts(p, nil, hyFlags{port: *hyPort}, env["HYP_HOST"])
 		if opts.Domain != "" && *host == "" {
 			env["HYP_HOST"] = opts.Domain
 		}
@@ -180,23 +184,35 @@ func runInstall(args []string) {
 		importUsers(store, old)
 		edit = func(d *yamlDoc) error { return saveOwnAuth(d, authPath) }
 	}
-	cfg, changed := rewriteHyConfig(cfgPath, orig, pl.fresh, edit)
+	changed := false
+	if !pl.noHysteria {
+		cfg, changed = rewriteHyConfig(cfgPath, orig, pl.fresh, edit)
+	}
 	var created []User
 	if !pl.update {
 		created = askUsers(store, p) // before the service owns the file
 	}
 	noInterrupt()
 
+	step("user "+panelUser, systemUser(panelUser, "", false))
 	step("systemd unit → "+unitPath, os.WriteFile(unitPath, []byte(unitFile), 0o644))
+	step("systemd unit → "+agentUnitPath, os.WriteFile(agentUnitPath, []byte(agentUnit), 0o644))
 	if port := env["HYP_UI_PORT"]; port != "off" {
 		_, _, err = panelCert(dataDir, env["HYP_HOST"])
 		step("panel HTTPS certificate", err)
 		ufwAllow(port + "/tcp")
 	}
 	step("systemd daemon-reload", systemctl("daemon-reload"))
+	step("enable hy-panel-agent", systemctl("enable", "hy-panel-agent"))
+	step("restart hy-panel-agent", systemctl("restart", "hy-panel-agent"))
 	step("enable hy-panel", systemctl("enable", "hy-panel"))
 	step("restart hy-panel", systemctl("restart", "hy-panel")) // picks up the new binary
 
+	if pl.noHysteria {
+		fmt.Println("\nГотово. Протоколы ставятся в панели: раздел «Протоколы».")
+		printInfo(env)
+		return
+	}
 	// Every run, not only the first: a run that stopped half-way is finished
 	// by the next one. Both are no-ops when already done.
 	hy := currentOpts(cfg)
@@ -221,8 +237,6 @@ func runInstall(args []string) {
 	}
 }
 
-// saveOwnAuth keeps the config's own auth (and trafficStats, if any), so
-// `uninstall -purge` can give it back.
 func saveOwnAuth(d *yamlDoc, path string) error {
 	keep, _ := parseDoc(nil)
 	for _, k := range []string{"auth", "trafficStats"} {
@@ -402,7 +416,10 @@ func removePanel() error {
 	if fileExists(unitPath) {
 		errs = append(errs, systemctl("disable", "--now", "hy-panel"))
 	}
-	for _, f := range []string{unitPath, binPath} {
+	if fileExists(agentUnitPath) {
+		errs = append(errs, systemctl("disable", "--now", "hy-panel-agent"))
+	}
+	for _, f := range []string{unitPath, agentUnitPath, binPath} {
 		if err := os.Remove(f); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, err)
 		}

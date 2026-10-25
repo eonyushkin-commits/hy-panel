@@ -26,7 +26,9 @@ const usage = `hy-panel — пользователи для Hysteria 2 и VLESS 
   hy-panel passwd      новый пароль панели
   hy-panel uninstall   удалить панель; пользователи и настройки сохранятся
                        (-purge — удалить и их)
+  hy-panel fetch hysteria|xray   поставить или обновить сервер протокола из официального релиза
   hy-panel serve       запуск панели (его делает systemd)
+  hy-panel agent       root-помощник панели (его делает systemd)
 `
 
 func main() {
@@ -42,7 +44,11 @@ func main() {
 	case "uninstall":
 		runUninstall(os.Args[2:])
 	case "settings":
-		runSettings()
+		runSettings(os.Args[2:])
+	case "fetch":
+		runFetch(os.Args[2:])
+	case "agent":
+		runAgent()
 	case "xray":
 		runXray(os.Args[2:])
 	case "info":
@@ -72,20 +78,31 @@ func serve() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	var hyOpts *hyOpts
+	// Hysteria is on once its config points at the panel; none or a fresh
+	// template means it is not set up yet (the panel's Protocols section does it).
 	cfgPath, _ := hyPaths(env)
-	cfg, err := loadHyConfig(cfgPath)
-	if err == nil && cfg.TrafficStats.Listen == "" {
-		err = fmt.Errorf("%s: no trafficStats — run hy-panel install", cfgPath)
-	}
-	cfgErr := ""
-	if err != nil {
+	b, readErr := os.ReadFile(cfgPath)
+	cfg, kind := classify(b, readErr)
+	cfgErr, hyOn := "", kind == cfgPanel
+	var warns []string
+	switch {
+	case kind == cfgOwnAuth:
+		warns = append(warns, "Hysteria работает со своими паролями, не через панель: подключи её командой hy-panel install")
+	case kindErr(kind) != nil:
 		// Keep /auth up, but hand out no links built from a config we could not read.
-		log.Printf("WARN: %v", err)
-		cfgErr = "конфиг Hysteria: " + err.Error()
-		cfg = &hyConfig{}
+		log.Printf("WARN: %s: %v", cfgPath, kindErr(kind))
+		cfgErr = "конфиг Hysteria: " + kindErr(kind).Error()
+	case hyOn && cfg.TrafficStats.Listen == "":
+		hyOn, cfgErr = false, "конфиг Hysteria: нет trafficStats — открой настройки Hysteria в панели"
 	}
-	checkHyConfig(cfg)
+	if hyOn {
+		checkHyConfig(cfg)
+	}
 	ep := endpointFor(cfg, env)
+	if !hyOn {
+		ep.Port = "" // no Hysteria links
+	}
 	// VLESS is on once hy-panel xray has set it up.
 	var xs *xraySetup
 	if xp := env["HYP_XRAY_CONFIG"]; xp != "" {
@@ -96,10 +113,23 @@ func serve() {
 			ep.Vless = &xs.Link
 		}
 	}
-	key := make([]byte, 32)
-	rand.Read(key)
-	app := newApp(store, newStatsClient(cfg.TrafficStats.Listen, cfg.TrafficStats.Secret), ep, env["HYP_PASSWORD"], key)
-	app.cfgErr = cfgErr
+	// The session key survives restarts: the panel restarts after every
+	// protocol change made in it, and must not log the admin out.
+	key, err := sessionKey(dataDir + "/session.key")
+	if err != nil {
+		log.Printf("WARN: session key: %v", err)
+		key = make([]byte, 32)
+		rand.Read(key)
+	}
+	var stats *statsClient
+	if hyOn {
+		stats = newStatsClient(cfg.TrafficStats.Listen, cfg.TrafficStats.Secret)
+		o := currentOpts(cfg)
+		hyOpts = &o
+	}
+	app := newApp(store, stats, ep, env["HYP_PASSWORD"], key)
+	app.cfgErr, app.warns, app.hyOpts = cfgErr, warns, hyOpts
+	app.agent = newAgentClient(agentSock)
 	log.Printf("hy-panel %s; links: %s:%s sni=%q obfs=%q pinned=%v ech=%v", version,
 		app.ep.Host, app.ep.Port, app.ep.SNI, app.ep.ObfsType, app.ep.Pin != "", app.ep.ECH != "")
 	if xs != nil {
@@ -177,4 +207,14 @@ func checkHyConfig(c *hyConfig) {
 	if h, _, _ := net.SplitHostPort(c.TrafficStats.Listen); h == "" || !isLoopbackHost(h) {
 		log.Printf("WARN: trafficStats.listen %q is reachable from outside — use 127.0.0.1:<port>", c.TrafficStats.Listen)
 	}
+}
+
+// sessionKey reads the key that signs panel sessions, creating it once.
+func sessionKey(path string) ([]byte, error) {
+	if b, err := os.ReadFile(path); err == nil && len(b) == 32 {
+		return b, nil
+	}
+	key := make([]byte, 32)
+	rand.Read(key)
+	return key, writeAtomic(path, key, 0o600)
 }

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -32,6 +33,8 @@ type App struct {
 	xray     *xrayAPI // nil: no VLESS
 	xrayTag  string   // the inbound whose users the panel keeps
 	xrayFlow string
+	hyOpts   *hyOpts // Hysteria's port, obfs, certificate; nil: not set up
+	agent    *agentClient
 	ep       Endpoint
 	password string
 	subBase  string   // public base URL of the subscription listener, "" = disabled
@@ -46,6 +49,8 @@ type App struct {
 	xonline   map[string]int // Xray: online client IPs per user
 	hyErr     string
 	xrayErr   string
+	hyFails   int // syncs failed in a row
+	xrayFails int
 	targetErr string
 	lastSync  time.Time
 	revoked   map[string]revocation // password changed: drop old sessions
@@ -448,6 +453,69 @@ func (a *App) handleSub(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ---- protocols: the agent installs and configures them ----
+
+func (a *App) handleSystem(w http.ResponseWriter, r *http.Request) {
+	st := map[string]protoStatus{}
+	agentErr := ""
+	if a.agent == nil {
+		agentErr = errNoAgent.Error()
+	} else if code, b, err := a.agent.do("GET", "/status", nil); err != nil {
+		agentErr = err.Error()
+	} else if code != http.StatusOK || json.Unmarshal(b, &st) != nil {
+		agentErr = "агент: " + strings.TrimSpace(string(b))
+	}
+	settings := map[string]any{}
+	if o := a.hyOpts; o != nil {
+		settings[protoHy2] = map[string]any{"port": o.Port, "obfs": o.Obfs, "domain": o.Domain, "email": o.Email}
+	}
+	if v := a.ep.Vless; v != nil {
+		settings[protoVless] = map[string]any{"port": v.Port, "sni": v.SNI, "network": v.Network}
+	}
+	writeJSON(w, map[string]any{"status": st, "settings": settings, "agentError": agentErr, "host": a.ep.Host})
+}
+
+// handleJobStart and handleJob pass the request to the agent, which checks
+// it and runs the job; its answer goes back as is.
+func (a *App) handleJobStart(w http.ResponseWriter, r *http.Request) {
+	a.proxyAgent(w, "POST", "/jobs", r.Body)
+}
+
+func (a *App) handleJob(w http.ResponseWriter, r *http.Request) { a.proxyAgent(w, "GET", "/job", nil) }
+
+func (a *App) proxyAgent(w http.ResponseWriter, method, path string, body io.Reader) {
+	if a.agent == nil {
+		http.Error(w, errNoAgent.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	code, b, err := a.agent.do(method, path, body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	if code != http.StatusOK {
+		http.Error(w, strings.TrimSpace(string(b)), code)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(b)
+}
+
+// handleCheckTarget checks a site for Reality before it is chosen.
+func (a *App) handleCheckTarget(w http.ResponseWriter, r *http.Request) {
+	d := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("domain")))
+	if !validHostname(d) || !strings.Contains(d, ".") {
+		http.Error(w, "нужен домен", http.StatusBadRequest)
+		return
+	}
+	res := map[string]any{"ok": true, "note": strings.TrimLeft(subnetNote(d, a.ep.Host), ",; ")}
+	if err := checkTarget(net.JoinHostPort(d, "443"), d); err != nil {
+		res["ok"], res["error"] = false, err.Error()
+	}
+	writeJSON(w, res)
+}
+
 // underPath serves h only below a secret path, like 3x-ui's web base path:
 // everything else is a plain 404, so scanners do not find the panel.
 func underPath(p string, h http.Handler) http.Handler {
@@ -485,6 +553,10 @@ func (a *App) routes(withAuth bool) http.Handler {
 	mux.HandleFunc("DELETE /api/users/{name}", a.guard(a.handleDelete))
 	mux.HandleFunc("GET /api/users/{name}/qr.png", a.guard(a.handleQR))
 	mux.HandleFunc("GET /api/users/{name}/mihomo", a.guard(a.handleMihomo))
+	mux.HandleFunc("GET /api/system", a.guard(a.handleSystem))
+	mux.HandleFunc("POST /api/system/jobs", a.guard(a.handleJobStart))
+	mux.HandleFunc("GET /api/system/job", a.guard(a.handleJob))
+	mux.HandleFunc("GET /api/system/check-target", a.guard(a.handleCheckTarget))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Content-Type", "text/html; charset=utf-8")

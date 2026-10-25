@@ -37,8 +37,8 @@ button.icon{padding:7px;color:var(--mute)}
 button.icon:hover{color:var(--fg)}
 button.icon.danger:hover{color:var(--bad);background:var(--bad-soft)}
 button.danger{color:var(--bad)}
-input,textarea{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:8px 10px;width:100%;transition:border-color .15s}
-input:hover,textarea:hover{border-color:var(--mute)}
+input,textarea,select{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:8px 10px;width:100%;transition:border-color .15s}
+input:hover,textarea:hover,select:hover{border-color:var(--mute)}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
 
 /* header */
@@ -73,7 +73,7 @@ input:hover,textarea:hover{border-color:var(--mute)}
 .av.on::after{background:var(--ok)}
 .body{flex:1;min-width:0}
 .name{font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.pill{font-size:11px;font-weight:550;padding:1px 8px;border-radius:99px}
+.pill{font-size:11px;font-weight:550;padding:1px 8px;border-radius:99px;background:var(--surface-2);color:var(--mute)}
 .ptag{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:550;padding:1px 8px;border-radius:99px;background:var(--surface-2);color:var(--fg)}
 .ptag::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--line)}
 .ptag.live{background:var(--ok-soft);color:var(--ok)}.ptag.live::before{background:var(--ok)}
@@ -90,6 +90,15 @@ input:hover,textarea:hover{border-color:var(--mute)}
 .sw::before{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0004;transition:transform .2s}
 .sw:checked{background:var(--ok)}.sw:checked::before{transform:translateX(14px)}
 .empty{padding:48px 16px;text-align:center}
+
+/* protocols */
+.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-bottom:16px}
+.pcard{padding:14px 16px;display:flex;flex-direction:column;gap:6px}
+.pcard .ph{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.pcard .pa{display:flex;gap:8px;margin-top:4px;flex-wrap:wrap}
+.pcard.soon{opacity:.6}
+.joblog{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface-2);border-radius:var(--r-sm);padding:10px 12px;max-height:50vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
+.check{font-size:12.5px;margin-top:6px}.check.ok{color:var(--ok)}.check.bad{color:var(--bad)}
 .empty button{margin-top:12px}
 
 /* dialogs */
@@ -179,6 +188,8 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
       <div class="card stat"><span class="mute small">Трафик</span><b id="stTraffic">0</b><span class="mute small" id="stTrafficSub"></span></div>
     </div>
 
+    <div class="pgrid" id="pgrid"></div>
+
     <div class="bar-tools">
       <label class="search"><svg class="i"><use href="#i-search"/></svg><input id="q" type="search" placeholder="Поиск по имени или заметке" aria-label="Поиск"></label>
       <div class="seg" id="filter">
@@ -223,6 +234,53 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
   </div>
 </dialog>
 
+<dialog id="hyDlg">
+  <form method="dialog" id="hyForm" class="dlg">
+    <div class="dlg-h"><h2>Hysteria 2</h2><button type="button" class="icon ghost" onclick="$('#hyDlg').close()" aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <div class="grid">
+      <label><span>Порт (UDP)</span><select name="portMode">
+        <option value="443">443 — как обычный HTTPS/QUIC</option>
+        <option value="custom">свой</option>
+        <option value="20000-50000">диапазон 20000-50000 (port hopping)</option></select></label>
+      <label id="hyPortWrap"><span>Свой порт</span><input name="port" type="number" min="1" max="65535"></label>
+      <label class="full"><span>Обфускация</span><select name="obfs">
+        <option value="salamander">salamander — трафик не похож ни на что (рекомендую)</option>
+        <option value="gecko">gecko — salamander + дробление рукопожатия (экспериментальная)</option>
+        <option value="none">без обфускации — выглядит как HTTP/3-сайт</option></select></label>
+      <label class="full"><span>Сертификат</span><select name="cert">
+        <option value="self">self-signed — домен не нужен, клиенты сверяют отпечаток</option>
+        <option value="acme">свой домен, Let's Encrypt</option></select></label>
+      <label id="hyDomainWrap"><span>Домен (A-запись на этот сервер)</span><input name="domain" autocapitalize="off"></label>
+      <label id="hyEmailWrap"><span>E-mail для Let's Encrypt</span><input name="email" type="email" placeholder="необязательно"></label>
+    </div>
+    <div class="mute small hint" id="hyHint"></div>
+    <div class="row"><button type="button" onclick="$('#hyDlg').close()">Отмена</button><button class="pri" value="ok" id="hyBtn">Установить</button></div>
+  </form>
+</dialog>
+
+<dialog id="vlDlg">
+  <form method="dialog" id="vlForm" class="dlg">
+    <div class="dlg-h"><h2>VLESS + Reality</h2><button type="button" class="icon ghost" onclick="$('#vlDlg').close()" aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <div class="grid">
+      <label id="vlPortWrap" class="full"><span>Порт (TCP)</span><input name="port" type="number" min="1" max="65535" value="443"></label>
+      <label class="full"><span>Сайт для маскировки — чужой сайт с TLS 1.3 и HTTP/2, лучше из той же подсети /24, что и сервер</span>
+        <div style="display:flex;gap:8px"><input name="target" placeholder="www.example.com" autocapitalize="off" required><button type="button" onclick="checkSite()">Проверить</button></div>
+        <div class="check" id="vlCheck"></div></label>
+    </div>
+    <div class="mute small hint" id="vlHint"></div>
+    <div class="row"><button type="button" onclick="$('#vlDlg').close()">Отмена</button><button class="pri" value="ok" id="vlBtn">Установить</button></div>
+  </form>
+</dialog>
+
+<dialog id="jobDlg">
+  <div class="dlg">
+    <div class="dlg-h"><h2 id="jobTitle"></h2><button class="icon ghost" onclick="$('#jobDlg').close()" aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <div class="mute small" id="jobState" style="margin-bottom:10px"></div>
+    <pre class="joblog" id="jobLog"></pre>
+    <div class="row"><button class="pri" onclick="$('#jobDlg').close()">Закрыть</button></div>
+  </div>
+</dialog>
+
 <div id="toasts" aria-live="polite"></div>
 
 <script>
@@ -263,7 +321,7 @@ async function api(method, path, body) {
 function showLogin() { $('#app').hidden = true; $('#login').hidden = false; $('#login input').focus(); }
 $('#login form').onsubmit = async e => {
   e.preventDefault();
-  try { await api('POST', 'api/login', {password: e.target.password.value}); e.target.reset(); load(); } catch {}
+  try { await api('POST', 'api/login', {password: e.target.password.value}); e.target.reset(); load(); loadSystem(); } catch {}
 };
 async function logout() { await api('POST', 'api/logout'); showLogin(); }
 
@@ -271,14 +329,130 @@ async function load() {
   try { S = await api('GET', 'api/state'); } catch { return; }
   $('#login').hidden = true; $('#app').hidden = false;
   const sv = S.server, vl = sv.vless;
-  $('#title').textContent = vl ? 'Hysteria 2 · VLESS' : 'Hysteria 2';
-  $('#srv').innerHTML = [`${sv.host}:${sv.port}`, sv.obfs, sv.pinned && 'self-signed · pin', sv.sni && 'sni ' + sv.sni,
+  $('#title').textContent = protos().map(p => p.title).join(' · ') || 'hy-panel';
+  const hy = protos().some(p => p.id === 'hysteria2');
+  $('#srv').innerHTML = [hy ? `${sv.host}:${sv.port}` : sv.host, hy && sv.obfs, hy && sv.pinned && 'self-signed · pin', hy && sv.sni && 'sni ' + sv.sni,
     vl && `vless :${vl.port}/tcp · ${vl.sni}`]
     .filter(Boolean).map(c => `<span class="chip">${esc(c)}</span>`).join('');
   $('#hyerr').hidden = !S.hyError;
   $('#hyerr').innerHTML = icon('alert') + '<span>' + esc(S.hyError) + '</span>';
   stats();
   render();
+}
+
+// ---- protocols: installed and configured by the agent ----
+let SYS = null;
+async function loadSystem() {
+  try { SYS = await api('GET', 'api/system'); } catch { return; }
+  renderProtocols();
+}
+const PROTOS = [
+  {id: 'hysteria2', title: 'Hysteria 2', what: 'UDP, быстрый. Основной протокол.', dlg: openHy},
+  {id: 'vless', title: 'VLESS + Reality', what: 'TCP, снаружи — обычный HTTPS-сайт. Запасной канал, если режут UDP.', dlg: openVl},
+  {id: 'awg', title: 'AmneziaWG 3.1', what: 'Скоро: следующий этап.', soon: true},
+];
+function renderProtocols() {
+  const st = SYS.status || {}, set = SYS.settings || {};
+  $('#pgrid').innerHTML = PROTOS.map(p => {
+    const s = st[p.id] || {}, c = set[p.id];
+    let pill = '<span class="pill">не установлен</span>', info = esc(p.what), btns = '';
+    if (p.soon) return `<div class="card pcard soon"><div class="ph"><b>${p.title}</b></div><div class="mute small">${info}</div></div>`;
+    if (c) {
+      pill = s.active ? '<span class="pill ok">работает</span>' : '<span class="pill bad">остановлен</span>';
+      info = p.id === 'hysteria2'
+        ? `UDP ${esc(c.port)} · ${esc(c.obfs || 'без обфускации')} · ${c.domain ? esc(c.domain) + ' (Let\'s Encrypt)' : 'self-signed'}`
+        : `TCP ${esc(c.port)} · ${esc(c.network)} · сайт ${esc(c.sni)}`;
+      btns = `<button data-p="${p.id}" data-do="cfg">Настройки</button>`;
+    } else if (s.installed) {
+      pill = '<span class="pill warn">не настроен</span>';
+      btns = `<button class="pri" data-p="${p.id}" data-do="cfg">Настроить</button>`;
+    } else {
+      btns = `<button class="pri" data-p="${p.id}" data-do="cfg">Установить</button>`;
+    }
+    if (s.installed) btns += `<button class="ghost" data-p="${p.id}" data-do="update" title="Скачать последний официальный релиз">Обновить${/^\d/.test(s.version || '') ? ' (' + esc(s.version) + ')' : ''}</button>`;
+    return `<div class="card pcard"><div class="ph"><b>${p.title}</b>${pill}</div><div class="mute small">${info}</div><div class="pa">${btns}</div></div>`;
+  }).join('') + (SYS.agentError ? `<div class="err" style="grid-column:1/-1;margin:0">${icon('alert')}<span>${esc(SYS.agentError)}</span></div>` : '');
+}
+$('#pgrid').onclick = e => {
+  const b = e.target.closest('[data-do]'); if (!b) return;
+  const p = PROTOS.find(x => x.id === b.dataset.p);
+  if (b.dataset.do === 'cfg') p.dlg();
+  else if (confirm(`Скачать последний релиз ${p.title} и перезапустить его? Подключения прервутся на секунду.`))
+    startJob('update-' + (p.id === 'vless' ? 'xray' : 'hysteria'), {}, 'Обновление ' + p.title);
+};
+
+function openHy() {
+  const f = $('#hyForm'), c = SYS.settings.hysteria2;
+  const port = c ? c.port : '443';
+  f.portMode.value = ['443', '20000-50000'].includes(port) ? port : 'custom';
+  f.port.value = f.portMode.value === 'custom' ? port : '';
+  f.obfs.value = c ? (c.obfs || 'none') : 'salamander';
+  f.cert.value = c && c.domain ? 'acme' : 'self';
+  f.domain.value = c ? c.domain : ''; f.email.value = c ? c.email : '';
+  $('#hyBtn').textContent = c ? 'Применить' : 'Установить';
+  $('#hyHint').textContent = c ? 'Ссылки и QR клиентов изменятся: подписка обновится сама, остальным нужно выдать новые.' : 'Панель скачает официальный релиз Hysteria (с проверкой SHA-256), напишет конфиг и запустит службу.';
+  hyToggle(); $('#hyDlg').returnValue = ''; $('#hyDlg').showModal();
+}
+function hyToggle() {
+  const f = $('#hyForm');
+  $('#hyPortWrap').hidden = f.portMode.value !== 'custom'; f.port.required = !$('#hyPortWrap').hidden;
+  $('#hyDomainWrap').hidden = $('#hyEmailWrap').hidden = f.cert.value !== 'acme'; f.domain.required = f.cert.value === 'acme';
+}
+$('#hyForm').onchange = hyToggle;
+$('#hyDlg').onclose = () => {
+  if ($('#hyDlg').returnValue !== 'ok') return;
+  const f = $('#hyForm');
+  const params = {port: f.portMode.value === 'custom' ? f.port.value : f.portMode.value, obfs: f.obfs.value, cert: f.cert.value};
+  if (f.cert.value === 'acme') { params.domain = f.domain.value.trim().toLowerCase(); params.email = f.email.value.trim(); }
+  startJob('hysteria', params, SYS.settings.hysteria2 ? 'Настройка Hysteria 2' : 'Установка Hysteria 2');
+};
+
+function openVl() {
+  const f = $('#vlForm'), c = SYS.settings.vless;
+  $('#vlPortWrap').hidden = !!c; f.port.value = c ? c.port : 443;
+  f.target.value = ''; f.target.placeholder = c ? c.sni : 'www.example.com';
+  $('#vlCheck').textContent = '';
+  $('#vlBtn').textContent = c ? 'Сменить сайт' : 'Установить';
+  $('#vlHint').textContent = c
+    ? `Сейчас сайт — ${c.sni}. Смени, если он перестал отвечать: в ссылках VLESS изменится sni, подписка обновится сама.`
+    : 'Панель скачает официальный релиз Xray (с проверкой SHA-256), сделает ключи Reality и запустит службу. Если Xray уже настроен вручную, панель подключится к нему, сохранив ключи и клиентов.';
+  $('#vlDlg').returnValue = ''; $('#vlDlg').showModal();
+}
+async function checkSite() {
+  const d = $('#vlForm').target.value.trim().toLowerCase(), el = $('#vlCheck');
+  if (!d) return;
+  el.className = 'check'; el.textContent = 'Проверяю…';
+  try {
+    const r = await api('GET', 'api/system/check-target?domain=' + encodeURIComponent(d));
+    el.className = 'check ' + (r.ok ? 'ok' : 'bad');
+    el.textContent = r.ok ? `✓ TLS 1.3, HTTP/2. ${r.note.charAt(0).toUpperCase() + r.note.slice(1)}.` : `✗ ${r.error}`;
+  } catch { el.textContent = ''; }
+}
+$('#vlDlg').onclose = () => {
+  if ($('#vlDlg').returnValue !== 'ok') return;
+  const f = $('#vlForm'), c = SYS.settings.vless;
+  const params = {target: f.target.value.trim().toLowerCase()};
+  if (!c) params.port = String(f.port.value);
+  startJob('vless', params, c ? 'Смена сайта для маскировки' : 'Установка VLESS + Reality');
+};
+
+// startJob asks the agent to run a job and follows its log. The panel
+// restarts at the end of most jobs: polling errors only mean "wait".
+async function startJob(action, params, title) {
+  try { await api('POST', 'api/system/jobs', {action, params}); } catch { return; }
+  $('#jobTitle').textContent = title; $('#jobLog').textContent = ''; $('#jobState').textContent = 'Идёт…';
+  if (!$('#jobDlg').open) $('#jobDlg').showModal();
+  for (;;) {
+    await new Promise(r => setTimeout(r, 1000));
+    let j;
+    try { const r = await fetch('api/system/job'); if (!r.ok) continue; j = await r.json(); } catch { continue; }
+    const log = $('#jobLog'), end = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
+    log.textContent = j.log; if (end) log.scrollTop = log.scrollHeight;
+    if (j.running) continue;
+    $('#jobState').innerHTML = j.ok ? '<span class="pill ok">готово</span>' : '<span class="pill bad">ошибка — подробности в логе</span>';
+    await load(); await loadSystem();
+    return;
+  }
 }
 
 // Hysteria counts sessions, Xray client IPs: shown apart, per protocol.
@@ -479,7 +653,8 @@ async function copyShare() {
   toast('Скопировано');
 }
 
-load();
+load(); loadSystem();
+setInterval(() => { if (!document.hidden && !$('#app').hidden && !document.querySelector('dialog[open]')) loadSystem(); }, 30000);
 // The server syncs every 10s; polling faster or in a hidden tab only repeats data.
 setInterval(() => { if (!document.hidden && !$('#app').hidden && !document.querySelector('dialog[open]')) load(); }, 10000);
 </script>

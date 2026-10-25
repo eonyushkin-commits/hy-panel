@@ -344,6 +344,7 @@ func runXray(args []string) {
 	svcFlag := fs.String("service", "", "Xray systemd service (default "+defaultXraySvc+")")
 	target := fs.String("target", "", "site Reality impersonates (SNI), e.g. www.example.com")
 	port := fs.String("port", "", "TCP port for VLESS (default: ask, 443)")
+	yes := fs.Bool("y", false, "no questions: flags and defaults only")
 	fs.Parse(args)
 	needRoot("xray")
 	env := readEnv()
@@ -366,15 +367,21 @@ func runXray(args []string) {
 		env["HYP_XRAY_SERVICE"] = *svcFlag
 	}
 	cfgPath, svc := xrayPaths(env)
+	if *target != "" && !validHostname(strings.TrimSuffix(*target, ".")) {
+		log.Fatalf("✗ -target %q: нужен домен", *target)
+	}
 	if !fileExists(xrayBin) || !unitExists(svc) {
-		log.Fatalf("✗ Xray не установлен. Сначала официальный установщик:\n    %s\n  затем снова hy-panel xray", xrayInstallCmd)
+		step("xray: официальный релиз", fetchXray())
 	}
 	if v := xrayVersion(); !v.atLeast(minXray) {
-		log.Fatalf("✗ нужен Xray ≥ %s, установлен %s — обнови его тем же установщиком:\n    %s", minXray, v, xrayInstallCmd)
+		log.Fatalf("✗ нужен Xray ≥ %s, установлен %s — обнови: hy-panel fetch xray", minXray, v)
 	}
 	orig, readErr := os.ReadFile(cfgPath)
 	d, kind := classifyXray(orig, readErr)
 	p := newPrompter()
+	if *yes {
+		p.in = nil
+	}
 	switch kind {
 	case xrayUnreadable:
 		log.Fatalf("✗ %v", readErr)

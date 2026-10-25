@@ -424,6 +424,10 @@ func TestTrafficKeptWhenOnlineFails(t *testing.T) {
 	f.send("u")
 	f.failOn = true
 	a.syncOnce(time.Now())
+	if a.hyErr != "" {
+		t.Fatal("one failed sync already shown")
+	}
+	a.syncOnce(time.Now())
 	if u, _ := a.store.Get("u"); u.Down != 1000 {
 		t.Fatalf("traffic lost when /online failed: %+v", u)
 	}
@@ -569,7 +573,8 @@ func TestPlanInstall(t *testing.T) {
 		err  bool
 	}{
 		{facts{kind: cfgNone, hysteria: true}, plan{fresh: true}, false},
-		{facts{kind: cfgNone}, plan{}, true}, // no Hysteria installed
+		{facts{kind: cfgNone}, plan{noHysteria: true}, false},                                // clean server: panel only, protocols from the panel
+		{facts{installed: true, kind: cfgNone}, plan{update: true, noHysteria: true}, false}, // update of a panel without Hysteria
 		{facts{kind: cfgOwnAuth, hysteria: true}, plan{connect: true}, false},
 		{facts{kind: cfgPanel, hysteria: true}, plan{}, false}, // after uninstall -purge: keep port/obfs/cert
 		{facts{installed: true, kind: cfgPanel}, plan{update: true}, false},

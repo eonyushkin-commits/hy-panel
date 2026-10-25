@@ -300,6 +300,7 @@ func TestXrayDownKeepsHysteria(t *testing.T) {
 	hy.connect("u")
 	hy.send("u")
 	a.syncOnce(time.Now())
+	a.syncOnce(time.Now())
 	if u, _ := a.store.Get("u"); u.Down != 1000 || a.hyErr != "" || !strings.Contains(a.xrayErr, "unavailable") {
 		t.Fatalf("%+v hyErr=%q xrayErr=%q", u, a.hyErr, a.xrayErr)
 	}

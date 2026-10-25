@@ -102,8 +102,12 @@ func (a *App) requestSync() {
 
 func (a *App) syncOnce(now time.Time) {
 	// Counters are cleared on read: account them even if /online fails below.
-	tr, errT := a.stats.TrafficAndClear()
-	on, errO := a.stats.Online()
+	var tr map[string]trafficEntry
+	on, errT, errO := map[string]int{}, error(nil), error(nil)
+	if a.stats != nil { // nil: Hysteria is not set up
+		tr, errT = a.stats.TrafficAndClear()
+		on, errO = a.stats.Online()
+	}
 	xtr, xon, errX := a.xrayStats()
 	a.store.Tick(now, addTraffic(tr, xtr), joinOnline(on, xon))
 	if a.xray != nil {
@@ -118,17 +122,24 @@ func (a *App) syncOnce(now time.Time) {
 	if xon != nil {
 		a.xonline = xon
 	}
-	a.hyErr, a.xrayErr = "", ""
-	if err != nil {
-		a.hyErr = err.Error()
-	}
-	if errX != nil {
-		a.xrayErr = errX.Error()
-	}
+	a.hyErr, a.hyFails = failing(a.hyFails, err)
+	a.xrayErr, a.xrayFails = failing(a.xrayFails, errX)
 	a.mu.Unlock()
 	if errO == nil {
 		a.enforce(now, on)
 	}
+}
+
+// failing shows an error once it repeats: one miss right after a restart
+// (the panel came up before Hysteria or Xray) is not worth a banner.
+func failing(n int, err error) (string, int) {
+	if err == nil {
+		return "", 0
+	}
+	if n++; n < 2 {
+		return "", n
+	}
+	return err.Error(), n
 }
 
 // ---- Xray (VLESS + Reality) ----
