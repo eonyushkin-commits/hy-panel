@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -237,7 +236,7 @@ func systemStatus(latest func(proto string) (hyVersion, string)) map[string]prot
 		}
 		return s
 	}
-	awg := protoStatus{Installed: fileExists(awgCfgPath) && fileExists(awgUnitPath), Version: awgVersion()}
+	awg := protoStatus{Installed: fileExists(awgCfgPath) && fileExists(awgUnitPath), Version: "встроен"}
 	awg.Active = awg.Installed && systemctl("is-active", "--quiet", "hy-panel-awg") == nil
 	return map[string]protoStatus{
 		protoHy2:   st(protoHy2, hysteriaBin, hySvc, hysteriaVersion()),
@@ -333,40 +332,6 @@ func latestRelease(base string) (hyVersion, error) {
 		return v, fmt.Errorf("%s: %s, версии в перенаправлении нет (%s)", page, resp.Status, loc)
 	}
 	return v, nil
-}
-
-// awgVersion is the amneziawg-go built into this binary, as the card shows it.
-func awgVersion() string {
-	if bi, ok := debug.ReadBuildInfo(); ok {
-		for _, m := range bi.Deps {
-			if m.Path == "github.com/amnezia-vpn/amneziawg-go" {
-				if m.Replace != nil {
-					m = m.Replace
-				}
-				return moduleVersion(m.Version)
-			}
-		}
-	}
-	return "встроена"
-}
-
-// moduleVersion makes a Go module version readable: a tag stays, a
-// pseudo-version (v0.2.20-0.20260724121833-457d920a1a7d) is the commit's
-// date and hash, "24.07.2026 (457d920)".
-func moduleVersion(v string) string {
-	parts := strings.Split(v, "-")
-	if len(parts) < 3 {
-		return strings.TrimPrefix(v, "v")
-	}
-	ts, hash := parts[len(parts)-2], parts[len(parts)-1]
-	if i := strings.LastIndex(ts, "."); i >= 0 {
-		ts = ts[i+1:]
-	}
-	t, err := time.Parse("20060102150405", ts)
-	if err != nil || len(hash) < 7 {
-		return strings.TrimPrefix(v, "v")
-	}
-	return t.Format("02.01.2006") + " (" + hash[:7] + ")"
 }
 
 // readEnvNoFatal is readEnv for the long-running agent: an unreadable file

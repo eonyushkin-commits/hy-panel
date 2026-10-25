@@ -384,7 +384,6 @@ function renderProtocols() {
     // An update is offered only when a newer release is out; if the agent
     // could not learn the latest one, it says why and can ask again.
     let ver = '';
-    if (s.installed && p.id === 'awg') ver = 'amneziawg-go ' + esc(s.version) + ' · встроена в панель, обновляется вместе с ней';
     if (s.installed && p.id !== 'awg') {
       ver = 'Версия ' + esc(s.version) + (s.update ? ` · <b>вышла ${esc(s.latest)}</b>` : s.latest ? ' · последняя'
         : ` · <span title="${esc(s.latestErr || '')}">последнюю узнать не удалось</span>`);
