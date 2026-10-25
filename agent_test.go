@@ -172,8 +172,12 @@ func TestSystemNeedsAgent(t *testing.T) {
 func TestLatestRelease(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/apernet/hysteria/releases/latest":
-			http.Redirect(w, r, "/apernet/hysteria/releases/tag/app/v2.6.1", http.StatusFound)
+		case "/apernet/hysteria/releases/latest": // a moved repository: 301 first
+			http.Redirect(w, r, "/new-org/hysteria/releases/latest", http.StatusMovedPermanently)
+		case "/new-org/hysteria/releases/latest":
+			http.Redirect(w, r, "/new-org/hysteria/releases/tag/app/v2.6.1", http.StatusFound)
+		case "/new-org/hysteria/releases/tag/app/v2.6.1":
+			t.Error("the tag page itself is not needed")
 		case "/XTLS/Xray-core/releases/latest":
 			http.Redirect(w, r, "/XTLS/Xray-core/releases/tag/v25.9.11", http.StatusFound)
 		default:

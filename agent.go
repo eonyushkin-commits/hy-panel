@@ -304,22 +304,32 @@ func (r *releases) watch() {
 	}
 }
 
-// latestRelease reads the version off the redirect of releases/latest, the
+// latestRelease reads the version off where releases/latest leads, the
 // page the downloads come from (base is its download/ URL): GitHub sends it
-// to .../releases/tag/app/v2.6.1 (Hysteria) or .../tag/v25.9.11 (Xray).
-// No API, so no API rate limit.
+// to .../releases/tag/app/v2.6.1 (Hysteria) or .../tag/v25.9.11 (Xray),
+// through a moved repository's redirect first if there is one. No API, so
+// no API rate limit.
 func latestRelease(base string) (hyVersion, error) {
 	page := strings.TrimSuffix(strings.TrimSuffix(base, "/"), "/download")
 	c := &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{Proxy: http.ProxyFromEnvironment},
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		CheckRedirect: func(r *http.Request, via []*http.Request) error {
+			if strings.Contains(r.URL.Path, "/releases/tag/") || len(via) >= 5 {
+				return http.ErrUseLastResponse // the tag is in the URL: no need for the page
+			}
+			return nil
+		}}
 	resp, err := c.Head(page)
 	if err != nil {
 		return hyVersion{}, err
 	}
 	resp.Body.Close()
-	v := parseVersion(versionRe, []byte(resp.Header.Get("Location")))
+	loc, _ := resp.Location()
+	if loc == nil {
+		return hyVersion{}, fmt.Errorf("%s: %s, без перенаправления на релиз", page, resp.Status)
+	}
+	v := parseVersion(versionRe, []byte(loc.Path))
 	if v == (hyVersion{}) {
-		return v, fmt.Errorf("%s: %s, версии в перенаправлении нет", page, resp.Status)
+		return v, fmt.Errorf("%s: %s, версии в перенаправлении нет (%s)", page, resp.Status, loc)
 	}
 	return v, nil
 }
