@@ -318,7 +318,8 @@ func runSettings(args []string) {
 	}
 	if !fileExists(hysteriaBin) || !unitExists(svc) {
 		noInterrupt()
-		step("hysteria: официальный релиз", fetchHysteria())
+		_, err := fetchHysteria()
+		step("hysteria: официальный релиз", err)
 	}
 	var cur *hyOpts
 	if kind != cfgNone {

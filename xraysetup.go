@@ -371,7 +371,8 @@ func runXray(args []string) {
 		log.Fatalf("✗ -target %q: нужен домен", *target)
 	}
 	if !fileExists(xrayBin) || !unitExists(svc) {
-		step("xray: официальный релиз", fetchXray())
+		_, err := fetchXray()
+		step("xray: официальный релиз", err)
 	}
 	if v := xrayVersion(); !v.atLeast(minXray) {
 		log.Fatalf("✗ нужен Xray ≥ %s, установлен %s — обнови: hy-panel fetch xray", minXray, v)

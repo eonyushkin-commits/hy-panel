@@ -38,6 +38,7 @@ type App struct {
 	awgPubs  map[string]string  // private → public key, cached
 	hyOpts   *hyOpts            // Hysteria's port, obfs, certificate; nil: not set up
 	agent    *agentClient
+	siteScan scanState // the search for a Reality site
 	ep       Endpoint
 	password string
 	subBase  string   // public base URL of the subscription listener, "" = disabled
@@ -556,6 +557,28 @@ func (a *App) handleCheckTarget(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, res)
 }
 
+// handleSiteScanStart starts the search for a Reality site in the server's
+// /24 (one at a time); handleSiteScan reports its progress and finds.
+func (a *App) handleSiteScanStart(w http.ResponseWriter, r *http.Request) {
+	ip, err := serverIPv4(a.ep.Host)
+	if err != nil {
+		http.Error(w, "адрес сервера: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	st := &a.siteScan
+	st.mu.Lock()
+	if !st.Running {
+		st.Running, st.Done, st.Found = true, 0, nil
+		go newSiteScanner().run(st, ip)
+	}
+	st.mu.Unlock()
+	writeJSON(w, st.snapshot())
+}
+
+func (a *App) handleSiteScan(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, a.siteScan.snapshot())
+}
+
 // underPath serves h only below a secret path, like 3x-ui's web base path:
 // everything else is a plain 404, so scanners do not find the panel.
 func underPath(p string, h http.Handler) http.Handler {
@@ -598,6 +621,8 @@ func (a *App) routes(withAuth bool) http.Handler {
 	mux.HandleFunc("POST /api/system/jobs", a.guard(a.handleJobStart))
 	mux.HandleFunc("GET /api/system/job", a.guard(a.handleJob))
 	mux.HandleFunc("GET /api/system/check-target", a.guard(a.handleCheckTarget))
+	mux.HandleFunc("POST /api/system/site-scan", a.guard(a.handleSiteScanStart))
+	mux.HandleFunc("GET /api/system/site-scan", a.guard(a.handleSiteScan))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Content-Type", "text/html; charset=utf-8")

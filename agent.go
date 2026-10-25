@@ -184,9 +184,13 @@ func (a *agent) handleStart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *agent) run(args []string) {
-	cmd := exec.Command(a.bin, args...)
+	// A job that hangs (a download that never ends) must not hold the agent forever.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, a.bin, args...)
 	cmd.Stdin = nil // no terminal: no questions
 	cmd.Stdout, cmd.Stderr = a, a
+	cmd.WaitDelay = 10 * time.Second // a child left holding the output does not keep the job open
 	err := cmd.Run()
 	a.mu.Lock()
 	defer a.mu.Unlock()

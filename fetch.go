@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -83,18 +84,41 @@ func runFetch(args []string) {
 	if len(args) != 1 {
 		log.Fatal("usage: hy-panel fetch hysteria|xray")
 	}
+	env := readEnvNoFatal()
+	_, hySvc := hyPaths(env)
+	_, xSvc := xrayPaths(env)
 	switch args[0] {
 	case "hysteria":
-		step("hysteria "+hysteriaVersion().String(), fetchHysteria())
+		updateServer("hysteria", hySvc, hysteriaVersion, fetchHysteria)
 	case "xray":
-		step("xray "+xrayVersion().String(), fetchXray())
+		updateServer("xray", xSvc, xrayVersion, fetchXray)
 	default:
 		log.Fatal("usage: hy-panel fetch hysteria|xray")
 	}
 }
 
+// updateServer installs the latest release and, if it is new, restarts the
+// running service so it takes effect.
+func updateServer(name, svc string, version func() hyVersion, fetch func() (bool, error)) {
+	before := version()
+	changed, err := fetch()
+	step(name+": официальный релиз", err)
+	if !changed {
+		fmt.Printf("✓ %s %s — уже последняя версия, перезапуск не нужен\n", name, before)
+		return
+	}
+	fmt.Printf("✓ %s: %s → %s\n", name, before, version())
+	if systemctl("is-active", "--quiet", svc) == nil {
+		step("restart "+svc, systemctl("restart", svc))
+	}
+}
+
 var httpGet = func(url string) ([]byte, error) {
-	c := &http.Client{Timeout: 5 * time.Minute}
+	fmt.Println("→ " + url)
+	// Slow mirrors are fine, a dead connection is not: it fails in a minute.
+	tr := &http.Transport{Proxy: http.ProxyFromEnvironment, TLSHandshakeTimeout: 30 * time.Second, ResponseHeaderTimeout: time.Minute,
+		DialContext: (&net.Dialer{Timeout: 30 * time.Second}).DialContext}
+	c := &http.Client{Timeout: 5 * time.Minute, Transport: tr}
 	resp, err := c.Get(url)
 	if err != nil {
 		return nil, err
@@ -109,7 +133,6 @@ var httpGet = func(url string) ([]byte, error) {
 // download fetches name from base and checks it against the SHA-256 that
 // sum (the release's checksum file, already parsed) gives for it.
 func download(base, name string, sum func(name string) (string, error)) ([]byte, error) {
-	fmt.Println("→ " + base + name)
 	b, err := httpGet(base + name)
 	if err != nil {
 		return nil, err
@@ -151,78 +174,108 @@ func dgst(b []byte) (string, error) {
 	return "", errors.New("в .dgst нет SHA2-256")
 }
 
-func fetchHysteria() error {
+// fetchHysteria installs the latest release; false if the installed binary
+// is that release already (nothing is downloaded then).
+func fetchHysteria() (bool, error) {
 	arch := map[string]string{"amd64": "amd64", "arm64": "arm64"}[runtime.GOARCH]
 	if arch == "" {
-		return fmt.Errorf("архитектура %s не поддерживается", runtime.GOARCH)
+		return false, fmt.Errorf("архитектура %s не поддерживается", runtime.GOARCH)
 	}
+	name := "hysteria-linux-" + arch
 	sums, err := httpGet(hysteriaURL + "hashes.txt")
 	if err != nil {
-		return err
+		return false, err
 	}
-	bin, err := download(hysteriaURL, "hysteria-linux-"+arch, hashesTxt(sums))
+	want, err := hashesTxt(sums)(name)
 	if err != nil {
-		return err
+		return false, err
 	}
-	if err := writeAtomic(hysteriaBin, bin, 0o755); err != nil {
-		return err
+	changed := true
+	if cur, err := os.ReadFile(hysteriaBin); err == nil && sha256hex(cur) == strings.ToLower(want) {
+		changed = false
+	} else {
+		bin, err := download(hysteriaURL, name, hashesTxt(sums))
+		if err != nil {
+			return false, err
+		}
+		if err := writeAtomic(hysteriaBin, bin, 0o755); err != nil {
+			return false, err
+		}
 	}
 	if err := systemUser("hysteria", "/var/lib/hysteria", true); err != nil {
-		return err
+		return false, err
 	}
-	return installUnit(hysteriaUnitPath, hysteriaUnit)
+	return changed, installUnit(hysteriaUnitPath, hysteriaUnit)
 }
 
-func fetchXray() error {
+func sha256hex(b []byte) string {
+	s := sha256.Sum256(b)
+	return hex.EncodeToString(s[:])
+}
+
+// xrayMark keeps the SHA-256 of the release archive installed last: the
+// next update knows it has it without downloading the archive again.
+const xrayMark = xrayDatDir + "/.hy-panel-release-sha256"
+
+// fetchXray installs the latest release; false if it is installed already.
+func fetchXray() (bool, error) {
 	arch := map[string]string{"amd64": "64", "arm64": "arm64-v8a"}[runtime.GOARCH]
 	if arch == "" {
-		return fmt.Errorf("архитектура %s не поддерживается", runtime.GOARCH)
+		return false, fmt.Errorf("архитектура %s не поддерживается", runtime.GOARCH)
 	}
 	name := "Xray-linux-" + arch + ".zip"
 	d, err := httpGet(xrayURL + name + ".dgst")
 	if err != nil {
-		return err
+		return false, err
 	}
-	z, err := download(xrayURL, name, func(string) (string, error) { return dgst(d) })
+	want, err := dgst(d)
 	if err != nil {
-		return err
+		return false, err
+	}
+	if mark, _ := os.ReadFile(xrayMark); strings.TrimSpace(string(mark)) == want && fileExists(xrayBin) {
+		return false, installUnit(xrayUnitPath, xrayUnit)
+	}
+	z, err := download(xrayURL, name, func(string) (string, error) { return want, nil })
+	if err != nil {
+		return false, err
 	}
 	zr, err := zip.NewReader(bytes.NewReader(z), int64(len(z)))
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := systemUser("xray", "", false); err != nil {
-		return err
+		return false, err
 	}
 	if err := os.MkdirAll(xrayDatDir, 0o755); err != nil {
-		return err
+		return false, err
 	}
 	for name, dst := range map[string]string{"xray": xrayBin, "geoip.dat": xrayDatDir + "/geoip.dat", "geosite.dat": xrayDatDir + "/geosite.dat"} {
 		b, err := zipFile(zr, name)
 		if err != nil {
-			return err
+			return false, err
 		}
 		mode := os.FileMode(0o644)
 		if name == "xray" {
 			mode = 0o755
 		}
 		if err := writeAtomic(dst, b, mode); err != nil {
-			return err
+			return false, err
 		}
 	}
 	if err := os.MkdirAll(filepath.Dir(defaultXrayCfg), 0o755); err != nil {
-		return err
+		return false, err
 	}
 	if !fileExists(defaultXrayCfg) {
 		// Like the installer: root:xray 0640, the config holds the Reality key.
 		if err := os.WriteFile(defaultXrayCfg, []byte("{}\n"), 0o640); err != nil {
-			return err
+			return false, err
 		}
 		if _, gid := userIDs("xray"); gid != 0 {
 			os.Chown(defaultXrayCfg, 0, gid)
 		}
 	}
-	return installUnit(xrayUnitPath, xrayUnit)
+	os.WriteFile(xrayMark, []byte(want+"\n"), 0o644)
+	return true, installUnit(xrayUnitPath, xrayUnit)
 }
 
 func zipFile(zr *zip.Reader, name string) ([]byte, error) {

@@ -97,6 +97,9 @@ input:hover,textarea:hover,select:hover{border-color:var(--mute)}
 .pcard .ph{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .pcard .pa{display:flex;gap:8px;margin-top:4px;flex-wrap:wrap}
 .joblog{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface-2);border-radius:var(--r-sm);padding:10px 12px;max-height:50vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
+.sites{display:grid;gap:4px;margin-top:6px;max-height:220px;overflow:auto}
+.sites button{justify-content:space-between;text-align:left;font-size:13px;padding:6px 10px}
+.sites button small{color:var(--mute)}
 .check{font-size:12.5px;margin-top:6px}.check.ok{color:var(--ok)}.check.bad{color:var(--bad)}
 .empty button{margin-top:12px}
 
@@ -263,8 +266,9 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
     <div class="grid">
       <label id="vlPortWrap" class="full"><span>Порт (TCP)</span><input name="port" type="number" min="1" max="65535" value="443"></label>
       <label class="full"><span>Сайт для маскировки — чужой сайт с TLS 1.3 и HTTP/2, лучше из той же подсети /24, что и сервер</span>
-        <div style="display:flex;gap:8px"><input name="target" placeholder="www.example.com" autocapitalize="off" required><button type="button" onclick="checkSite()">Проверить</button></div>
+        <div style="display:flex;gap:8px"><input name="target" placeholder="www.example.com" autocapitalize="off" required><button type="button" onclick="checkSite()">Проверить</button><button type="button" id="findBtn" onclick="findSites()" title="Найти соседей сервера по /24 с TLS 1.3, HTTP/2 и ответом 200">Найти</button></div>
         <div class="check" id="vlCheck"></div></label>
+      <div class="full" id="vlFind" hidden><div class="mute small" id="findState"></div><div class="sites" id="sites"></div></div>
     </div>
     <div class="mute small hint" id="vlHint"></div>
     <div class="row"><button type="button" onclick="$('#vlDlg').close()">Отмена</button><button class="pri" value="ok" id="vlBtn">Установить</button></div>
@@ -419,13 +423,41 @@ function openVl() {
   const f = $('#vlForm'), c = SYS.settings.vless;
   $('#vlPortWrap').hidden = !!c; f.port.value = c ? c.port : 443;
   f.target.value = ''; f.target.placeholder = c ? c.sni : 'www.example.com';
-  $('#vlCheck').textContent = '';
+  $('#vlCheck').textContent = ''; $('#vlFind').hidden = true; $('#findBtn').disabled = false;
   $('#vlBtn').textContent = c ? 'Сменить сайт' : 'Установить';
   $('#vlHint').textContent = c
     ? `Сейчас сайт — ${c.sni}. Смени, если он перестал отвечать: в ссылках VLESS изменится sni, подписка обновится сама.`
     : 'Панель скачает официальный релиз Xray (с проверкой SHA-256), сделает ключи Reality и запустит службу. Если Xray уже настроен вручную, панель подключится к нему, сохранив ключи и клиентов.';
   $('#vlDlg').returnValue = ''; $('#vlDlg').showModal();
 }
+// findSites does what the guide did by hand: RealiTLScanner over the
+// server's /24, then a check of every site found (same /24, valid
+// certificate, TLS 1.3 + HTTP/2, answers 200).
+async function findSites() {
+  let st;
+  try { st = await api('POST', 'api/system/site-scan'); } catch { return; }
+  $('#vlFind').hidden = false; $('#findBtn').disabled = true;
+  while (st.running) {
+    showSites(st);
+    await new Promise(r => setTimeout(r, 1000));
+    if (!$('#vlDlg').open) { $('#findBtn').disabled = false; return; }
+    try { st = await api('GET', 'api/system/site-scan'); } catch { break; }
+  }
+  showSites(st); $('#findBtn').disabled = false;
+}
+function showSites(st) {
+  const ok = st.found.filter(c => c.status === 200).length;
+  $('#findState').textContent = st.running
+    ? `Ищу в ${st.net}: ${st.done} из ${st.total} адресов, подходящих ${ok}…`
+    : st.found.length ? `${st.net}: подходящих ${ok}. Лучшие сверху — выбери сайт, он подставится и проверится.`
+    : `${st.net}: соседей с TLS 1.3 и HTTP/2 не нашлось. Возьми сайт из соседней подсети провайдера или крупный сайт.`;
+  $('#sites').innerHTML = st.found.map(c => `<button type="button" data-d="${esc(c.domain)}">${esc(c.domain)}
+    <small>${esc(c.ip)}${c.sameIP ? '' : ' · DNS на соседний IP'} · ${c.ms} мс · ${c.status === 200 ? '200' : '<span style="color:var(--warn)">' + c.status + '</span>'}</small></button>`).join('');
+}
+$('#sites').onclick = e => {
+  const b = e.target.closest('[data-d]'); if (!b) return;
+  $('#vlForm').target.value = b.dataset.d; checkSite();
+};
 async function checkSite() {
   const d = $('#vlForm').target.value.trim().toLowerCase(), el = $('#vlCheck');
   if (!d) return;
@@ -466,15 +498,31 @@ async function startJob(action, params, title) {
   try { await api('POST', 'api/system/jobs', {action, params}); } catch { return; }
   $('#jobTitle').textContent = title; $('#jobLog').textContent = ''; $('#jobState').textContent = 'Идёт…';
   if (!$('#jobDlg').open) $('#jobDlg').showModal();
+  const t0 = Date.now(), secs = () => Math.round((Date.now() - t0) / 1000);
+  let lost = 0;
   for (;;) {
     await new Promise(r => setTimeout(r, 1000));
-    let j;
-    try { const r = await fetch('api/system/job'); if (!r.ok) continue; j = await r.json(); } catch { continue; }
+    let j = null;
+    try { const r = await fetch('api/system/job'); if (r.ok) j = await r.json(); } catch {}
+    if (!j) { // the panel is restarting after the change, or unreachable
+      lost++;
+      $('#jobState').textContent = `Идёт… ${secs()} с` + (lost > 3 ? ' · панель перезапускается, жду связи' : '');
+      continue;
+    }
+    lost = 0;
     const log = $('#jobLog'), end = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
     log.textContent = j.log; if (end) log.scrollTop = log.scrollHeight;
-    if (j.running) continue;
+    if (j.running) {
+      const last = j.log.trim().split('\n').pop() || '';
+      $('#jobState').textContent = `Идёт… ${secs()} с` + (last ? ' · ' + last.slice(0, 80) : '');
+      continue;
+    }
     $('#jobState').innerHTML = j.ok ? '<span class="pill ok">готово</span>' : '<span class="pill bad">ошибка — подробности в логе</span>';
     await load(); await loadSystem();
+    if (j.ok) { // nothing to read on success: the window goes, the cards show the result
+      toast(title + ': готово');
+      setTimeout(() => $('#jobDlg').close(), 1500);
+    }
     return;
   }
 }
