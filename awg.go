@@ -108,6 +108,9 @@ func (c *awgConfig) write(path string) error {
 		return err
 	}
 	_, gid := userIDs(panelUser) // the panel reads it to build client configs
+	if gid == 0 || os.Geteuid() != 0 {
+		return nil // no panel user, or not root (tests): nothing to hand over
+	}
 	return os.Chown(path, 0, gid)
 }
 
