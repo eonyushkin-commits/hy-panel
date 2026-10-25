@@ -22,6 +22,8 @@ type User struct {
 	SubToken     string   `json:"subToken"`
 	UUID         string   `json:"uuid"`               // VLESS key (Xray)
 	ProtoOff     []string `json:"protoOff,omitempty"` // protocols the user may not use; empty = all
+	AWGKey       string   `json:"awgKey"`             // AmneziaWG private key (the client's)
+	AWGIndex     int      `json:"awgIndex"`           // AmneziaWG address: awgIP(index)
 	Enabled      bool     `json:"enabled"`
 	QuotaBytes   int64    `json:"quotaBytes"`   // 0 = unlimited, counts up+down
 	ResetMonthly bool     `json:"resetMonthly"` // zero traffic on the 1st of each month (server time)
@@ -86,8 +88,13 @@ func OpenStore(path string) (*Store, error) {
 	missing := false
 	for _, u := range list {
 		s.users[u.Name] = u
+	}
+	for _, u := range list {
 		if u.UUID == "" {
 			u.UUID, missing = newUUID(), true
+		}
+		if u.AWGKey == "" {
+			u.AWGKey, u.AWGIndex, missing = newWGKey(), s.freeIndex(), true
 		}
 	}
 	if missing {
@@ -207,6 +214,19 @@ func (s *Store) Resolve(auth string) (User, bool) {
 	return User{}, false
 }
 
+// freeIndex is the lowest AmneziaWG address index no user has (mu held).
+func (s *Store) freeIndex() int {
+	used := map[int]bool{}
+	for _, u := range s.users {
+		used[u.AWGIndex] = true
+	}
+	i := 2
+	for used[i] && i < awgMaxIndex {
+		i++
+	}
+	return i
+}
+
 // checkUUID must be called with mu held: two users with one UUID would be one user for Xray.
 func (s *Store) checkUUID(id, self string) error {
 	for _, o := range s.users {
@@ -258,6 +278,9 @@ func (s *Store) Create(u User, legacy bool) (User, error) {
 		}
 		if err := s.checkUUID(u.UUID, u.Name); err != nil {
 			return nil, err
+		}
+		if u.AWGKey == "" {
+			u.AWGKey, u.AWGIndex = newWGKey(), s.freeIndex()
 		}
 		nu := u // the stored copy is the store's; u is returned
 		s.users[u.Name] = &nu

@@ -22,6 +22,7 @@ const usage = `hy-panel — пользователи для Hysteria 2 и VLESS 
   hy-panel install     установить или обновить (повторный запуск ничего не меняет, кроме программы)
   hy-panel settings    поменять порт, обфускацию или сертификат Hysteria
   hy-panel xray        добавить VLESS + Reality (Xray) или сменить его сайт для маскировки
+  hy-panel awg         добавить AmneziaWG 3.1 или сменить его порт
   hy-panel info        адрес и пароль панели
   hy-panel passwd      новый пароль панели
   hy-panel uninstall   удалить панель; пользователи и настройки сохранятся
@@ -49,6 +50,10 @@ func main() {
 		runFetch(os.Args[2:])
 	case "agent":
 		runAgent()
+	case "awg":
+		runAWG(os.Args[2:])
+	case "awg-serve":
+		runAWGServe()
 	case "xray":
 		runXray(os.Args[2:])
 	case "info":
@@ -130,6 +135,15 @@ func serve() {
 	app := newApp(store, stats, ep, env["HYP_PASSWORD"], key)
 	app.cfgErr, app.warns, app.hyOpts = cfgErr, warns, hyOpts
 	app.agent = newAgentClient(agentSock)
+	if fileExists(awgCfgPath) {
+		if c, err := readAWG(awgCfgPath); err != nil {
+			log.Printf("WARN: %s: %v", awgCfgPath, err)
+			app.cfgErr = strings.TrimPrefix(app.cfgErr+"; конфиг AmneziaWG: "+err.Error(), "; ")
+		} else {
+			app.ep.AWG, app.awg = c, newAWGClient(awgSock)
+			log.Printf("awg: udp :%d", c.Port)
+		}
+	}
 	log.Printf("hy-panel %s; links: %s:%s sni=%q obfs=%q pinned=%v ech=%v", version,
 		app.ep.Host, app.ep.Port, app.ep.SNI, app.ep.ObfsType, app.ep.Pin != "", app.ep.ECH != "")
 	if xs != nil {

@@ -33,7 +33,10 @@ type App struct {
 	xray     *xrayAPI // nil: no VLESS
 	xrayTag  string   // the inbound whose users the panel keeps
 	xrayFlow string
-	hyOpts   *hyOpts // Hysteria's port, obfs, certificate; nil: not set up
+	awg      *awgClient         // nil: no AmneziaWG
+	awgSeen  map[string]awgPeer // syncLoop only: last counters per public key
+	awgPubs  map[string]string  // private → public key, cached
+	hyOpts   *hyOpts            // Hysteria's port, obfs, certificate; nil: not set up
 	agent    *agentClient
 	ep       Endpoint
 	password string
@@ -47,6 +50,9 @@ type App struct {
 	mu        sync.RWMutex
 	online    map[string]int
 	xonline   map[string]int // Xray: online client IPs per user
+	aonline   map[string]int // AmneziaWG: 1 if a handshake in the last 3 minutes
+	awgErr    string
+	awgFails  int
 	hyErr     string
 	xrayErr   string
 	hyFails   int // syncs failed in a row
@@ -150,6 +156,7 @@ type userView struct {
 	User
 	Online     int    `json:"online"`     // Hysteria sessions
 	XrayOnline int    `json:"xrayOnline"` // VLESS client IPs
+	AWGOnline  int    `json:"awgOnline"`  // AmneziaWG: recent handshake
 	Status     string `json:"status"`     // "", disabled, expired, quota
 	URI        string `json:"uri"`
 	VlessURI   string `json:"vlessUri"`
@@ -164,7 +171,7 @@ type link struct {
 
 func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 	a.mu.RLock()
-	on, xon, last := a.online, a.xonline, a.lastSync
+	on, xon, aon, last := a.online, a.xonline, a.aonline, a.lastSync
 	var listen []string
 	for name, e := range a.listenErr {
 		listen = append(listen, name+": "+e)
@@ -181,6 +188,9 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 	if a.xrayErr != "" {
 		problems = append(problems, "Нет связи с API Xray: "+a.xrayErr)
 	}
+	if a.awgErr != "" {
+		problems = append(problems, "Нет связи с AmneziaWG: "+a.awgErr)
+	}
 	if a.targetErr != "" {
 		problems = append(problems, a.targetErr)
 	}
@@ -190,7 +200,7 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 	users := a.store.List()
 	views := make([]userView, len(users))
 	for i, u := range users {
-		views[i] = userView{User: u, Online: on[u.Name], XrayOnline: xon[u.Name], Status: u.Blocked(now),
+		views[i] = userView{User: u, Online: on[u.Name], XrayOnline: xon[u.Name], AWGOnline: aon[u.Name], Status: u.Blocked(now),
 			URI: a.ep.URI(u), VlessURI: a.ep.VlessURI(u), Links: []link{}, SubPath: "/sub/" + u.SubToken}
 		for _, p := range a.ep.UserProtocols(u) {
 			views[i].Links = append(views[i].Links, link{p, a.ep.Link(p, u)})
@@ -287,6 +297,7 @@ func (p userPatch) apply(u *User, now time.Time) {
 		u.Password = randStr(20)
 		u.SubToken = randStr(24)
 		u.UUID = newUUID()
+		u.AWGKey = newWGKey()
 	}
 }
 
@@ -377,7 +388,11 @@ func (a *App) handleQR(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Has("sub") && a.subBase != "" {
 		text = a.subBase + "/sub/" + u.SubToken
 	}
-	png, err := qrcode.Encode(text, qrcode.Medium, 320)
+	level, size := qrcode.Medium, 320
+	if len(text) > 400 { // an AmneziaWG config: bigger and with less redundancy, so phones read it
+		level, size = qrcode.Low, 480
+	}
+	png, err := qrcode.Encode(text, level, size)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -407,6 +422,28 @@ func (a *App) handleMihomo(w http.ResponseWriter, r *http.Request) {
 	default:
 		fmt.Fprint(w, a.ep.MihomoDoc(u))
 	}
+}
+
+// handleAWGConf downloads u's AmneziaWG config as a file the apps import.
+func (a *App) handleAWGConf(w http.ResponseWriter, r *http.Request) {
+	if a.noLinks(w) {
+		return
+	}
+	u, ok := a.store.Get(r.PathValue("name"))
+	if !ok || !slices.Contains(a.ep.UserProtocols(u), protoAWG) {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	// Apps name the tunnel after the file: keep it short and plain.
+	w.Header().Set("Content-Disposition", `attachment; filename="`+strings.Map(func(r rune) rune {
+		if r < 128 && (r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+			return r
+		}
+		return '-'
+	}, a.ep.awgRemark(u))+`.conf"`)
+	fmt.Fprint(w, a.ep.AWGConf(u))
 }
 
 // ---- subscription (public listener, token-protected) ----
@@ -471,6 +508,9 @@ func (a *App) handleSystem(w http.ResponseWriter, r *http.Request) {
 	}
 	if v := a.ep.Vless; v != nil {
 		settings[protoVless] = map[string]any{"port": v.Port, "sni": v.SNI, "network": v.Network}
+	}
+	if c := a.ep.AWG; c != nil {
+		settings[protoAWG] = map[string]any{"port": c.Port, "net": awgNet.String()}
 	}
 	writeJSON(w, map[string]any{"status": st, "settings": settings, "agentError": agentErr, "host": a.ep.Host})
 }
@@ -553,6 +593,7 @@ func (a *App) routes(withAuth bool) http.Handler {
 	mux.HandleFunc("DELETE /api/users/{name}", a.guard(a.handleDelete))
 	mux.HandleFunc("GET /api/users/{name}/qr.png", a.guard(a.handleQR))
 	mux.HandleFunc("GET /api/users/{name}/mihomo", a.guard(a.handleMihomo))
+	mux.HandleFunc("GET /api/users/{name}/awg.conf", a.guard(a.handleAWGConf))
 	mux.HandleFunc("GET /api/system", a.guard(a.handleSystem))
 	mux.HandleFunc("POST /api/system/jobs", a.guard(a.handleJobStart))
 	mux.HandleFunc("GET /api/system/job", a.guard(a.handleJob))

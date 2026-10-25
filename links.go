@@ -17,10 +17,11 @@ type Endpoint struct {
 	SNI      string
 	ObfsType string
 	ObfsPass string
-	Pin      string // hex sha256 of a self-signed cert
-	ECH      string // base64 ECHConfigList, "" if ECH is off
-	Name     string // profile/remark prefix
-	Vless    *Vless // Xray's VLESS + Reality, nil if off
+	Pin      string     // hex sha256 of a self-signed cert
+	ECH      string     // base64 ECHConfigList, "" if ECH is off
+	Name     string     // profile/remark prefix
+	Vless    *Vless     // Xray's VLESS + Reality, nil if off
+	AWG      *awgConfig // AmneziaWG server, nil if off
 }
 
 // endpointFor builds the link parameters from the Hysteria config and the
@@ -232,9 +233,11 @@ const (
 )
 
 // protoTitles name the protocols in the panel, in fallback order: Hysteria
-// (fast, UDP) first, VLESS over TCP when UDP is cut.
+// (fast, UDP) first, then AmneziaWG (UDP, looks different), VLESS over TCP
+// when UDP is cut.
 var protoTitles = []struct{ ID, Title string }{
 	{protoHy2, "Hysteria 2"},
+	{protoAWG, "AmneziaWG"},
 	{protoVless, "VLESS"},
 }
 
@@ -256,7 +259,7 @@ func (e Endpoint) Protocols() []string {
 	var ps []string
 	for _, p := range protoTitles {
 		switch {
-		case p.ID == protoHy2 && e.Port != "", p.ID == protoVless && e.Vless != nil:
+		case p.ID == protoHy2 && e.Port != "", p.ID == protoVless && e.Vless != nil, p.ID == protoAWG && e.AWG != nil:
 			ps = append(ps, p.ID)
 		}
 	}
@@ -274,30 +277,38 @@ func (e Endpoint) UserProtocols(u User) []string {
 	return ps
 }
 
-// Link is u's share link for one protocol.
+// Link is u's share link for one protocol; for AmneziaWG, the .conf text.
 func (e Endpoint) Link(proto string, u User) string {
 	switch proto {
 	case protoHy2:
 		return e.URI(u)
 	case protoVless:
 		return e.VlessURI(u)
+	case protoAWG:
+		return e.AWGConf(u)
 	}
 	return ""
 }
 
-// URIs are u's share links, in fallback order.
+// URIs are u's share links for subscriptions, in fallback order. AmneziaWG
+// has no link scheme the apps take from a subscription: it is left out.
 func (e Endpoint) URIs(u User) []string {
 	var ls []string
 	for _, p := range e.UserProtocols(u) {
-		ls = append(ls, e.Link(p, u))
+		if p != protoAWG {
+			ls = append(ls, e.Link(p, u))
+		}
 	}
 	return ls
 }
 
 // proxyName is the name of u's proxy for proto in mihomo and the apps.
 func (e Endpoint) proxyName(proto string, u User) string {
-	if proto == protoVless {
+	switch proto {
+	case protoVless:
 		return e.vlessRemark(u)
+	case protoAWG:
+		return e.awgRemark(u)
 	}
 	return e.remark(u)
 }
@@ -309,6 +320,8 @@ func (e Endpoint) MihomoProxy(proto string, u User) string {
 		return e.Mihomo(u)
 	case protoVless:
 		return e.MihomoVless(u)
+	case protoAWG:
+		return e.MihomoAWG(u)
 	}
 	return ""
 }

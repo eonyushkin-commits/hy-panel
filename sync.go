@@ -109,10 +109,14 @@ func (a *App) syncOnce(now time.Time) {
 		on, errO = a.stats.Online()
 	}
 	xtr, xon, errX := a.xrayStats()
-	a.store.Tick(now, addTraffic(tr, xtr), joinOnline(on, xon))
+	atr, aon, errA := a.awgStats(now)
+	a.store.Tick(now, addTraffic(addTraffic(tr, xtr), atr), joinOnline(joinOnline(on, xon), aon))
+	// After Tick: a quota used up just now closes VLESS and AmneziaWG at once.
 	if a.xray != nil {
-		// After Tick: a quota used up just now closes VLESS at once.
 		errX = errors.Join(errX, a.pushXrayUsers(now))
+	}
+	if a.awg != nil && errA == nil {
+		errA = a.pushAWGPeers(now)
 	}
 	err := errors.Join(errT, errO)
 	a.mu.Lock()
@@ -122,6 +126,10 @@ func (a *App) syncOnce(now time.Time) {
 	if xon != nil {
 		a.xonline = xon
 	}
+	if aon != nil {
+		a.aonline = aon
+	}
+	a.awgErr, a.awgFails = failing(a.awgFails, errA)
 	a.hyErr, a.hyFails = failing(a.hyFails, err)
 	a.xrayErr, a.xrayFails = failing(a.xrayFails, errX)
 	a.mu.Unlock()
@@ -210,6 +218,70 @@ func (a *App) pushXrayUsers(now time.Time) error {
 	return errors.Join(errs...)
 }
 
+// ---- AmneziaWG ----
+
+func (a *App) awgPub(priv string) string {
+	if a.awgPubs == nil {
+		a.awgPubs = map[string]string{}
+	}
+	pub, ok := a.awgPubs[priv]
+	if !ok {
+		pub, _ = wgPublic(priv)
+		a.awgPubs[priv] = pub
+	}
+	return pub
+}
+
+// awgStats turns the service's cumulative counters into deltas since the
+// last sync (a peer that was re-added or a restarted service starts from
+// zero) and counts a user online after a handshake in the last 3 minutes:
+// WireGuard re-handshakes every 2 while traffic flows.
+func (a *App) awgStats(now time.Time) (map[string]trafficEntry, map[string]int, error) {
+	if a.awg == nil {
+		return nil, nil, nil
+	}
+	peers, err := a.awg.Peers()
+	if err != nil {
+		return nil, nil, err
+	}
+	byKey := make(map[string]awgPeer, len(peers))
+	for _, p := range peers {
+		byKey[p.Key] = p
+	}
+	tr, on := map[string]trafficEntry{}, map[string]int{}
+	for _, u := range a.store.List() {
+		p, ok := byKey[a.awgPub(u.AWGKey)]
+		if !ok {
+			continue
+		}
+		last := a.awgSeen[p.Key]
+		d := trafficEntry{Tx: p.Rx - last.Rx, Rx: p.Tx - last.Tx} // Tx: from the client
+		if d.Tx < 0 || d.Rx < 0 {
+			d = trafficEntry{Tx: p.Rx, Rx: p.Tx}
+		}
+		if d.Tx > 0 || d.Rx > 0 {
+			tr[u.Name] = d
+		}
+		if p.LastHandshake > 0 && now.Unix()-p.LastHandshake < 180 {
+			on[u.Name] = 1
+		}
+	}
+	a.awgSeen = byKey
+	return tr, on, nil
+}
+
+// pushAWGPeers makes the service's peers exactly the active users with
+// AmneziaWG on. A removed peer is cut off at once: its session dies with it.
+func (a *App) pushAWGPeers(now time.Time) error {
+	want := []awgPeer{}
+	for _, u := range a.store.List() {
+		if u.Blocked(now) == "" && u.Uses(protoAWG) && u.AWGKey != "" {
+			want = append(want, awgPeer{Key: a.awgPub(u.AWGKey), IP: awgIP(u.AWGIndex)})
+		}
+	}
+	return a.awg.SetPeers(want)
+}
+
 func addTraffic(a, b map[string]trafficEntry) map[string]trafficEntry {
 	if len(b) == 0 {
 		return a
@@ -256,7 +328,7 @@ func (a *App) watchTarget(target, sni string) {
 		a.mu.Lock()
 		a.targetErr = ""
 		if fails >= 2 {
-			a.targetErr = fmt.Sprintf("Сайт для маскировки VLESS (%s) не отвечает по TLS 1.3 + HTTP/2: %v. Смени его: hy-panel xray", sni, err)
+			a.targetErr = fmt.Sprintf("Сайт для маскировки VLESS (%s) не отвечает по TLS 1.3 + HTTP/2: %v. Смени его в панели: VLESS + Reality → «Настройки»", sni, err)
 		}
 		a.mu.Unlock()
 		if fails == 1 {

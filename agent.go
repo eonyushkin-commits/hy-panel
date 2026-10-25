@@ -100,6 +100,15 @@ func jobArgs(action string, p map[string]string) ([]string, error) {
 			return nil, fmt.Errorf("сайт для маскировки %q: нужен домен", t)
 		}
 		return append(args, "-target", t), nil
+	case "awg":
+		args := []string{"awg", "-y"}
+		if port := p["port"]; port != "" {
+			if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+				return nil, fmt.Errorf("порт %q: нужен 1–65535", port)
+			}
+			args = append(args, "-port", port)
+		}
+		return args, nil
 	case "update-hysteria", "update-xray":
 		return []string{"fetch", strings.TrimPrefix(action, "update-")}, nil
 	}
@@ -207,9 +216,12 @@ func systemStatus() map[string]protoStatus {
 		}
 		return s
 	}
+	awg := protoStatus{Installed: fileExists(awgCfgPath) && fileExists(awgUnitPath), Version: "встроен"}
+	awg.Active = awg.Installed && systemctl("is-active", "--quiet", "hy-panel-awg") == nil
 	return map[string]protoStatus{
 		protoHy2:   st(hysteriaBin, hySvc, hysteriaVersion()),
 		protoVless: st(xrayBin, xSvc, xrayVersion()),
+		protoAWG:   awg,
 	}
 }
 

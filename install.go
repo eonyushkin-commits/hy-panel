@@ -375,6 +375,9 @@ func runUninstall(args []string) {
 		if vless {
 			fmt.Println("Xray держит пользователей VLESS до своего перезапуска, после него — никого, пока панель не вернётся.")
 		}
+		if fileExists(awgCfgPath) {
+			fmt.Println("AmneziaWG встроен в панель и остановлен вместе с ней; после установки поднимется с теми же конфигами клиентов.")
+		}
 		fmt.Println("Установить снова — всё вернётся как было:\n    " + installCmd)
 		return
 	}
@@ -406,6 +409,7 @@ func runUninstall(args []string) {
 	}
 	step("remove "+dataDir, os.RemoveAll(dataDir))
 	step("remove "+envPath, os.RemoveAll(envPath))
+	step("remove "+awgCfgPath, os.RemoveAll(awgCfgPath)) // its clients were the panel's users
 	fmt.Println("Удалено вместе с пользователями. Порт, obfs и сертификат Hysteria остались прежними.")
 }
 
@@ -416,10 +420,13 @@ func removePanel() error {
 	if fileExists(unitPath) {
 		errs = append(errs, systemctl("disable", "--now", "hy-panel"))
 	}
-	if fileExists(agentUnitPath) {
-		errs = append(errs, systemctl("disable", "--now", "hy-panel-agent"))
+	// The AmneziaWG server is this binary too: it goes with it.
+	for _, u := range []string{agentUnitPath, awgUnitPath} {
+		if fileExists(u) {
+			errs = append(errs, systemctl("disable", "--now", strings.TrimSuffix(filepath.Base(u), ".service")))
+		}
 	}
-	for _, f := range []string{unitPath, agentUnitPath, binPath} {
+	for _, f := range []string{unitPath, agentUnitPath, awgUnitPath, binPath} {
 		if err := os.Remove(f); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, err)
 		}
