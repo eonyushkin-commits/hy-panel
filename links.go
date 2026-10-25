@@ -152,6 +152,13 @@ func (e Endpoint) Mihomo(u User) string {
 	return b.String()
 }
 
+// realityFP is the browser whose TLS handshake VLESS clients imitate
+// (Reality only works with uTLS fingerprints). Not chrome: its post-quantum
+// key share makes the ClientHello ~1.7 KB, two TCP segments, and some
+// networks drop the second one; Reality then sees half a ClientHello and
+// hands the client to the real site (a timeout). Safari's fits in one.
+const realityFP = "safari"
+
 // VlessURI builds the vless:// share link the way v2rayN and the Xray apps
 // (Happ, v2RayTun, Streisand) read it; "" if VLESS is off.
 func (e Endpoint) VlessURI(u User) string {
@@ -163,7 +170,7 @@ func (e Endpoint) VlessURI(u User) string {
 	q.Set("encryption", "none")
 	q.Set("security", "reality")
 	q.Set("sni", v.SNI)
-	q.Set("fp", "chrome") // a browser's TLS handshake: Reality only works with uTLS fingerprints
+	q.Set("fp", realityFP)
 	q.Set("pbk", v.PublicKey)
 	if v.ShortID != "" {
 		q.Set("sid", v.ShortID)
@@ -209,7 +216,7 @@ func (e Endpoint) MihomoVless(u User) string {
 	w("packet-encoding", "xudp")
 	w("tls", "true")
 	q("servername", v.SNI)
-	w("client-fingerprint", "chrome")
+	w("client-fingerprint", realityFP)
 	w("network", v.Network)
 	if v.Flow != "" {
 		w("flow", v.Flow)

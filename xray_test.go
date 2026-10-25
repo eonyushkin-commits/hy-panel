@@ -548,7 +548,7 @@ func TestVlessLinks(t *testing.T) {
 	}
 	q := v.Query()
 	if v.Scheme != "vless" || v.User.Username() != u.UUID || v.Host != "195.63.134.68:443" || v.Fragment != "NL-phone-vless" ||
-		q.Get("encryption") != "none" || q.Get("security") != "reality" || q.Get("sni") != "lurkpro.tech" || q.Get("fp") != "chrome" ||
+		q.Get("encryption") != "none" || q.Get("security") != "reality" || q.Get("sni") != "lurkpro.tech" || q.Get("fp") != "safari" ||
 		q.Get("pbk") != xs.Link.PublicKey || q.Get("sid") != xs.Link.ShortID || q.Get("type") != "xhttp" ||
 		q.Get("path") != xs.Link.Path || q.Get("mode") != "auto" || q.Has("flow") {
 		t.Fatalf("%s", ep.VlessURI(u))
@@ -567,7 +567,7 @@ func TestVlessLinks(t *testing.T) {
 	xo, _ := m["xhttp-opts"].(map[string]any)
 	ro, _ := m["reality-opts"].(map[string]any)
 	if m["type"] != "vless" || m["name"] != "NL-phone-vless" || m["uuid"] != u.UUID || m["port"] != 443 || m["servername"] != "lurkpro.tech" ||
-		m["network"] != "xhttp" || m["tls"] != true || m["client-fingerprint"] != "chrome" || m["flow"] != nil ||
+		m["network"] != "xhttp" || m["tls"] != true || m["client-fingerprint"] != "safari" || m["flow"] != nil ||
 		xo["path"] != xs.Link.Path || ro["public-key"] != xs.Link.PublicKey || ro["short-id"] != "12345678" {
 		t.Fatalf("%v", m)
 	}
