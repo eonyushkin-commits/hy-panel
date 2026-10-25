@@ -52,9 +52,10 @@ type facts struct {
 
 // plan is what install does.
 type plan struct {
-	update  bool // re-run: panel settings and users stay, nothing is asked about them
-	fresh   bool // write the Hysteria config from the answers
-	connect bool // point the config's own auth at the panel, import its users
+	update     bool // re-run: panel settings and users stay, nothing is asked about them
+	fresh      bool // write the Hysteria config from the answers
+	connect    bool // point the config's own auth at the panel, import its users
+	noHysteria bool // panel only: protocols are installed from the panel
 }
 
 func planInstall(f facts) (plan, error) {
@@ -65,7 +66,8 @@ func planInstall(f facts) (plan, error) {
 	case f.v01:
 		return plan{}, errors.New("стоит прежняя hy-panel v0.1 — сначала удали её: hy-panel uninstall")
 	case f.kind == cfgNone && !f.hysteria:
-		return plan{}, errors.New("Hysteria не установлена. Сначала официальный установщик:\n    bash <(curl -fsSL https://get.hy2.sh/)\n  затем снова установи панель")
+		// A clean server: the panel and its agent; protocols are set up in the panel.
+		return plan{update: f.installed, noHysteria: true}, nil
 	case f.kind == cfgNone:
 		// No working config (first install, or it was deleted or reset to
 		// the template): ask and write one. Panel settings stay as they are.
@@ -126,13 +128,15 @@ func runInstall(args []string) {
 		pl.connect, pl.fresh = false, true
 	}
 	switch {
+	case pl.noHysteria && !pl.update:
+		fmt.Println("Ставлю панель. Протоколы (Hysteria 2, VLESS + Reality) — в панели, раздел «Протоколы».")
 	case pl.fresh:
 		if kind == cfgOwnAuth {
 			fmt.Printf("Настраиваю Hysteria (%s) заново.\n", svc)
 		} else {
 			fmt.Printf("Hysteria (%s) ещё не настроена — настроим её.\n", svc)
 		}
-		opts = askHyOpts(p, nil, *hyPort, env["HYP_HOST"])
+		opts = askHyOpts(p, nil, hyFlags{port: *hyPort}, env["HYP_HOST"])
 		if opts.Domain != "" && *host == "" {
 			env["HYP_HOST"] = opts.Domain
 		}
@@ -180,23 +184,35 @@ func runInstall(args []string) {
 		importUsers(store, old)
 		edit = func(d *yamlDoc) error { return saveOwnAuth(d, authPath) }
 	}
-	cfg, changed := rewriteHyConfig(cfgPath, orig, pl.fresh, edit)
+	changed := false
+	if !pl.noHysteria {
+		cfg, changed = rewriteHyConfig(cfgPath, orig, pl.fresh, edit)
+	}
 	var created []User
 	if !pl.update {
 		created = askUsers(store, p) // before the service owns the file
 	}
 	noInterrupt()
 
+	step("user "+panelUser, systemUser(panelUser, "", false))
 	step("systemd unit → "+unitPath, os.WriteFile(unitPath, []byte(unitFile), 0o644))
+	step("systemd unit → "+agentUnitPath, os.WriteFile(agentUnitPath, []byte(agentUnit), 0o644))
 	if port := env["HYP_UI_PORT"]; port != "off" {
 		_, _, err = panelCert(dataDir, env["HYP_HOST"])
 		step("panel HTTPS certificate", err)
 		ufwAllow(port + "/tcp")
 	}
 	step("systemd daemon-reload", systemctl("daemon-reload"))
+	step("enable hy-panel-agent", systemctl("enable", "hy-panel-agent"))
+	step("restart hy-panel-agent", systemctl("restart", "hy-panel-agent"))
 	step("enable hy-panel", systemctl("enable", "hy-panel"))
 	step("restart hy-panel", systemctl("restart", "hy-panel")) // picks up the new binary
 
+	if pl.noHysteria {
+		fmt.Println("\nГотово. Протоколы ставятся в панели: раздел «Протоколы».")
+		printInfo(env)
+		return
+	}
 	// Every run, not only the first: a run that stopped half-way is finished
 	// by the next one. Both are no-ops when already done.
 	hy := currentOpts(cfg)
@@ -221,8 +237,6 @@ func runInstall(args []string) {
 	}
 }
 
-// saveOwnAuth keeps the config's own auth (and trafficStats, if any), so
-// `uninstall -purge` can give it back.
 func saveOwnAuth(d *yamlDoc, path string) error {
 	keep, _ := parseDoc(nil)
 	for _, k := range []string{"auth", "trafficStats"} {
@@ -349,6 +363,8 @@ func runUninstall(args []string) {
 	}
 	env := readEnv()
 	cfgPath, svc := hyPaths(env)
+	xrayCfg, xraySvc := xrayPaths(env)
+	vless := env["HYP_XRAY_CONFIG"] != ""
 	if err := removePanel(); err != nil {
 		log.Fatalf("✗ %v\nПанель удалена не полностью; пользователи и настройки не тронуты.", err)
 	}
@@ -356,6 +372,12 @@ func runUninstall(args []string) {
 	if !*purge {
 		fmt.Printf("Пользователи и настройки остались (%s, %s).\n", dataDir, envPath)
 		fmt.Println("Пока панели нет, Hysteria не пускает новых клиентов: проверять пароли некому.")
+		if vless {
+			fmt.Println("Xray держит пользователей VLESS до своего перезапуска, после него — никого, пока панель не вернётся.")
+		}
+		if fileExists(awgCfgPath) {
+			fmt.Println("AmneziaWG встроен в панель и остановлен вместе с ней; после установки поднимется с теми же конфигами клиентов.")
+		}
 		fmt.Println("Установить снова — всё вернётся как было:\n    " + installCmd)
 		return
 	}
@@ -367,8 +389,27 @@ func runUninstall(args []string) {
 	} else {
 		fmt.Printf("• своего auth до панели у Hysteria не было: %s остаётся как есть\n", cfgPath)
 	}
+	if vless {
+		// The users are gone: so is their VLESS access, also before Xray's next restart.
+		restored, err := restoreXrayClients(xrayCfg, xrayClientsPath)
+		switch {
+		case err != nil:
+			fmt.Printf("  ✗ вернуть клиентов в %s: %v\n", xrayCfg, err)
+		case restored:
+			fmt.Println("✓ в конфиге Xray снова его прежние клиенты — их ссылки VLESS работают без панели")
+		default:
+			fmt.Printf("• клиентов VLESS до панели не было: в %s их нет (systemctl disable --now %s, если Xray не нужен)\n", xrayCfg, xraySvc)
+		}
+		// Not fatal: the purge must go on to delete the users.
+		if err := systemctl("restart", xraySvc); err != nil {
+			fmt.Printf("  ✗ %v\n", err)
+		} else {
+			fmt.Println("✓ restart " + xraySvc)
+		}
+	}
 	step("remove "+dataDir, os.RemoveAll(dataDir))
 	step("remove "+envPath, os.RemoveAll(envPath))
+	step("remove "+awgCfgPath, os.RemoveAll(awgCfgPath)) // its clients were the panel's users
 	fmt.Println("Удалено вместе с пользователями. Порт, obfs и сертификат Hysteria остались прежними.")
 }
 
@@ -379,7 +420,13 @@ func removePanel() error {
 	if fileExists(unitPath) {
 		errs = append(errs, systemctl("disable", "--now", "hy-panel"))
 	}
-	for _, f := range []string{unitPath, binPath} {
+	// The AmneziaWG server is this binary too: it goes with it.
+	for _, u := range []string{agentUnitPath, awgUnitPath} {
+		if fileExists(u) {
+			errs = append(errs, systemctl("disable", "--now", strings.TrimSuffix(filepath.Base(u), ".service")))
+		}
+	}
+	for _, f := range []string{unitPath, agentUnitPath, awgUnitPath, binPath} {
 		if err := os.Remove(f); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, err)
 		}
@@ -434,7 +481,7 @@ func printInfo(env map[string]string) {
 	} else {
 		fmt.Printf("Панель:  ssh -L 8090:%s root@%s, затем http://localhost:8090\n", panelAddr, host)
 	}
-	fmt.Printf("Пароль:  %s\n\nhy-panel info | passwd | settings | uninstall\n", env["HYP_PASSWORD"])
+	fmt.Printf("Пароль:  %s\n\nhy-panel info | passwd | settings | xray | uninstall\n", env["HYP_PASSWORD"])
 }
 
 // runPasswd sets a new random panel password (`hy-panel passwd`).
@@ -449,7 +496,8 @@ func runPasswd() {
 
 // ---- /etc/hy-panel.env ----
 
-var envKeys = []string{"HYP_PASSWORD", "HYP_UI_PATH", "HYP_UI_PORT", "HYP_HOST", "HYP_NAME", "HYP_HY_CONFIG", "HYP_HY_SERVICE", "HYP_SUB_LISTEN", "HYP_SUB_URL"}
+var envKeys = []string{"HYP_PASSWORD", "HYP_UI_PATH", "HYP_UI_PORT", "HYP_HOST", "HYP_NAME", "HYP_HY_CONFIG", "HYP_HY_SERVICE",
+	"HYP_SUB_LISTEN", "HYP_SUB_URL", "HYP_XRAY_CONFIG", "HYP_XRAY_SERVICE"}
 
 func readEnv() map[string]string {
 	env := map[string]string{}
@@ -501,6 +549,9 @@ func checkEnv(env map[string]string) error {
 		if u, err := url.Parse(s); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			bad("HYP_SUB_URL", "нужен адрес вида https://sub.example.com")
 		}
+	}
+	if s := env["HYP_XRAY_CONFIG"]; s != "" && !filepath.IsAbs(s) {
+		bad("HYP_XRAY_CONFIG", "нужен абсолютный путь к конфигу Xray")
 	}
 	if err := errors.Join(errs...); err != nil {
 		return fmt.Errorf("%s: %w", envPath, err)
