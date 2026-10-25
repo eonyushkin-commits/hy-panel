@@ -254,7 +254,7 @@ proxies:
     ech-opts: {enable: true, config: "AEX+DQBB"}
 
 --- qr proto=hysteria2: 200
-png sha256 22b464037afc187dcdb005654c27fb9f40c1e9e6b4507fa9d31612a9f8e22dd1
+png 320x320 sha256 054b7a91e150f9754095e2981350f478400918108e3ac1a051074784378452bb
 
 --- mihomo proto=awg: 200
 proxies:
@@ -285,7 +285,7 @@ proxies:
       content-padding-addition: "0-32"
 
 --- qr proto=awg: 200
-png sha256 d0f351b8b3f8239203e6a003a3ca7fcb58b258339c560ebf71f7c68209211fe8
+png 480x480 sha256 047086d4a51d6ae1aae4bffebff60300cded731e67517617748883f115fe213e
 
 --- mihomo proto=vless: 200
 proxies:
@@ -304,10 +304,10 @@ proxies:
     reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
 
 --- qr proto=vless: 200
-png sha256 e600b983d160dba7631ebad79f610f24c4e5316031afc0709e44f593ed65b820
+png 320x320 sha256 874eada7d19befd9f754da143ce29d0d70f53167e6e082b2b309b070065d97fc
 
 --- qr: 200
-png sha256 22b464037afc187dcdb005654c27fb9f40c1e9e6b4507fa9d31612a9f8e22dd1
+png 320x320 sha256 054b7a91e150f9754095e2981350f478400918108e3ac1a051074784378452bb
 
 --- awg.conf: 200
 Content-Disposition: attachment; filename="NL-alice-awg.conf"
@@ -532,7 +532,7 @@ proxies:
     ech-opts: {enable: true, config: "AEX+DQBB"}
 
 --- qr proto=hysteria2: 200
-png sha256 2d754c1e8dc12232578c323f0f829e950037abe5fbce495dd4169df341ecdf60
+png 320x320 sha256 7ec14b995b6a12034829df495581dfd9e23c0a93b23cb3edfc7ae267d3027bd3
 
 --- mihomo proto=awg: 200
 proxies:
@@ -563,7 +563,7 @@ proxies:
       content-padding-addition: "0-32"
 
 --- qr proto=awg: 200
-png sha256 706debc41d181316ff6d129feeaa592998913be274d8b1278433f03dc71cbf94
+png 480x480 sha256 3e1fba3117bf137b638b29a3f9d559392fcc838e1c379849844b54f1f1cbff0a
 
 --- mihomo proto=vless: 200
 proxies:
@@ -582,10 +582,10 @@ proxies:
     reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
 
 --- qr proto=vless: 200
-png sha256 dffeddf52c7ca0ba432936ed70fed26d5cd40f74fd7609d6c74726c4a774fc99
+png 320x320 sha256 46793f746077f4030a6309b2bf0211a946f1d60c8ec0256bd6dd36da423ec2ee
 
 --- qr: 200
-png sha256 2d754c1e8dc12232578c323f0f829e950037abe5fbce495dd4169df341ecdf60
+png 320x320 sha256 7ec14b995b6a12034829df495581dfd9e23c0a93b23cb3edfc7ae267d3027bd3
 
 --- awg.conf: 200
 Content-Disposition: attachment; filename="NL-bob-awg.conf"
@@ -718,7 +718,7 @@ proxies:
     ech-opts: {enable: true, config: "AEX+DQBB"}
 
 --- qr proto=hysteria2: 200
-png sha256 5b7eec79735b774a193b5a48a7d309941bb3668862a518d814a2e0cff202584c
+png 320x320 sha256 f3ad873ae5a937c1bfa34762d3fbdcf0f5561704330f311c5a918906e423a4d5
 
 --- mihomo proto=awg: 200
 proxies:
@@ -749,7 +749,7 @@ proxies:
       content-padding-addition: "0-32"
 
 --- qr proto=awg: 200
-png sha256 7a4de4cc70c9c5cd358dbdae04c02efe1b3c9a7147c783ec869e7b31221c288c
+png 480x480 sha256 fbbe5e748d2c3847d1f56a08d3b2628d6cf1992c4a47f3ac5afbdd9bb54af263
 
 --- mihomo proto=vless: 200
 proxies:
@@ -768,10 +768,10 @@ proxies:
     reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
 
 --- qr proto=vless: 200
-png sha256 60da372682ef98e4fc111dae0cca7e304e804c9982fc3fafcbc5d2350a3ca36e
+png 320x320 sha256 b376b67b7c06e007207c8168aa8386979acb6b940057f489e6adde69857103b0
 
 --- qr: 200
-png sha256 5b7eec79735b774a193b5a48a7d309941bb3668862a518d814a2e0cff202584c
+png 320x320 sha256 f3ad873ae5a937c1bfa34762d3fbdcf0f5561704330f311c5a918906e423a4d5
 
 --- awg.conf: 404
 404 page not found
@@ -900,7 +900,7 @@ proxies:
     password: "alice:alice-pass-1"
 
 --- qr proto=hysteria2: 200
-png sha256 3106c77165cfdcc3fb32c4a52b9a6e558dea36b6b36af26229d767bacf4bbd15
+png 320x320 sha256 4e810a4501c5dda73e1756b43cf55df9ed807e9fc709f251773420114185d61f
 
 --- mihomo proto=awg: 200
 proxies:
@@ -924,7 +924,7 @@ proxies:
     reality-opts: {public-key: "pbk-tcp", short-id: ""}
 
 --- qr proto=awg: 200
-png sha256 3106c77165cfdcc3fb32c4a52b9a6e558dea36b6b36af26229d767bacf4bbd15
+png 320x320 sha256 4e810a4501c5dda73e1756b43cf55df9ed807e9fc709f251773420114185d61f
 
 --- mihomo proto=vless: 200
 proxies:
@@ -943,10 +943,10 @@ proxies:
     reality-opts: {public-key: "pbk-tcp", short-id: ""}
 
 --- qr proto=vless: 200
-png sha256 78cc841c3c38a5bf501beba66ca40fb03a97fdb2490cb360753b12425a3cad8e
+png 320x320 sha256 210807bab70e2fbd831696c2663d95ce02fe93d7aca8b4db268cdf7bd7fe6ada
 
 --- qr: 200
-png sha256 3106c77165cfdcc3fb32c4a52b9a6e558dea36b6b36af26229d767bacf4bbd15
+png 320x320 sha256 4e810a4501c5dda73e1756b43cf55df9ed807e9fc709f251773420114185d61f
 
 --- awg.conf: 404
 404 page not found
@@ -1016,7 +1016,7 @@ proxies:
     password: "bob:bob-pass-12"
 
 --- qr proto=hysteria2: 200
-png sha256 514043bb9504f843b2c854148579e61308cac6db4766c4e04f087ee24fd6808e
+png 320x320 sha256 b7e42aee5227bb7444f39146bf63781cc26e123dba71394b7ca587cf1e814b2f
 
 --- mihomo proto=awg: 200
 proxies:
@@ -1027,7 +1027,7 @@ proxies:
     password: "bob:bob-pass-12"
 
 --- qr proto=awg: 200
-png sha256 514043bb9504f843b2c854148579e61308cac6db4766c4e04f087ee24fd6808e
+png 320x320 sha256 b7e42aee5227bb7444f39146bf63781cc26e123dba71394b7ca587cf1e814b2f
 
 --- mihomo proto=vless: 200
 proxies:
@@ -1046,10 +1046,10 @@ proxies:
     reality-opts: {public-key: "pbk-tcp", short-id: ""}
 
 --- qr proto=vless: 200
-png sha256 c55713c3d271f400b33ec7b060b39acbc76ab98fc28d3d0f52a84e90ee520fc8
+png 320x320 sha256 057b886036751cc141a8a89987910d5ce91ef97caf18ed78b47de457db2618a8
 
 --- qr: 200
-png sha256 514043bb9504f843b2c854148579e61308cac6db4766c4e04f087ee24fd6808e
+png 320x320 sha256 b7e42aee5227bb7444f39146bf63781cc26e123dba71394b7ca587cf1e814b2f
 
 --- awg.conf: 404
 404 page not found
@@ -1151,7 +1151,7 @@ proxies:
     password: "carol:carol-pass-1"
 
 --- qr proto=hysteria2: 200
-png sha256 712f4d4071d9db7411810305a09aa339dc55cc484b93849c0ef2d2ac0d69ff4e
+png 320x320 sha256 28d5308d8b4e397b8022663b1a3bed15cf3e4bbd681d8f222780b8b6720bbc5e
 
 --- mihomo proto=awg: 200
 proxies:
@@ -1170,7 +1170,7 @@ proxies:
     reality-opts: {public-key: "pbk-tcp", short-id: ""}
 
 --- qr proto=awg: 200
-png sha256 712f4d4071d9db7411810305a09aa339dc55cc484b93849c0ef2d2ac0d69ff4e
+png 320x320 sha256 28d5308d8b4e397b8022663b1a3bed15cf3e4bbd681d8f222780b8b6720bbc5e
 
 --- mihomo proto=vless: 200
 proxies:
@@ -1189,10 +1189,10 @@ proxies:
     reality-opts: {public-key: "pbk-tcp", short-id: ""}
 
 --- qr proto=vless: 200
-png sha256 de357a20750ef1ab7e058244836d6aed7da38a143de099a3db337be995b377ab
+png 320x320 sha256 4284b99d33bf7545fc3b5a3e376b9c0931292d717ac079ff82fab16e89c19764
 
 --- qr: 200
-png sha256 712f4d4071d9db7411810305a09aa339dc55cc484b93849c0ef2d2ac0d69ff4e
+png 320x320 sha256 28d5308d8b4e397b8022663b1a3bed15cf3e4bbd681d8f222780b8b6720bbc5e
 
 --- awg.conf: 404
 404 page not found

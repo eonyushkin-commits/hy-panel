@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"image/color"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +16,24 @@ import (
 )
 
 var update = flag.Bool("update", false, "rewrite testdata/*.golden")
+
+// pixels fingerprints a PNG by its size and pixels: the encoder's bytes
+// differ between Go versions, the picture does not.
+func pixels(t *testing.T, b []byte) string {
+	img, err := png.Decode(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := sha256.New()
+	r := img.Bounds()
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		for x := r.Min.X; x < r.Max.X; x++ {
+			c := color.GrayModel.Convert(img.At(x, y)).(color.Gray)
+			h.Write([]byte{c.Y})
+		}
+	}
+	return fmt.Sprintf("%dx%d sha256 %x", r.Dx(), r.Dy(), h.Sum(nil))
+}
 
 // TestLinksGolden pins everything clients get — share links, subscriptions
 // in every format, mihomo documents, AmneziaWG configs and QR codes — for
@@ -56,7 +77,7 @@ func TestLinksGolden(t *testing.T) {
 			}
 		}
 		if w.Header().Get("Content-Type") == "image/png" {
-			fmt.Fprintf(&out, "png sha256 %x\n", sha256.Sum256(w.Body.Bytes()))
+			fmt.Fprintf(&out, "png %s\n", pixels(t, w.Body.Bytes()))
 		} else {
 			out.WriteString(w.Body.String())
 		}
