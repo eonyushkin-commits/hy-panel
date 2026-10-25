@@ -208,10 +208,16 @@ func TestAWGHandshake(t *testing.T) {
 	fmt.Fprintf(&b, "public_key=%s\nendpoint=%s\nallowed_ip=0.0.0.0/0\n", b64hex(conf["Peer"]["PublicKey"]), conf["Peer"]["Endpoint"])
 	_, cli := newTestDevice(t, b.String())
 
-	// A packet from the client to the internet starts the handshake.
-	cli.Outbound <- tuntest.Ping(netip.MustParseAddr("1.1.1.1"), netip.MustParseAddr("10.66.0.2"))
+	// Packets from the client to the internet start the handshake. Not one
+	// packet: AmneziaWG tells message types by size, and content padding now
+	// and then makes a data packet the size of a cookie reply, which the
+	// server then drops. Real traffic goes on; so does this.
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
+		select {
+		case cli.Outbound <- tuntest.Ping(netip.MustParseAddr("1.1.1.1"), netip.MustParseAddr("10.66.0.2")):
+		default:
+		}
 		if ps, _ := devPeers(srv); len(ps) == 1 && ps[0].LastHandshake > 0 && ps[0].Rx > 0 {
 			a.syncOnce(time.Now())
 			if a.aonline["u"] != 1 {
@@ -231,7 +237,7 @@ func TestAWGHandshake(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	ps, _ := devPeers(srv)
-	t.Fatalf("no handshake: %+v", ps)
+	t.Fatalf("no handshake: %+v\nserver: %+v", ps, *c)
 }
 
 // TestAWGConfigsAccepted gives amneziawg-go many random server configs:
