@@ -524,6 +524,22 @@ func (a *App) handleJobStart(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleJob(w http.ResponseWriter, r *http.Request) { a.proxyAgent(w, "GET", "/job", nil) }
 
+// handleReleases has the agent ask GitHub now, then answers as GET /api/system.
+func (a *App) handleReleases(w http.ResponseWriter, r *http.Request) {
+	if a.agent == nil {
+		http.Error(w, errNoAgent.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	if code, b, err := a.agent.do("POST", "/releases", nil); err != nil || code != http.StatusOK {
+		if err == nil {
+			err = errors.New(strings.TrimSpace(string(b)))
+		}
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	a.handleSystem(w, r)
+}
+
 func (a *App) proxyAgent(w http.ResponseWriter, method, path string, body io.Reader) {
 	if a.agent == nil {
 		http.Error(w, errNoAgent.Error(), http.StatusServiceUnavailable)
@@ -620,9 +636,7 @@ func (a *App) routes(withAuth bool) http.Handler {
 	mux.HandleFunc("GET /api/system", a.guard(a.handleSystem))
 	mux.HandleFunc("POST /api/system/jobs", a.guard(a.handleJobStart))
 	mux.HandleFunc("GET /api/system/job", a.guard(a.handleJob))
-	mux.HandleFunc("POST /api/system/releases", a.guard(func(w http.ResponseWriter, r *http.Request) {
-		a.proxyAgent(w, "POST", "/releases", nil)
-	}))
+	mux.HandleFunc("POST /api/system/releases", a.guard(a.handleReleases))
 	mux.HandleFunc("GET /api/system/check-target", a.guard(a.handleCheckTarget))
 	mux.HandleFunc("POST /api/system/site-scan", a.guard(a.handleSiteScanStart))
 	mux.HandleFunc("GET /api/system/site-scan", a.guard(a.handleSiteScan))

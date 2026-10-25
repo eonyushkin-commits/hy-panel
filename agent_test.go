@@ -200,7 +200,7 @@ func TestLatestRelease(t *testing.T) {
 
 	defer func(h, x string) { hysteriaURL, xrayURL = h, x }(hysteriaURL, xrayURL)
 	hysteriaURL, xrayURL = srv.URL+"/apernet/hysteria/releases/latest/download/", srv.URL+"/mirror/download/"
-	var r releases
+	r := releases{latest: map[string]release{}}
 	if v, e := r.get(protoHy2); v != (hyVersion{}) || e == "" {
 		t.Errorf("before a check: %v %q", v, e)
 	}

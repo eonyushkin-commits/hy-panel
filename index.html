@@ -404,7 +404,7 @@ $('#pgrid').onclick = e => {
 
 async function checkReleases(p, b) {
   b.disabled = true; b.textContent = 'Проверяю…';
-  try { SYS.status = await api('POST', 'api/system/releases'); } catch { renderProtocols(); return; }
+  try { SYS = await api('POST', 'api/system/releases'); } catch { return renderProtocols(); }
   renderProtocols();
   const s = SYS.status[p.id] || {};
   if (s.update) toast(`${p.title}: вышла ${s.latest}`);

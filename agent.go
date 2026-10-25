@@ -125,7 +125,7 @@ func runAgent() {
 		log.Fatal(err)
 	}
 	a := &agent{bin: bin}
-	rel := &releases{}
+	rel := &releases{latest: map[string]release{}}
 	go rel.watch()
 	os.Remove(agentSock)
 	l, err := net.Listen("unix", agentSock)
@@ -141,10 +141,10 @@ func runAgent() {
 		log.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, systemStatus(rel.get)) })
+	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, systemStatus(rel)) })
 	mux.HandleFunc("POST /releases", func(w http.ResponseWriter, r *http.Request) {
 		rel.check()
-		writeJSON(w, systemStatus(rel.get))
+		writeJSON(w, struct{}{})
 	})
 	mux.HandleFunc("GET /job", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, a.current()) })
 	mux.HandleFunc("POST /jobs", a.handleStart)
@@ -217,18 +217,18 @@ type protoStatus struct {
 	LatestErr string `json:"latestErr,omitempty"` // why the latest is not known
 }
 
-// systemStatus describes the servers; latest gives a protocol's latest
-// release (zero if not known, with the reason if there is one).
-func systemStatus(latest func(proto string) (hyVersion, string)) map[string]protoStatus {
+// systemStatus describes the servers, with the latest releases rel knows.
+func systemStatus(rel *releases) map[string]protoStatus {
 	env := readEnvNoFatal()
 	_, hySvc := hyPaths(env)
 	_, xSvc := xrayPaths(env)
-	st := func(proto, bin, svc string, v hyVersion) protoStatus {
+	st := func(proto, bin, svc string, version func() hyVersion) protoStatus {
 		s := protoStatus{Installed: fileExists(bin) && unitExists(svc)}
 		if s.Installed {
+			v := version()
 			s.Version = v.String()
 			s.Active = systemctl("is-active", "--quiet", svc) == nil
-			if l, err := latest(proto); l != (hyVersion{}) {
+			if l, err := rel.get(proto); l != (hyVersion{}) {
 				s.Latest, s.Update = l.String(), !v.atLeast(l)
 			} else {
 				s.LatestErr = err
@@ -239,8 +239,8 @@ func systemStatus(latest func(proto string) (hyVersion, string)) map[string]prot
 	awg := protoStatus{Installed: fileExists(awgCfgPath) && fileExists(awgUnitPath), Version: "встроен"}
 	awg.Active = awg.Installed && systemctl("is-active", "--quiet", "hy-panel-awg") == nil
 	return map[string]protoStatus{
-		protoHy2:   st(protoHy2, hysteriaBin, hySvc, hysteriaVersion()),
-		protoVless: st(protoVless, xrayBin, xSvc, xrayVersion()),
+		protoHy2:   st(protoHy2, hysteriaBin, hySvc, hysteriaVersion),
+		protoVless: st(protoVless, xrayBin, xSvc, xrayVersion),
 		protoAWG:   awg,
 	}
 }
@@ -280,9 +280,6 @@ func (r *releases) check() bool {
 			v, err := latestRelease(base)
 			r.mu.Lock()
 			defer r.mu.Unlock()
-			if r.latest == nil {
-				r.latest = map[string]release{}
-			}
 			if err != nil {
 				log.Printf("latest release: %v", err)
 				ok = false
@@ -298,10 +295,12 @@ func (r *releases) check() bool {
 	return ok
 }
 
+// watch checks a few times a day; while neither server is installed there
+// is nothing to compare with, so it does not ask.
 func (r *releases) watch() {
 	for {
 		next := 6 * time.Hour
-		if !r.check() {
+		if (fileExists(hysteriaBin) || fileExists(xrayBin)) && !r.check() {
 			next = 30 * time.Minute
 		}
 		time.Sleep(next)
