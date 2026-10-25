@@ -5,18 +5,25 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>hy-panel</title>
+<script>try { const t = localStorage.getItem('theme'); if (t) document.documentElement.dataset.theme = t; } catch {}</script>
 <style>
 :root{
   --bg:#f5f6f8;--surface:#fff;--surface-2:#f0f2f5;--fg:#111318;--mute:#6b7280;--line:#e4e7ec;
   --acc:#4f46e5;--acc-soft:#4f46e51a;--ok:#16a34a;--ok-soft:#16a34a1f;--bad:#dc2626;--bad-soft:#dc26261a;--warn:#c2410c;--warn-soft:#ea580c1f;
   --shadow:0 1px 2px #1018280d,0 1px 3px #1018280f;--shadow-lg:0 20px 40px -12px #10182840;
-  --r:14px;--r-sm:9px;
+  --r:14px;--r-sm:9px;--on-acc:#fff;
 }
-@media (prefers-color-scheme:dark){:root{
+/* dark: the system's choice, or the one made with the header button */
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
   --bg:#0c0d10;--surface:#15171c;--surface-2:#1d2027;--fg:#e8eaee;--mute:#8d94a1;--line:#262a33;
   --acc:#818cf8;--acc-soft:#818cf826;--ok:#4ade80;--ok-soft:#4ade801f;--bad:#f87171;--bad-soft:#f871711f;--warn:#fb923c;--warn-soft:#fb923c1f;
-  --shadow:0 0 0 1px #ffffff08;--shadow-lg:0 24px 48px -12px #000a;
+  --shadow:0 0 0 1px #ffffff08;--shadow-lg:0 24px 48px -12px #000a;color-scheme:dark;--on-acc:#0c0d10;
 }}
+:root[data-theme=dark]{
+  --bg:#0c0d10;--surface:#15171c;--surface-2:#1d2027;--fg:#e8eaee;--mute:#8d94a1;--line:#262a33;
+  --acc:#818cf8;--acc-soft:#818cf826;--ok:#4ade80;--ok-soft:#4ade801f;--bad:#f87171;--bad-soft:#f871711f;--warn:#fb923c;--warn-soft:#fb923c1f;
+  --shadow:0 0 0 1px #ffffff08;--shadow-lg:0 24px 48px -12px #000a;color-scheme:dark;--on-acc:#0c0d10;
+}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
@@ -29,7 +36,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 button{display:inline-flex;align-items:center;justify-content:center;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:7px 12px;cursor:pointer;transition:background .15s,border-color .15s,color .15s}
 button:hover{background:var(--surface-2)}
 button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
-button.pri{background:var(--acc);border-color:transparent;color:#fff;font-weight:550}
+button.pri{background:var(--acc);border-color:transparent;color:var(--on-acc);font-weight:550}
 button.pri:hover{filter:brightness(1.08)}
 button.ghost{background:none;border-color:transparent}
 button.ghost:hover{background:var(--surface-2)}
@@ -44,9 +51,8 @@ input:hover,textarea:hover,select:hover{border-color:var(--mute)}
 /* header */
 .top{position:sticky;top:0;z-index:5;margin:0 -16px 20px;padding:14px 16px;display:flex;align-items:center;gap:12px;background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
 .brand{display:flex;align-items:center;gap:10px;min-width:0;margin-right:auto}
-.logo{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--acc),#06b6d4);color:#fff;display:grid;place-items:center;font-weight:700;font-size:14px;flex:none}
-.srv{display:flex;gap:6px;flex-wrap:wrap;margin-top:2px}
-.chip{font-size:11.5px;padding:1px 8px;border-radius:99px;background:var(--surface-2);color:var(--mute);white-space:nowrap}
+.logo{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--acc),#06b6d4);color:#fff;display:grid;place-items:center;flex:none}
+.logo svg{width:60%;height:60%}
 
 /* stats */
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
@@ -125,7 +131,7 @@ label span{display:block;font-size:12.5px;color:var(--mute);margin-bottom:4px}
 textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface-2);border-color:transparent;resize:vertical}
 .hint{margin-top:8px}
 #login{max-width:340px;margin:18vh auto 0;padding:28px 24px}
-#login .logo{width:40px;height:40px;font-size:18px;border-radius:12px;margin-bottom:14px}
+#login .logo{width:40px;height:40px;border-radius:12px;margin-bottom:14px}
 #login h1{margin-bottom:4px}
 #login form{margin-top:18px;display:grid;gap:12px}
 
@@ -155,14 +161,17 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
   <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></symbol>
 </svg>
 
 <main>
   <div id="login" class="card" hidden>
-    <div class="logo">H</div>
+    <div class="logo"><svg class="i"><use href="#i-globe"/></svg></div>
     <h1>hy-panel</h1>
-    <div class="mute small">Панель пользователей Hysteria 2</div>
+    <div class="mute small">VPN-панель: Hysteria 2, AmneziaWG, VLESS</div>
     <form>
       <input type="password" name="password" placeholder="Пароль" autocomplete="current-password" autofocus>
       <button class="pri">Войти</button>
@@ -172,13 +181,14 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
   <div id="app" hidden>
     <header class="top">
       <div class="brand">
-        <div class="logo">H</div>
+        <div class="logo"><svg class="i"><use href="#i-globe"/></svg></div>
         <div style="min-width:0">
-          <h1 id="title">Hysteria 2</h1>
-          <div class="srv" id="srv"></div>
+          <h1>hy-panel</h1>
+          <div class="mute small" id="host"></div>
         </div>
       </div>
       <button class="pri" onclick="openEdit()"><svg class="i"><use href="#i-plus"/></svg><span class="lbl">Пользователь</span></button>
+      <button class="icon ghost" id="themeBtn" onclick="toggleTheme()"><svg class="i"><use href="#i-moon"/></svg></button>
       <button class="icon ghost" onclick="logout()" title="Выйти" aria-label="Выйти"><svg class="i"><use href="#i-out"/></svg></button>
     </header>
 
@@ -330,6 +340,26 @@ async function api(method, path, body) {
   return ct.includes('json') ? r.json() : r.text();
 }
 
+// ---- theme: the system's until the viewer picks one; kept in this browser ----
+function setTheme(t) {
+  if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  const dark = t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  const b = $('#themeBtn'), label = dark ? 'Светлая тема' : 'Тёмная тема';
+  b.title = label; b.setAttribute('aria-label', label);
+  b.querySelector('use').setAttribute('href', dark ? '#i-sun' : '#i-moon');
+}
+function toggleTheme() {
+  const dark = document.documentElement.dataset.theme
+    ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  const t = dark ? 'light' : 'dark';
+  try { localStorage.setItem('theme', t); } catch {}
+  setTheme(t);
+}
+let savedTheme = null;
+try { savedTheme = localStorage.getItem('theme'); } catch {}
+setTheme(savedTheme);
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => setTheme(document.documentElement.dataset.theme));
+
 function showLogin() { $('#app').hidden = true; $('#login').hidden = false; $('#login input').focus(); }
 $('#login form').onsubmit = async e => {
   e.preventDefault();
@@ -340,12 +370,7 @@ async function logout() { await api('POST', 'api/logout'); showLogin(); }
 async function load() {
   try { S = await api('GET', 'api/state'); } catch { return; }
   $('#login').hidden = true; $('#app').hidden = false;
-  const sv = S.server, vl = sv.vless;
-  $('#title').textContent = protos().map(p => p.title).join(' · ') || 'hy-panel';
-  const hy = protos().some(p => p.id === 'hysteria2');
-  $('#srv').innerHTML = [hy ? `${sv.host}:${sv.port}` : sv.host, hy && sv.obfs, hy && sv.pinned && 'self-signed · pin', hy && sv.sni && 'sni ' + sv.sni,
-    vl && `vless :${vl.port}/tcp · ${vl.sni}`]
-    .filter(Boolean).map(c => `<span class="chip">${esc(c)}</span>`).join('');
+  $('#host').textContent = 'Сервер ' + S.server.host; // protocol details are on their cards
   $('#hyerr').hidden = !S.hyError;
   $('#hyerr').innerHTML = icon('alert') + '<span>' + esc(S.hyError) + '</span>';
   stats();
