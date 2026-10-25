@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -16,21 +17,22 @@ import (
 )
 
 type User struct {
-	Name         string `json:"name"`
-	Password     string `json:"password"`
-	SubToken     string `json:"subToken"`
-	UUID         string `json:"uuid"` // VLESS key (Xray)
-	Enabled      bool   `json:"enabled"`
-	QuotaBytes   int64  `json:"quotaBytes"`   // 0 = unlimited, counts up+down
-	ResetMonthly bool   `json:"resetMonthly"` // zero traffic on the 1st of each month (server time)
-	LastReset    int    `json:"lastReset"`    // yyyymm of the last monthly reset
-	ExpiresAt    int64  `json:"expiresAt"`    // unix seconds, 0 = never
-	MaxDevices   int    `json:"maxDevices"`   // 0 = unlimited
-	Up           int64  `json:"up"`           // client → server
-	Down         int64  `json:"down"`         // server → client
-	CreatedAt    int64  `json:"createdAt"`
-	LastSeen     int64  `json:"lastSeen"`
-	Note         string `json:"note"`
+	Name         string   `json:"name"`
+	Password     string   `json:"password"`
+	SubToken     string   `json:"subToken"`
+	UUID         string   `json:"uuid"`               // VLESS key (Xray)
+	ProtoOff     []string `json:"protoOff,omitempty"` // protocols the user may not use; empty = all
+	Enabled      bool     `json:"enabled"`
+	QuotaBytes   int64    `json:"quotaBytes"`   // 0 = unlimited, counts up+down
+	ResetMonthly bool     `json:"resetMonthly"` // zero traffic on the 1st of each month (server time)
+	LastReset    int      `json:"lastReset"`    // yyyymm of the last monthly reset
+	ExpiresAt    int64    `json:"expiresAt"`    // unix seconds, 0 = never
+	MaxDevices   int      `json:"maxDevices"`   // 0 = unlimited
+	Up           int64    `json:"up"`           // client → server
+	Down         int64    `json:"down"`         // server → client
+	CreatedAt    int64    `json:"createdAt"`
+	LastSeen     int64    `json:"lastSeen"`
+	Note         string   `json:"note"`
 }
 
 // Blocked returns why the user may not connect right now, "" if allowed.
@@ -45,6 +47,9 @@ func (u *User) Blocked(now time.Time) string {
 	}
 	return ""
 }
+
+// Uses reports whether the user may connect over proto.
+func (u *User) Uses(proto string) bool { return !slices.Contains(u.ProtoOff, proto) }
 
 func yyyymm(t time.Time) int { return t.Year()*100 + int(t.Month()) }
 

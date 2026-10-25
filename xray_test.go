@@ -713,3 +713,91 @@ func TestCheckEnvXray(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// ---- protocols per user ----
+
+func TestUserProtocolsOff(t *testing.T) {
+	a, hy, fx := xrayApp(t)
+	xs, _ := parseXray(freshXray("443", "lurkpro.tech"))
+	a.ep = Endpoint{Host: "203.0.113.7", Port: "443", Name: "NL", Vless: &xs.Link}
+	u := mustCreate(t, a.store, User{Name: "u", Password: "secret123"}, false)
+	hy.connect("u")
+	a.syncOnce(time.Now())
+	if _, in := fx.snapshot()["u"]; !in {
+		t.Fatal("u not in xray")
+	}
+
+	// Hysteria off: no new sessions, the open one is kicked; VLESS stays.
+	patch(t, a, "u", `{"protoOff":["hysteria2"]}`)
+	if ok, _, why := a.authorize("u:secret123"); ok || !strings.Contains(why, "hysteria off") {
+		t.Fatalf("authorize: %v %s", ok, why)
+	}
+	a.syncOnce(time.Now())
+	hy.send("u")
+	a.syncOnce(time.Now())
+	if conns, kicks, _ := hy.state(); conns != 0 || kicks != 1 {
+		t.Fatalf("hysteria session left: conns=%d kicks=%d", conns, kicks)
+	}
+	u, _ = a.store.Get("u")
+	if _, in := fx.snapshot()["u"]; !in || !slices.Equal(a.ep.UserProtocols(u), []string{protoVless}) {
+		t.Fatalf("vless lost: %v", a.ep.UserProtocols(u))
+	}
+	if ls := a.ep.URIs(u); len(ls) != 1 || !strings.HasPrefix(ls[0], "vless://") {
+		t.Fatalf("links %v", ls)
+	}
+	if d := a.ep.MihomoDoc(u); strings.Contains(d, "hysteria2") || !strings.Contains(d, "type: vless") {
+		t.Fatal(d)
+	}
+
+	// VLESS off too: out of Xray. All on again: both back.
+	patch(t, a, "u", `{"protoOff":["vless","hysteria2","vless"]}`)
+	a.syncOnce(time.Now())
+	if _, in := fx.snapshot()["u"]; in {
+		t.Fatal("vless-off user still in xray")
+	}
+	if u, _ = a.store.Get("u"); !slices.Equal(u.ProtoOff, []string{"hysteria2", "vless"}) || len(a.ep.URIs(u)) != 0 {
+		t.Fatalf("%v %v", u.ProtoOff, a.ep.URIs(u))
+	}
+	patch(t, a, "u", `{"protoOff":[]}`)
+	a.syncOnce(time.Now())
+	if u, _ = a.store.Get("u"); u.ProtoOff != nil || len(a.ep.URIs(u)) != 2 {
+		t.Fatalf("%v", u.ProtoOff)
+	}
+	if ok, _, _ := a.authorize("u:secret123"); !ok {
+		t.Fatal("hysteria still off")
+	}
+
+	r := httptest.NewRequest("PATCH", "/api/users/u", strings.NewReader(`{"protoOff":["openvpn"]}`))
+	r.SetPathValue("name", "u")
+	w := httptest.NewRecorder()
+	a.handlePatch(w, r)
+	if w.Code != 400 {
+		t.Fatalf("unknown protocol accepted: %d", w.Code)
+	}
+}
+
+func TestMihomoFallback(t *testing.T) {
+	xs, _ := parseXray(freshXray("443", "lurkpro.tech"))
+	ep := Endpoint{Host: "203.0.113.7", Port: "443", Name: "NL", Vless: &xs.Link}
+	u := User{Name: "phone", Password: "Pw123456", UUID: newUUID()}
+	var doc struct {
+		Proxies     []map[string]any
+		ProxyGroups []struct {
+			Name, Type, URL string
+			Proxies         []string
+		} `yaml:"proxy-groups"`
+	}
+	if err := yaml.Unmarshal([]byte(ep.MihomoFallback(u)), &doc); err != nil {
+		t.Fatalf("%v\n%s", err, ep.MihomoFallback(u))
+	}
+	g := doc.ProxyGroups
+	if len(doc.Proxies) != 2 || len(g) != 1 || g[0].Name != "NL" || g[0].Type != "fallback" ||
+		!slices.Equal(g[0].Proxies, []string{"NL-phone", "NL-phone-vless"}) {
+		t.Fatalf("%+v", doc)
+	}
+	// One protocol: still a valid group.
+	u.ProtoOff = []string{protoHy2}
+	if err := yaml.Unmarshal([]byte(ep.MihomoFallback(u)), &doc); err != nil || !slices.Equal(doc.ProxyGroups[0].Proxies, []string{"NL-phone-vless"}) {
+		t.Fatalf("%v %+v", err, doc)
+	}
+}

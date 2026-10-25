@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -147,7 +148,13 @@ type userView struct {
 	Status     string `json:"status"`     // "", disabled, expired, quota
 	URI        string `json:"uri"`
 	VlessURI   string `json:"vlessUri"`
+	Links      []link `json:"links"` // the user's protocols, in fallback order
 	SubPath    string `json:"subPath"`
+}
+
+type link struct {
+	Proto string `json:"proto"`
+	URI   string `json:"uri"`
 }
 
 func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
@@ -179,7 +186,14 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 	views := make([]userView, len(users))
 	for i, u := range users {
 		views[i] = userView{User: u, Online: on[u.Name], XrayOnline: xon[u.Name], Status: u.Blocked(now),
-			URI: a.ep.URI(u), VlessURI: a.ep.VlessURI(u), SubPath: "/sub/" + u.SubToken}
+			URI: a.ep.URI(u), VlessURI: a.ep.VlessURI(u), Links: []link{}, SubPath: "/sub/" + u.SubToken}
+		for _, p := range a.ep.UserProtocols(u) {
+			views[i].Links = append(views[i].Links, link{p, a.ep.Link(p, u)})
+		}
+	}
+	protos := []map[string]string{}
+	for _, p := range a.ep.Protocols() {
+		protos = append(protos, map[string]string{"id": p, "title": protoTitle(p)})
 	}
 	var vless any
 	if v := a.ep.Vless; v != nil {
@@ -188,7 +202,7 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"users": views,
 		"server": map[string]any{"host": a.ep.Host, "port": a.ep.Port, "obfs": a.ep.ObfsType, "sni": a.ep.SNI, "pinned": a.ep.Pin != "",
-			"vless": vless},
+			"vless": vless, "protocols": protos},
 		"hyError":  strings.Join(problems, "; "),
 		"lastSync": last.Unix(),
 		"subBase":  a.subBase,
@@ -196,16 +210,17 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 }
 
 type userPatch struct {
-	Name         string  `json:"name"`
-	Password     *string `json:"password"` // "" = generate
-	Enabled      *bool   `json:"enabled"`
-	QuotaBytes   *int64  `json:"quotaBytes"`
-	ResetMonthly *bool   `json:"resetMonthly"`
-	ExpiresAt    *int64  `json:"expiresAt"`
-	MaxDevices   *int    `json:"maxDevices"`
-	Note         *string `json:"note"`
-	ResetTraffic bool    `json:"resetTraffic"`
-	NewKey       bool    `json:"newKey"` // new password, VLESS key and subscription link
+	Name         string    `json:"name"`
+	Password     *string   `json:"password"` // "" = generate
+	Enabled      *bool     `json:"enabled"`
+	QuotaBytes   *int64    `json:"quotaBytes"`
+	ResetMonthly *bool     `json:"resetMonthly"`
+	ExpiresAt    *int64    `json:"expiresAt"`
+	MaxDevices   *int      `json:"maxDevices"`
+	Note         *string   `json:"note"`
+	ProtoOff     *[]string `json:"protoOff"` // protocols the user may not use
+	ResetTraffic bool      `json:"resetTraffic"`
+	NewKey       bool      `json:"newKey"` // new password, VLESS key and subscription link
 }
 
 // check rejects a hand-set password too short for Hysteria, which also
@@ -213,6 +228,13 @@ type userPatch struct {
 func (p userPatch) check() error {
 	if p.Password != nil && *p.Password != "" && len(*p.Password) < 8 {
 		return errors.New("пароль: не короче 8 символов (пусто — сгенерировать)")
+	}
+	if p.ProtoOff != nil {
+		for _, id := range *p.ProtoOff {
+			if !knownProto(id) {
+				return errors.New("неизвестный протокол: " + id)
+			}
+		}
 	}
 	return nil
 }
@@ -238,6 +260,14 @@ func (p userPatch) apply(u *User, now time.Time) {
 	}
 	if p.Note != nil {
 		u.Note = strings.TrimSpace(*p.Note)
+	}
+	if p.ProtoOff != nil {
+		off := slices.Clone(*p.ProtoOff)
+		slices.Sort(off)
+		u.ProtoOff = slices.Compact(off)
+		if len(u.ProtoOff) == 0 {
+			u.ProtoOff = nil
+		}
 	}
 	if p.ResetTraffic {
 		u.Up, u.Down = 0, 0
@@ -336,8 +366,8 @@ func (a *App) handleQR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	text := a.ep.URI(u)
-	if r.URL.Query().Has("vless") && a.ep.Vless != nil {
-		text = a.ep.VlessURI(u)
+	if p := r.URL.Query().Get("proto"); slices.Contains(a.ep.Protocols(), p) {
+		text = a.ep.Link(p, u)
 	}
 	if r.URL.Query().Has("sub") && a.subBase != "" {
 		text = a.subBase + "/sub/" + u.SubToken
@@ -363,7 +393,15 @@ func (a *App) handleMihomo(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	fmt.Fprint(w, a.ep.MihomoDoc(u))
+	q := r.URL.Query()
+	switch p := q.Get("proto"); {
+	case slices.Contains(a.ep.Protocols(), p):
+		fmt.Fprint(w, "proxies:\n"+a.ep.MihomoProxy(p, u))
+	case q.Has("fallback"):
+		fmt.Fprint(w, a.ep.MihomoFallback(u))
+	default:
+		fmt.Fprint(w, a.ep.MihomoDoc(u))
+	}
 }
 
 // ---- subscription (public listener, token-protected) ----

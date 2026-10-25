@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -223,16 +224,128 @@ func (e Endpoint) MihomoVless(u User) string {
 	return b.String()
 }
 
-// URIs are the share links of every protocol the server runs, Hysteria first.
-func (e Endpoint) URIs(u User) []string {
-	if l := e.VlessURI(u); l != "" {
-		return []string{e.URI(u), l}
-	}
-	return []string{e.URI(u)}
+// ---- protocols ----
+
+const (
+	protoHy2   = "hysteria2"
+	protoVless = "vless"
+)
+
+// protoTitles name the protocols in the panel, in fallback order: Hysteria
+// (fast, UDP) first, VLESS over TCP when UDP is cut.
+var protoTitles = []struct{ ID, Title string }{
+	{protoHy2, "Hysteria 2"},
+	{protoVless, "VLESS"},
 }
 
-// MihomoDoc is a complete mihomo proxy-provider document for u.
-func (e Endpoint) MihomoDoc(u User) string { return "proxies:\n" + e.Mihomo(u) + e.MihomoVless(u) }
+func knownProto(id string) bool {
+	return slices.ContainsFunc(protoTitles, func(p struct{ ID, Title string }) bool { return p.ID == id })
+}
+
+func protoTitle(id string) string {
+	for _, p := range protoTitles {
+		if p.ID == id {
+			return p.Title
+		}
+	}
+	return id
+}
+
+// Protocols the server runs, in fallback order.
+func (e Endpoint) Protocols() []string {
+	var ps []string
+	for _, p := range protoTitles {
+		switch {
+		case p.ID == protoHy2 && e.Port != "", p.ID == protoVless && e.Vless != nil:
+			ps = append(ps, p.ID)
+		}
+	}
+	return ps
+}
+
+// UserProtocols are the server's protocols u may use, in fallback order.
+func (e Endpoint) UserProtocols(u User) []string {
+	var ps []string
+	for _, p := range e.Protocols() {
+		if u.Uses(p) {
+			ps = append(ps, p)
+		}
+	}
+	return ps
+}
+
+// Link is u's share link for one protocol.
+func (e Endpoint) Link(proto string, u User) string {
+	switch proto {
+	case protoHy2:
+		return e.URI(u)
+	case protoVless:
+		return e.VlessURI(u)
+	}
+	return ""
+}
+
+// URIs are u's share links, in fallback order.
+func (e Endpoint) URIs(u User) []string {
+	var ls []string
+	for _, p := range e.UserProtocols(u) {
+		ls = append(ls, e.Link(p, u))
+	}
+	return ls
+}
+
+// proxyName is the name of u's proxy for proto in mihomo and the apps.
+func (e Endpoint) proxyName(proto string, u User) string {
+	if proto == protoVless {
+		return e.vlessRemark(u)
+	}
+	return e.remark(u)
+}
+
+// MihomoProxy is the proxy list item of one protocol.
+func (e Endpoint) MihomoProxy(proto string, u User) string {
+	switch proto {
+	case protoHy2:
+		return e.Mihomo(u)
+	case protoVless:
+		return e.MihomoVless(u)
+	}
+	return ""
+}
+
+// MihomoDoc is a complete mihomo proxy-provider document for u: a proxy
+// for each of u's protocols.
+func (e Endpoint) MihomoDoc(u User) string {
+	var b strings.Builder
+	b.WriteString("proxies:\n")
+	for _, p := range e.UserProtocols(u) {
+		b.WriteString(e.MihomoProxy(p, u))
+	}
+	return b.String()
+}
+
+// MihomoFallback is u's proxies plus a fallback group over them in the
+// panel's order: when a protocol is blocked, mihomo moves to the next one.
+func (e Endpoint) MihomoFallback(u User) string {
+	var names []string
+	for _, p := range e.UserProtocols(u) {
+		names = append(names, fmt.Sprintf("%q", e.proxyName(p, u)))
+	}
+	return e.MihomoDoc(u) + fmt.Sprintf(`proxy-groups:
+  - name: %q
+    type: fallback
+    proxies: [%s]
+    url: https://www.gstatic.com/generate_204
+    interval: 120
+`, e.groupName(), strings.Join(names, ", "))
+}
+
+func (e Endpoint) groupName() string {
+	if e.Name == "" {
+		return "VPN"
+	}
+	return e.Name
+}
 
 func subscriptionUserinfo(u User) string {
 	return fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", u.Up, u.Down, u.QuotaBytes, u.ExpiresAt)

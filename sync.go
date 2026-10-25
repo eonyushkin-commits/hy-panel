@@ -57,6 +57,9 @@ func (a *App) authorize(auth string) (bool, string, string) {
 	if why := u.Blocked(time.Now()); why != "" {
 		return false, u.Name, why
 	}
+	if !u.Uses(protoHy2) {
+		return false, u.Name, "hysteria off for user"
+	}
 	if u.MaxDevices > 0 {
 		a.mu.RLock()
 		n := a.online[u.Name]
@@ -162,7 +165,7 @@ func (a *App) pushXrayUsers(now time.Time) error {
 	}
 	var add []User
 	for _, u := range a.store.List() {
-		if u.Blocked(now) != "" {
+		if u.Blocked(now) != "" || !u.Uses(protoVless) {
 			continue // stays in have: taken out below
 		}
 		if have[u.Name] == u.UUID {
@@ -256,7 +259,7 @@ func (a *App) watchTarget(target, sni string) {
 // mustDrop reports whether online sessions of name must be closed.
 func (a *App) mustDrop(name string, now time.Time) bool {
 	u, ok := a.store.Get(name)
-	if !ok || u.Blocked(now) != "" {
+	if !ok || u.Blocked(now) != "" || !u.Uses(protoHy2) {
 		return true
 	}
 	a.mu.RLock()
@@ -266,7 +269,7 @@ func (a *App) mustDrop(name string, now time.Time) bool {
 }
 
 // enforce closes sessions of deleted, disabled, expired, over-quota and
-// re-keyed users.
+// re-keyed users, and of users whose Hysteria was switched off.
 //
 // Hysteria's kick is a one-shot flag per ID: the next traffic of any session
 // with that ID closes the session and clears the flag; there is no expiry and no

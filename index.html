@@ -74,6 +74,11 @@ input:hover,textarea:hover{border-color:var(--mute)}
 .body{flex:1;min-width:0}
 .name{font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .pill{font-size:11px;font-weight:550;padding:1px 8px;border-radius:99px}
+.ptag{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:550;padding:1px 8px;border-radius:99px;background:var(--surface-2);color:var(--fg)}
+.ptag::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--line)}
+.ptag.live{background:var(--ok-soft);color:var(--ok)}.ptag.live::before{background:var(--ok)}
+.ptag.off{color:var(--mute);text-decoration:line-through;background:none;border:1px dashed var(--line)}.ptag.off::before{display:none}
+.protos{display:flex;gap:8px 16px;flex-wrap:wrap}
 .pill.bad{background:var(--bad-soft);color:var(--bad)}.pill.warn{background:var(--warn-soft);color:var(--warn)}.pill.ok{background:var(--ok-soft);color:var(--ok)}
 .meta{display:flex;gap:4px 14px;flex-wrap:wrap;margin-top:2px}
 .meta span{white-space:nowrap}.meta .note{white-space:normal;overflow-wrap:anywhere}
@@ -193,6 +198,7 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
       <label><span>Устройств одновременно <button type="button" class="tip" onclick="this.focus()" aria-label="Подсказка" data-tip="Телефону лучше разрешить не меньше двух устройств. Когда телефон переключается между Wi-Fi и мобильной сетью, прежнее подключение сохраняется ещё около тридцати секунд и тоже учитывается в лимите. Лимит действует на Hysteria: VLESS он не ограничивает."><svg class="i"><use href="#i-info"/></svg></button></span><input name="devices" type="number" min="0" placeholder="без лимита"></label>
       <label><span>Действует до</span><input name="expires" type="date"></label>
       <label><span>Пароль</span><input name="password" autocomplete="off" pattern="[^:\s]{8,128}" title="8–128 символов, без двоеточия и пробелов"></label>
+      <div class="full" id="protoWrap"><label><span>Протоколы</span></label><div class="protos" id="protoBoxes"></div></div>
       <label class="full chk"><input type="checkbox" name="monthly" class="sw"> Сбрасывать трафик 1-го числа</label>
       <label class="full"><span>Заметка</span><input name="note" maxlength="200"></label>
     </div>
@@ -208,8 +214,8 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
   <div class="dlg">
     <div class="dlg-h"><h2 id="shareTitle"></h2><button class="icon ghost" onclick="$('#share').close()" aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
     <div class="seg" id="tabs" style="display:flex;margin-bottom:16px">
-      <button data-t="uri" id="uriTab" style="flex:1">Ссылка</button><button data-t="vless" id="vlessTab" style="flex:1">VLESS</button><button data-t="sub" id="subTab" style="flex:1">Подписка</button><button data-t="mihomo" style="flex:1">Mihomo</button>
     </div>
+    <div class="seg" id="mtabs" style="display:flex;flex-wrap:wrap;margin-bottom:12px"></div>
     <img class="qr" id="qr" alt="QR-код">
     <textarea id="shareText" rows="4" readonly></textarea>
     <div class="mute small hint" id="shareHint"></div>
@@ -275,8 +281,12 @@ async function load() {
   render();
 }
 
-// Hysteria counts sessions, Xray client IPs: shown apart.
+// Hysteria counts sessions, Xray client IPs: shown apart, per protocol.
+const short = {hysteria2: 'Hy2', vless: 'VLESS'};
+const liveOn = (u, p) => p === 'hysteria2' ? u.online : p === 'vless' ? u.xrayOnline : 0;
 const isOn = u => u.online || u.xrayOnline;
+const protos = () => S.server.protocols || [];
+const userProtos = u => u.links.map(l => l.proto);
 function stats() {
   const us = S.users, on = us.filter(isOn);
   const up = us.reduce((s, u) => s + u.up, 0), down = us.reduce((s, u) => s + u.down, 0);
@@ -309,15 +319,19 @@ function render() {
     const used = u.up + u.down, st = statusTag[u.status], days = daysLeft(u);
     const pct = u.quotaBytes ? Math.min(100, used / u.quotaBytes * 100) : 0;
     const h = hue(u.name);
-    const onTag = [u.online && 'онлайн' + (u.online > 1 || u.maxDevices ? ' ' + u.online + (u.maxDevices ? '/' + u.maxDevices : '') : ''),
-      u.xrayOnline && 'VLESS' + (u.xrayOnline > 1 ? ' ' + u.xrayOnline : '')].filter(Boolean).join(' · ');
+    const tags = protos().map(p => {
+      const n = liveOn(u, p.id), on = userProtos(u).includes(p.id);
+      const cnt = n && (n > 1 || (p.id === 'hysteria2' && u.maxDevices)) ? ' ' + n + (p.id === 'hysteria2' && u.maxDevices ? '/' + u.maxDevices : '') : '';
+      const tip = !on ? 'выключен у пользователя' : n ? 'онлайн' : 'не подключён';
+      return `<span class="ptag${!on ? ' off' : n ? ' live' : ''}" title="${esc(p.title)}: ${tip}">${esc(short[p.id] || p.title)}${cnt}</span>`;
+    }).join('');
     return `<div class="user${u.enabled ? '' : ' off'}" data-n="${esc(u.name)}">
       <div class="av${isOn(u) ? ' on' : ''}" style="--h:${h}">${esc(u.name[0])}</div>
       <div class="body">
         <div class="name">${esc(u.name)}
           ${st ? `<span class="pill ${st[1]}">${st[0]}</span>` : ''}
           ${!st && days !== null && days <= 3 ? `<span class="pill warn">${days > 0 ? days + ' дн.' : 'сегодня'}</span>` : ''}
-          ${onTag ? `<span class="pill ok">${onTag}</span>` : ''}
+          ${tags}
         </div>
         <div class="meta mute small">
           <span>↓ ${fmt(u.down)} ↑ ${fmt(u.up)}${u.quotaBytes ? ' из ' + fmt(u.quotaBytes) : ''}</span>
@@ -376,6 +390,10 @@ function openEdit(n) {
   f.expires.value = u.expiresAt ? localDate(u.expiresAt) : '';
   f.password.value = ''; f.password.placeholder = editing ? 'не менять' : 'случайный';
   f.note.value = u.note || '';
+  const off = u.protoOff || [];
+  $('#protoWrap').hidden = protos().length < 2;
+  $('#protoBoxes').innerHTML = protos().map(p =>
+    `<label class="chk"><input type="checkbox" class="sw" data-p="${esc(p.id)}"${off.includes(p.id) ? '' : ' checked'}> ${esc(p.title)}</label>`).join('');
   $('#rekeyBtn').hidden = !editing;
   $('#edit').returnValue = ''; // returnValue survives between openings; Esc must not re-save
   $('#edit').showModal();
@@ -390,6 +408,7 @@ $('#edit').onclose = async () => {
     resetMonthly: f.monthly.checked,
     expiresAt: f.expires.value ? Math.floor(new Date(f.expires.value + 'T23:59:59').getTime() / 1000) : 0,
     note: f.note.value,
+    protoOff: [...$('#protoBoxes').querySelectorAll('input:not(:checked)')].map(i => i.dataset.p),
   };
   if (f.password.value) body.password = f.password.value;
   try {
@@ -406,38 +425,54 @@ async function rekey() {
   $('#edit').close(); await load(); openShare(n);
 }
 const localDate = t => { const d = new Date(t * 1000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+let shareTab = '', mihomoView = '';
 async function openShare(n) {
   shareUser = find(n);
   $('#shareTitle').textContent = n;
-  $('#subTab').hidden = !S.subBase;
-  $('#vlessTab').hidden = !S.server.vless;
-  $('#uriTab').textContent = S.server.vless ? 'Hysteria' : 'Ссылка';
-  setTab('uri');
+  const u = shareUser, many = u.links.length > 1;
+  const tabs = u.links.map(l => [l.proto, many ? protoName(l.proto) : 'Ссылка']);
+  if (S.subBase) tabs.push(['sub', 'Подписка']);
+  if (u.links.length) tabs.push(['mihomo', 'Mihomo']);
+  $('#tabs').innerHTML = tabs.map(([t, title]) => `<button data-t="${esc(t)}" style="flex:1">${esc(title)}</button>`).join('');
+  mihomoView = many ? 'fallback' : (u.links[0] || {}).proto;
+  setTab(tabs.length ? tabs[0][0] : '');
   $('#share').showModal();
 }
+const protoName = id => (protos().find(p => p.id === id) || {title: id}).title;
+const hints = {
+  hysteria2: 'Hiddify, v2RayTun, Happ, Shadowrocket, v2rayN, официальный клиент.',
+  vless: () => `Happ, v2RayTun, Streisand, v2rayN, Hiddify. TCP ${S.server.vless.port}: снаружи выглядит как сайт ${S.server.vless.sni} — запасной канал, если UDP режут.`,
+};
 async function setTab(t) {
+  shareTab = t;
   $('#tabs').querySelectorAll('button').forEach(b => b.classList.toggle('act', b.dataset.t === t));
-  const u = shareUser, q = 'api/users/' + u.name + '/qr.png?t=' + Date.now();
-  let text, hint = '', qr = q;
-  const vl = S.server.vless;
-  if (t === 'uri') { text = u.uri; hint = 'Hiddify, v2RayTun, Happ, Shadowrocket, v2rayN, официальный клиент.'; }
-  if (t === 'vless') {
-    text = u.vlessUri; qr = q + '&vless=1';
-    hint = `Happ, v2RayTun, Streisand, v2rayN, Hiddify. TCP ${vl.port}: снаружи выглядит как сайт ${vl.sni} — запасной канал, если UDP режут.`;
-  }
+  const u = shareUser, q = 'api/users/' + u.name + '/qr.png?t=' + Date.now(), names = u.links.map(l => protoName(l.proto));
+  let text = '', hint = '', qr = '';
+  const l = u.links.find(l => l.proto === t);
+  if (!t) hint = 'У пользователя выключены все протоколы.';
+  if (l) { text = l.uri; qr = q + '&proto=' + t; hint = typeof hints[t] === 'function' ? hints[t]() : hints[t] || ''; }
   if (t === 'sub') {
     text = S.subBase + u.subPath; qr = q + '&sub=1';
-    hint = 'Клиент сам обновляет конфиг и видит остаток трафика и срок. mihomo получает YAML.' + (vl ? ' Внутри обе ссылки: Hysteria и VLESS.' : '');
+    hint = 'Клиент сам обновляет конфиг и видит остаток трафика и срок. mihomo получает YAML.' + (names.length > 1 ? ' Внутри: ' + names.join(', ') + '.' : '');
   }
+  $('#mtabs').hidden = t !== 'mihomo';
   if (t === 'mihomo') {
-    text = await api('GET', 'api/users/' + u.name + '/mihomo'); qr = '';
-    hint = 'Вставь в proxies: конфига mihomo.' + (vl ? ' На роутере — обе в группу fallback: пропал UDP, и он сам перейдёт на VLESS.' : '');
+    const views = u.links.map(l => [l.proto, protoName(l.proto)]);
+    if (views.length > 1) views.push(['fallback', 'Все + fallback']);
+    $('#mtabs').hidden = views.length < 2;
+    $('#mtabs').innerHTML = views.map(([v, title]) => `<button data-v="${esc(v)}" style="flex:1" class="${v === mihomoView ? 'act' : ''}">${esc(title)}</button>`).join('');
+    const path = 'api/users/' + u.name + '/mihomo' + (mihomoView === 'fallback' ? '?fallback=1' : '?proto=' + mihomoView);
+    text = await api('GET', path);
+    hint = mihomoView === 'fallback'
+      ? `Готовый кусок конфига: прокси и группа fallback в порядке ${names.join(' → ')} — пропал первый протокол, mihomo сам перейдёт на следующий. Группу выбери в rules.`
+      : `Прокси ${protoName(mihomoView)}: вставь в proxies: конфига mihomo.`;
   }
   $('#shareText').value = text; $('#shareHint').textContent = hint;
   $('#qr').hidden = !qr; if (qr) $('#qr').src = qr;
-  $('#shareText').rows = t === 'mihomo' ? (vl ? 18 : 10) : 4;
+  $('#shareText').rows = t === 'mihomo' ? (mihomoView === 'fallback' ? 20 : 12) : 4;
 }
 $('#tabs').onclick = e => { const b = e.target.closest('button'); if (b) setTab(b.dataset.t); };
+$('#mtabs').onclick = e => { const b = e.target.closest('button'); if (b) { mihomoView = b.dataset.v; setTab('mihomo'); } };
 async function copyShare() {
   const t = $('#shareText');
   try { await navigator.clipboard.writeText(t.value); } catch { t.select(); document.execCommand('copy'); }
