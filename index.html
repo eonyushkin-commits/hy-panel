@@ -623,7 +623,12 @@ async function resetT(n) { if (confirm(`Сбросить трафик ${n}?`)) {
 async function del(n) { if (confirm(`Удалить ${n}? Клиент будет отключён.`)) { try { await api('DELETE', 'api/users/' + n); toast(`${n} удалён`); } catch {} load(); } }
 
 // Click on the backdrop closes a dialog (the dialog itself has no padding, so only the backdrop hits it).
-document.querySelectorAll('dialog').forEach(d => d.addEventListener('click', e => { if (e.target === d) d.close(); }));
+// Only a press that also started there: selecting text and letting go past the edge is not a click outside.
+document.querySelectorAll('dialog').forEach(d => {
+  let down = null;
+  d.addEventListener('mousedown', e => { down = e.target; });
+  d.addEventListener('click', e => { if (e.target === d && down === d) d.close(); });
+});
 
 function openEdit(n) {
   editing = n ? find(n) : null;
