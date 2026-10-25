@@ -214,3 +214,17 @@ func TestLatestRelease(t *testing.T) {
 		t.Errorf("xray: %v %q, want the reason", v, e)
 	}
 }
+
+func TestModuleVersion(t *testing.T) {
+	for in, want := range map[string]string{
+		"v0.2.20-0.20260724121833-457d920a1a7d": "24.07.2026 (457d920)",
+		"v0.0.0-20250102030405-abcdef123456":    "02.01.2025 (abcdef1)",
+		"v0.2.16":                               "0.2.16",
+		"v1.0.0-rc.1":                           "1.0.0-rc.1",
+		"(devel)":                               "(devel)",
+	} {
+		if got := moduleVersion(in); got != want {
+			t.Errorf("%s: %q, want %q", in, got, want)
+		}
+	}
+}
