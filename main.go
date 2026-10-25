@@ -135,19 +135,10 @@ func serve() {
 	app := newApp(store, stats, ep, env["HYP_PASSWORD"], key)
 	app.cfgErr, app.warns, app.hyOpts = cfgErr, warns, hyOpts
 	app.agent = newAgentClient(agentSock)
-	if fileExists(awgCfgPath) {
-		if c, err := readAWG(awgCfgPath); err != nil {
-			log.Printf("WARN: %s: %v", awgCfgPath, err)
-			app.cfgErr = strings.TrimPrefix(app.cfgErr+"; конфиг AmneziaWG: "+err.Error(), "; ")
-		} else {
-			app.ep.AWG, app.awg = c, newAWGClient(awgSock)
-			log.Printf("awg: udp :%d", c.Port)
-		}
-	}
 	log.Printf("hy-panel %s; links: %s:%s sni=%q obfs=%q pinned=%v ech=%v", version,
 		app.ep.Host, app.ep.Port, app.ep.SNI, app.ep.ObfsType, app.ep.Pin != "", app.ep.ECH != "")
 	if xs != nil {
-		app.xray, app.xrayTag, app.xrayFlow = newXrayAPI(xs.API), xs.Tag, xs.Link.Flow
+		app.addBackend(&xrayBackend{api: newXrayAPI(xs.API), tag: xs.Tag, flow: xs.Link.Flow})
 		if xs.Warn != "" {
 			log.Printf("WARN: xray: %s", xs.Warn)
 			app.warns = append(app.warns, xs.Warn)
@@ -155,6 +146,16 @@ func serve() {
 		log.Printf("vless: :%s/tcp %s sni=%q, inbound %q, api %s", xs.Link.Port, xs.Link.Network, xs.Link.SNI, xs.Tag, xs.API)
 		if xs.Link.Target != "" {
 			go app.watchTarget(xs.Link.Target, xs.Link.SNI)
+		}
+	}
+	if fileExists(awgCfgPath) {
+		if c, err := readAWG(awgCfgPath); err != nil {
+			log.Printf("WARN: %s: %v", awgCfgPath, err)
+			app.cfgErr = strings.TrimPrefix(app.cfgErr+"; конфиг AmneziaWG: "+err.Error(), "; ")
+		} else {
+			app.ep.AWG = c
+			app.addBackend(newAWGBackend(newAWGClient(awgSock)))
+			log.Printf("awg: udp :%d", c.Port)
 		}
 	}
 

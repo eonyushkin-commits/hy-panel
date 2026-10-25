@@ -109,8 +109,8 @@ func TestE2EXray(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := testApp(t, nil)
-	a.stats = newStatsClient("127.0.0.1:1", "") // no Hysteria here
-	a.xray, a.xrayTag, a.xrayFlow = newXrayAPI(xs.API), xs.Tag, xs.Link.Flow
+	xb := &xrayBackend{api: newXrayAPI(xs.API), tag: xs.Tag, flow: xs.Link.Flow}
+	a.addBackend(xb)
 	// Xray does not count 127.0.0.1 as online: clients come from another local address.
 	host := "127.0.0.1"
 	if addrs, _ := net.InterfaceAddrs(); addrs != nil {
@@ -127,12 +127,12 @@ func TestE2EXray(t *testing.T) {
 	mustCreate(t, a.store, User{Name: "bob"}, false)
 	sync := func() {
 		a.syncOnce(time.Now())
-		if a.xrayErr != "" {
-			t.Fatalf("xray sync: %s", a.xrayErr)
+		if syncState(a, protoVless).err != "" {
+			t.Fatalf("xray sync: %s", syncState(a, protoVless).err)
 		}
 	}
 	sync()
-	users, err := a.xray.Users(xs.Tag)
+	users, err := xb.api.Users(xs.Tag)
 	if err != nil || len(users) != 2 || users["alice"] != alice.UUID {
 		t.Fatalf("users in xray: %v %v", users, err)
 	}
@@ -195,8 +195,8 @@ func TestE2EXray(t *testing.T) {
 		sync()
 		close(hold)
 		<-done
-		if a.xonline["alice"] != 1 {
-			t.Fatalf("online while connected: %v", a.xonline)
+		if a.onlineOf(protoVless)["alice"] != 1 {
+			t.Fatalf("online while connected: %v", a.onlineOf(protoVless))
 		}
 	}
 

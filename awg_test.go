@@ -184,12 +184,12 @@ func TestAWGHandshake(t *testing.T) {
 	go http.Serve(l, awgControl(srv))
 	t.Cleanup(func() { l.Close() })
 	a := testApp(t, nil)
-	a.awg = newAWGClient(sock)
+	a.addBackend(newAWGBackend(newAWGClient(sock)))
 	a.ep = ep
 	mustCreate(t, a.store, u, false)
 	a.syncOnce(time.Now())
-	if a.awgErr != "" || a.awgFails != 0 {
-		t.Fatal(a.awgErr)
+	if l := syncState(a, protoAWG); l.err != "" || l.fails != 0 {
+		t.Fatal(l.err)
 	}
 	pub, _ := wgPublic(u.AWGKey)
 	if ps, _ := devPeers(srv); len(ps) != 1 || ps[0].Key != pub || ps[0].IP != "10.66.0.2" {
@@ -220,8 +220,8 @@ func TestAWGHandshake(t *testing.T) {
 		}
 		if ps, _ := devPeers(srv); len(ps) == 1 && ps[0].LastHandshake > 0 && ps[0].Rx > 0 {
 			a.syncOnce(time.Now())
-			if a.aonline["u"] != 1 {
-				t.Fatalf("not online: %v", a.aonline)
+			if a.onlineOf(protoAWG)["u"] != 1 {
+				t.Fatalf("not online: %v", a.onlineOf(protoAWG))
 			}
 			if su, _ := a.store.Get("u"); su.Up == 0 {
 				t.Fatalf("traffic not counted: %+v", su)
