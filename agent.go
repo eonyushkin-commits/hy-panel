@@ -125,6 +125,8 @@ func runAgent() {
 		log.Fatal(err)
 	}
 	a := &agent{bin: bin}
+	rel := &releases{}
+	go rel.watch()
 	os.Remove(agentSock)
 	l, err := net.Listen("unix", agentSock)
 	if err != nil {
@@ -139,7 +141,7 @@ func runAgent() {
 		log.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, systemStatus()) })
+	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, systemStatus(rel.get)) })
 	mux.HandleFunc("GET /job", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, a.current()) })
 	mux.HandleFunc("POST /jobs", a.handleStart)
 	log.Printf("hy-panel agent on %s", agentSock)
@@ -205,28 +207,89 @@ func (a *agent) run(args []string) {
 type protoStatus struct {
 	Installed bool   `json:"installed"` // server binary and unit present
 	Version   string `json:"version"`
-	Active    bool   `json:"active"` // service running
+	Active    bool   `json:"active"`           // service running
+	Latest    string `json:"latest,omitempty"` // the latest official release, if known
+	Update    bool   `json:"update,omitempty"` // it is newer than the installed one
 }
 
-func systemStatus() map[string]protoStatus {
+// systemStatus describes the servers; latest gives a protocol's latest
+// release (zero if not known yet).
+func systemStatus(latest func(proto string) hyVersion) map[string]protoStatus {
 	env := readEnvNoFatal()
 	_, hySvc := hyPaths(env)
 	_, xSvc := xrayPaths(env)
-	st := func(bin, svc string, v hyVersion) protoStatus {
+	st := func(proto, bin, svc string, v hyVersion) protoStatus {
 		s := protoStatus{Installed: fileExists(bin) && unitExists(svc)}
 		if s.Installed {
 			s.Version = v.String()
 			s.Active = systemctl("is-active", "--quiet", svc) == nil
+			if l := latest(proto); l != (hyVersion{}) {
+				s.Latest, s.Update = l.String(), !v.atLeast(l)
+			}
 		}
 		return s
 	}
 	awg := protoStatus{Installed: fileExists(awgCfgPath) && fileExists(awgUnitPath), Version: "встроен"}
 	awg.Active = awg.Installed && systemctl("is-active", "--quiet", "hy-panel-awg") == nil
 	return map[string]protoStatus{
-		protoHy2:   st(hysteriaBin, hySvc, hysteriaVersion()),
-		protoVless: st(xrayBin, xSvc, xrayVersion()),
+		protoHy2:   st(protoHy2, hysteriaBin, hySvc, hysteriaVersion()),
+		protoVless: st(protoVless, xrayBin, xSvc, xrayVersion()),
 		protoAWG:   awg,
 	}
+}
+
+// releases knows the latest official release of each server, so the panel
+// offers an update only when there is one. It asks a few times a day.
+type releases struct {
+	mu     sync.Mutex
+	latest map[string]hyVersion
+}
+
+func (r *releases) get(proto string) hyVersion {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.latest[proto]
+}
+
+func (r *releases) watch() {
+	for {
+		next := 6 * time.Hour
+		for proto, base := range map[string]string{protoHy2: hysteriaURL, protoVless: xrayURL} {
+			v, err := latestRelease(base)
+			if err != nil {
+				log.Printf("latest release: %v", err)
+				next = 30 * time.Minute
+				continue
+			}
+			r.mu.Lock()
+			if r.latest == nil {
+				r.latest = map[string]hyVersion{}
+			}
+			r.latest[proto] = v
+			r.mu.Unlock()
+		}
+		time.Sleep(next)
+	}
+}
+
+// latestRelease reads the version off the redirect of releases/latest, the
+// page the downloads come from (base is its download/ URL): GitHub sends it
+// to .../releases/tag/app/v2.6.1 (Hysteria) or .../tag/v25.9.11 (Xray).
+// No API, so no API rate limit.
+func latestRelease(base string) (hyVersion, error) {
+	page := strings.TrimSuffix(strings.TrimSuffix(base, "/"), "/download")
+	c := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{Proxy: http.ProxyFromEnvironment},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := c.Head(page)
+	if err != nil {
+		return hyVersion{}, err
+	}
+	resp.Body.Close()
+	v := parseVersion(versionRe, []byte(resp.Header.Get("Location")))
+	if v == (hyVersion{}) {
+		return v, fmt.Errorf("%s: %s, версии в перенаправлении нет", page, resp.Status)
+	}
+	return v, nil
 }
 
 // readEnvNoFatal is readEnv for the long-running agent: an unreadable file

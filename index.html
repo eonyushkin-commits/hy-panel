@@ -381,8 +381,15 @@ function renderProtocols() {
     } else {
       btns = `<button class="pri" data-p="${p.id}" data-do="cfg">Установить</button>`;
     }
-    if (s.installed && p.id !== 'awg') btns += `<button class="ghost" data-p="${p.id}" data-do="update" title="Скачать последний официальный релиз">Обновить${/^\d/.test(s.version || '') ? ' (' + esc(s.version) + ')' : ''}</button>`;
-    return `<div class="card pcard"><div class="ph"><b>${p.title}</b>${pill}</div><div class="mute small">${info}</div><div class="pa">${btns}</div></div>`;
+    // An update is offered only when a newer release is out; if the agent
+    // could not learn the latest one, the button stays, unlabelled.
+    let ver = '';
+    if (s.installed && p.id !== 'awg') {
+      ver = 'Версия ' + esc(s.version) + (s.update ? ` · <b>вышла ${esc(s.latest)}</b>` : s.latest ? ' · последняя' : '');
+      if (s.update) btns += `<button class="pri" data-p="${p.id}" data-do="update" title="Скачать официальный релиз ${esc(s.latest)}">Обновить до ${esc(s.latest)}</button>`;
+      else if (!s.latest) btns += `<button class="ghost" data-p="${p.id}" data-do="update" title="Последнюю версию узнать не удалось: скачать последний официальный релиз, если он новее">Обновить</button>`;
+    }
+    return `<div class="card pcard"><div class="ph"><b>${p.title}</b>${pill}</div><div class="mute small">${info}</div>${ver ? `<div class="mute small">${ver}</div>` : ''}<div class="pa">${btns}</div></div>`;
   }).join('') + (SYS.agentError ? `<div class="err" style="grid-column:1/-1;margin:0">${icon('alert')}<span>${esc(SYS.agentError)}</span></div>` : '');
 }
 $('#pgrid').onclick = e => {

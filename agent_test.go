@@ -168,3 +168,29 @@ func TestSystemNeedsAgent(t *testing.T) {
 		t.Fatalf("%d", w.Code)
 	}
 }
+
+func TestLatestRelease(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/apernet/hysteria/releases/latest":
+			http.Redirect(w, r, "/apernet/hysteria/releases/tag/app/v2.6.1", http.StatusFound)
+		case "/XTLS/Xray-core/releases/latest":
+			http.Redirect(w, r, "/XTLS/Xray-core/releases/tag/v25.9.11", http.StatusFound)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	for base, want := range map[string]hyVersion{
+		srv.URL + "/apernet/hysteria/releases/latest/download/": {2, 6, 1},
+		srv.URL + "/XTLS/Xray-core/releases/latest/download/":   {25, 9, 11},
+	} {
+		if v, err := latestRelease(base); err != nil || v != want {
+			t.Errorf("%s: %v %v, want %v", base, v, err, want)
+		}
+	}
+	// A mirror without the redirect: unknown, not "up to date".
+	if v, err := latestRelease(srv.URL + "/mirror/download/"); err == nil {
+		t.Errorf("mirror: %v, want an error", v)
+	}
+}
