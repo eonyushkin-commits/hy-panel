@@ -382,12 +382,13 @@ function renderProtocols() {
       btns = `<button class="pri" data-p="${p.id}" data-do="cfg">Установить</button>`;
     }
     // An update is offered only when a newer release is out; if the agent
-    // could not learn the latest one, the button stays, unlabelled.
+    // could not learn the latest one, it says why and can ask again.
     let ver = '';
     if (s.installed && p.id !== 'awg') {
-      ver = 'Версия ' + esc(s.version) + (s.update ? ` · <b>вышла ${esc(s.latest)}</b>` : s.latest ? ' · последняя' : '');
+      ver = 'Версия ' + esc(s.version) + (s.update ? ` · <b>вышла ${esc(s.latest)}</b>` : s.latest ? ' · последняя'
+        : ` · <span title="${esc(s.latestErr || '')}">последнюю узнать не удалось</span>`);
       if (s.update) btns += `<button class="pri" data-p="${p.id}" data-do="update" title="Скачать официальный релиз ${esc(s.latest)}">Обновить до ${esc(s.latest)}</button>`;
-      else if (!s.latest) btns += `<button class="ghost" data-p="${p.id}" data-do="update" title="Последнюю версию узнать не удалось: скачать последний официальный релиз, если он новее">Обновить</button>`;
+      else if (!s.latest) btns += `<button class="ghost" data-p="${p.id}" data-do="check" title="Спросить GitHub о последнем релизе">Проверить обновления</button>`;
     }
     return `<div class="card pcard"><div class="ph"><b>${p.title}</b>${pill}</div><div class="mute small">${info}</div>${ver ? `<div class="mute small">${ver}</div>` : ''}<div class="pa">${btns}</div></div>`;
   }).join('') + (SYS.agentError ? `<div class="err" style="grid-column:1/-1;margin:0">${icon('alert')}<span>${esc(SYS.agentError)}</span></div>` : '');
@@ -396,9 +397,20 @@ $('#pgrid').onclick = e => {
   const b = e.target.closest('[data-do]'); if (!b) return;
   const p = PROTOS.find(x => x.id === b.dataset.p);
   if (b.dataset.do === 'cfg') p.dlg();
+  else if (b.dataset.do === 'check') checkReleases(p, b);
   else if (confirm(`Скачать последний релиз ${p.title} и перезапустить его? Подключения прервутся на секунду.`))
     startJob('update-' + (p.id === 'vless' ? 'xray' : 'hysteria'), {}, 'Обновление ' + p.title);
 };
+
+async function checkReleases(p, b) {
+  b.disabled = true; b.textContent = 'Проверяю…';
+  try { SYS.status = await api('POST', 'api/system/releases'); } catch { renderProtocols(); return; }
+  renderProtocols();
+  const s = SYS.status[p.id] || {};
+  if (s.update) toast(`${p.title}: вышла ${s.latest}`);
+  else if (s.latest) toast(`${p.title}: ${s.version} — последняя версия`);
+  else toast(`${p.title}: ${s.latestErr || 'GitHub не ответил'}`, true);
+}
 
 function openHy() {
   const f = $('#hyForm'), c = SYS.settings.hysteria2;
@@ -628,14 +640,6 @@ async function toggle(n) {
 }
 async function resetT(n) { if (confirm(`Сбросить трафик ${n}?`)) { try { await api('PATCH', 'api/users/' + n, {resetTraffic: true}); toast('Трафик сброшен'); } catch {} load(); } }
 async function del(n) { if (confirm(`Удалить ${n}? Клиент будет отключён.`)) { try { await api('DELETE', 'api/users/' + n); toast(`${n} удалён`); } catch {} load(); } }
-
-// Click on the backdrop closes a dialog (the dialog itself has no padding, so only the backdrop hits it).
-// Only a press that also started there: selecting text and letting go past the edge is not a click outside.
-document.querySelectorAll('dialog').forEach(d => {
-  let down = null;
-  d.addEventListener('mousedown', e => { down = e.target; });
-  d.addEventListener('click', e => { if (e.target === d && down === d) d.close(); });
-});
 
 function openEdit(n) {
   editing = n ? find(n) : null;

@@ -142,6 +142,10 @@ func runAgent() {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, systemStatus(rel.get)) })
+	mux.HandleFunc("POST /releases", func(w http.ResponseWriter, r *http.Request) {
+		rel.check()
+		writeJSON(w, systemStatus(rel.get))
+	})
 	mux.HandleFunc("GET /job", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, a.current()) })
 	mux.HandleFunc("POST /jobs", a.handleStart)
 	log.Printf("hy-panel agent on %s", agentSock)
@@ -207,14 +211,15 @@ func (a *agent) run(args []string) {
 type protoStatus struct {
 	Installed bool   `json:"installed"` // server binary and unit present
 	Version   string `json:"version"`
-	Active    bool   `json:"active"`           // service running
-	Latest    string `json:"latest,omitempty"` // the latest official release, if known
-	Update    bool   `json:"update,omitempty"` // it is newer than the installed one
+	Active    bool   `json:"active"`              // service running
+	Latest    string `json:"latest,omitempty"`    // the latest official release, if known
+	Update    bool   `json:"update,omitempty"`    // it is newer than the installed one
+	LatestErr string `json:"latestErr,omitempty"` // why the latest is not known
 }
 
 // systemStatus describes the servers; latest gives a protocol's latest
-// release (zero if not known yet).
-func systemStatus(latest func(proto string) hyVersion) map[string]protoStatus {
+// release (zero if not known, with the reason if there is one).
+func systemStatus(latest func(proto string) (hyVersion, string)) map[string]protoStatus {
 	env := readEnvNoFatal()
 	_, hySvc := hyPaths(env)
 	_, xSvc := xrayPaths(env)
@@ -223,8 +228,10 @@ func systemStatus(latest func(proto string) hyVersion) map[string]protoStatus {
 		if s.Installed {
 			s.Version = v.String()
 			s.Active = systemctl("is-active", "--quiet", svc) == nil
-			if l := latest(proto); l != (hyVersion{}) {
+			if l, err := latest(proto); l != (hyVersion{}) {
 				s.Latest, s.Update = l.String(), !v.atLeast(l)
+			} else {
+				s.LatestErr = err
 			}
 		}
 		return s
@@ -243,30 +250,55 @@ func systemStatus(latest func(proto string) hyVersion) map[string]protoStatus {
 type releases struct {
 	mu     sync.Mutex
 	latest map[string]hyVersion
+	errs   map[string]string
 }
 
-func (r *releases) get(proto string) hyVersion {
+func (r *releases) get(proto string) (hyVersion, string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.latest[proto]
+	if v, ok := r.latest[proto]; ok {
+		return v, ""
+	}
+	if e, ok := r.errs[proto]; ok {
+		return hyVersion{}, e
+	}
+	return hyVersion{}, "ещё не проверено"
+}
+
+// check asks GitHub now, for both servers at once; false if it did not
+// answer for one of them.
+func (r *releases) check() bool {
+	ok := true
+	var wg sync.WaitGroup
+	for proto, base := range map[string]string{protoHy2: hysteriaURL, protoVless: xrayURL} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			v, err := latestRelease(base)
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			if r.latest == nil {
+				r.latest, r.errs = map[string]hyVersion{}, map[string]string{}
+			}
+			if err != nil {
+				log.Printf("latest release: %v", err)
+				delete(r.latest, proto)
+				r.errs[proto], ok = err.Error(), false
+				return
+			}
+			r.latest[proto] = v
+			delete(r.errs, proto)
+		}()
+	}
+	wg.Wait()
+	return ok
 }
 
 func (r *releases) watch() {
 	for {
 		next := 6 * time.Hour
-		for proto, base := range map[string]string{protoHy2: hysteriaURL, protoVless: xrayURL} {
-			v, err := latestRelease(base)
-			if err != nil {
-				log.Printf("latest release: %v", err)
-				next = 30 * time.Minute
-				continue
-			}
-			r.mu.Lock()
-			if r.latest == nil {
-				r.latest = map[string]hyVersion{}
-			}
-			r.latest[proto] = v
-			r.mu.Unlock()
+		if !r.check() {
+			next = 30 * time.Minute
 		}
 		time.Sleep(next)
 	}
@@ -278,7 +310,7 @@ func (r *releases) watch() {
 // No API, so no API rate limit.
 func latestRelease(base string) (hyVersion, error) {
 	page := strings.TrimSuffix(strings.TrimSuffix(base, "/"), "/download")
-	c := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{Proxy: http.ProxyFromEnvironment},
+	c := &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{Proxy: http.ProxyFromEnvironment},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := c.Head(page)
 	if err != nil {

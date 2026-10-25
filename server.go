@@ -620,6 +620,9 @@ func (a *App) routes(withAuth bool) http.Handler {
 	mux.HandleFunc("GET /api/system", a.guard(a.handleSystem))
 	mux.HandleFunc("POST /api/system/jobs", a.guard(a.handleJobStart))
 	mux.HandleFunc("GET /api/system/job", a.guard(a.handleJob))
+	mux.HandleFunc("POST /api/system/releases", a.guard(func(w http.ResponseWriter, r *http.Request) {
+		a.proxyAgent(w, "POST", "/releases", nil)
+	}))
 	mux.HandleFunc("GET /api/system/check-target", a.guard(a.handleCheckTarget))
 	mux.HandleFunc("POST /api/system/site-scan", a.guard(a.handleSiteScanStart))
 	mux.HandleFunc("GET /api/system/site-scan", a.guard(a.handleSiteScan))

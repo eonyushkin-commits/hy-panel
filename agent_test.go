@@ -193,4 +193,20 @@ func TestLatestRelease(t *testing.T) {
 	if v, err := latestRelease(srv.URL + "/mirror/download/"); err == nil {
 		t.Errorf("mirror: %v, want an error", v)
 	}
+
+	defer func(h, x string) { hysteriaURL, xrayURL = h, x }(hysteriaURL, xrayURL)
+	hysteriaURL, xrayURL = srv.URL+"/apernet/hysteria/releases/latest/download/", srv.URL+"/mirror/download/"
+	var r releases
+	if v, e := r.get(protoHy2); v != (hyVersion{}) || e == "" {
+		t.Errorf("before a check: %v %q", v, e)
+	}
+	if r.check() {
+		t.Error("check: ok with a failing mirror")
+	}
+	if v, e := r.get(protoHy2); v != (hyVersion{2, 6, 1}) || e != "" {
+		t.Errorf("hysteria: %v %q", v, e)
+	}
+	if v, e := r.get(protoVless); v != (hyVersion{}) || !strings.Contains(e, "404") {
+		t.Errorf("xray: %v %q, want the reason", v, e)
+	}
 }
