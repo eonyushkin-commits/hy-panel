@@ -208,8 +208,8 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	protos := []map[string]string{}
-	for _, p := range a.ep.Protocols() {
-		protos = append(protos, map[string]string{"id": p, "title": protoTitle(p)})
+	for _, p := range a.ep.running() {
+		protos = append(protos, map[string]string{"id": p.ID(), "title": p.Title()})
 	}
 	var vless any
 	if v := a.ep.Vless; v != nil {
