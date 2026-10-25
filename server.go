@@ -28,18 +28,24 @@ var assets embed.FS
 type App struct {
 	store    *Store
 	stats    *statsClient
+	xray     *xrayAPI // nil: no VLESS
+	xrayTag  string   // the inbound whose users the panel keeps
+	xrayFlow string
 	ep       Endpoint
 	password string
-	subBase  string // public base URL of the subscription listener, "" = disabled
-	cfgErr   string // Hysteria config unreadable: no links are handed out
-	warn     string // shown in the panel banner (set once before serving)
+	subBase  string   // public base URL of the subscription listener, "" = disabled
+	cfgErr   string   // Hysteria or Xray config unreadable: no links are handed out
+	warns    []string // shown in the panel banner (set once before serving)
 	key      []byte
 	loginMu  sync.Mutex // serializes logins: ~1 guess/s total, not per connection
 	poke     chan struct{}
 
 	mu        sync.RWMutex
 	online    map[string]int
+	xonline   map[string]int // Xray: online client IPs per user
 	hyErr     string
+	xrayErr   string
+	targetErr string
 	lastSync  time.Time
 	revoked   map[string]revocation // password changed: drop old sessions
 	listenErr map[string]string     // public listener → why it does not run
@@ -136,15 +142,17 @@ func (a *App) guard(h http.HandlerFunc) http.HandlerFunc {
 
 type userView struct {
 	User
-	Online  int    `json:"online"`
-	Status  string `json:"status"` // "", disabled, expired, quota
-	URI     string `json:"uri"`
-	SubPath string `json:"subPath"`
+	Online     int    `json:"online"`     // Hysteria sessions
+	XrayOnline int    `json:"xrayOnline"` // VLESS client IPs
+	Status     string `json:"status"`     // "", disabled, expired, quota
+	URI        string `json:"uri"`
+	VlessURI   string `json:"vlessUri"`
+	SubPath    string `json:"subPath"`
 }
 
 func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 	a.mu.RLock()
-	on, last := a.online, a.lastSync
+	on, xon, last := a.online, a.xonline, a.lastSync
 	var listen []string
 	for name, e := range a.listenErr {
 		listen = append(listen, name+": "+e)
@@ -154,11 +162,15 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 	if a.cfgErr != "" {
 		problems = append(problems, a.cfgErr)
 	}
-	if a.warn != "" {
-		problems = append(problems, a.warn)
-	}
+	problems = append(problems, a.warns...)
 	if a.hyErr != "" {
 		problems = append(problems, "Нет связи с trafficStats Hysteria: "+a.hyErr)
+	}
+	if a.xrayErr != "" {
+		problems = append(problems, "Нет связи с API Xray: "+a.xrayErr)
+	}
+	if a.targetErr != "" {
+		problems = append(problems, a.targetErr)
 	}
 	problems = append(problems, listen...)
 	a.mu.RUnlock()
@@ -166,11 +178,17 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 	users := a.store.List()
 	views := make([]userView, len(users))
 	for i, u := range users {
-		views[i] = userView{User: u, Online: on[u.Name], Status: u.Blocked(now), URI: a.ep.URI(u), SubPath: "/sub/" + u.SubToken}
+		views[i] = userView{User: u, Online: on[u.Name], XrayOnline: xon[u.Name], Status: u.Blocked(now),
+			URI: a.ep.URI(u), VlessURI: a.ep.VlessURI(u), SubPath: "/sub/" + u.SubToken}
+	}
+	var vless any
+	if v := a.ep.Vless; v != nil {
+		vless = map[string]any{"port": v.Port, "sni": v.SNI, "network": v.Network}
 	}
 	writeJSON(w, map[string]any{
-		"users":    views,
-		"server":   map[string]any{"host": a.ep.Host, "port": a.ep.Port, "obfs": a.ep.ObfsType, "sni": a.ep.SNI, "pinned": a.ep.Pin != ""},
+		"users": views,
+		"server": map[string]any{"host": a.ep.Host, "port": a.ep.Port, "obfs": a.ep.ObfsType, "sni": a.ep.SNI, "pinned": a.ep.Pin != "",
+			"vless": vless},
 		"hyError":  strings.Join(problems, "; "),
 		"lastSync": last.Unix(),
 		"subBase":  a.subBase,
@@ -187,7 +205,7 @@ type userPatch struct {
 	MaxDevices   *int    `json:"maxDevices"`
 	Note         *string `json:"note"`
 	ResetTraffic bool    `json:"resetTraffic"`
-	NewKey       bool    `json:"newKey"` // new password + new subscription link
+	NewKey       bool    `json:"newKey"` // new password, VLESS key and subscription link
 }
 
 // check rejects a hand-set password too short for Hysteria, which also
@@ -233,6 +251,7 @@ func (p userPatch) apply(u *User, now time.Time) {
 	if p.NewKey {
 		u.Password = randStr(20)
 		u.SubToken = randStr(24)
+		u.UUID = newUUID()
 	}
 }
 
@@ -263,6 +282,7 @@ func (a *App) handleCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	a.requestSync() // into Xray now, not in up to 10 s
 	writeJSON(w, u)
 }
 
@@ -292,10 +312,8 @@ func (a *App) handlePatch(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		a.revoked[name] = revocation{at: now, until: now.Add(revokeWindow)}
 		a.mu.Unlock()
-		a.requestSync()
-	} else if u.Blocked(now) != "" {
-		a.requestSync()
 	}
+	a.requestSync() // blocks, re-keys and Xray's user list take effect now
 	writeJSON(w, u)
 }
 
@@ -318,6 +336,9 @@ func (a *App) handleQR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	text := a.ep.URI(u)
+	if r.URL.Query().Has("vless") && a.ep.Vless != nil {
+		text = a.ep.VlessURI(u)
+	}
 	if r.URL.Query().Has("sub") && a.subBase != "" {
 		text = a.subBase + "/sub/" + u.SubToken
 	}
@@ -347,8 +368,8 @@ func (a *App) handleMihomo(w http.ResponseWriter, r *http.Request) {
 
 // ---- subscription (public listener, token-protected) ----
 
-// noLinks answers 503 while the Hysteria config is unreadable, so clients
-// keep their working profile instead of fetching a broken one.
+// noLinks answers 503 while the Hysteria or Xray config is unreadable, so
+// clients keep their working profile instead of fetching a broken one.
 func (a *App) noLinks(w http.ResponseWriter) bool {
 	if a.cfgErr != "" {
 		http.Error(w, a.cfgErr, http.StatusServiceUnavailable)
@@ -383,9 +404,9 @@ func (a *App) handleSub(w http.ResponseWriter, r *http.Request) {
 	case "mihomo", "clash":
 		fmt.Fprint(w, a.ep.MihomoDoc(u))
 	case "raw":
-		fmt.Fprintln(w, a.ep.URI(u))
+		fmt.Fprint(w, strings.Join(a.ep.URIs(u), "\n")+"\n")
 	default:
-		fmt.Fprint(w, b64(a.ep.URI(u)+"\n"))
+		fmt.Fprint(w, b64(strings.Join(a.ep.URIs(u), "\n")+"\n"))
 	}
 }
 

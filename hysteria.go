@@ -588,17 +588,22 @@ func (c *statsClient) Kick(ids []string) error {
 
 const hysteriaBin = "/usr/local/bin/hysteria"
 
-// hyVersion is major.minor.patch of the installed Hysteria; zero if unknown.
+// hyVersion is major.minor.patch of the installed Hysteria (or Xray); zero if unknown.
 type hyVersion [3]int
 
 var versionRe = regexp.MustCompile(`v(\d+)\.(\d+)\.(\d+)`)
 
 func hysteriaVersion() hyVersion {
 	out, _ := exec.Command(hysteriaBin, "version").Output()
+	return parseVersion(versionRe, out)
+}
+
+// parseVersion reads major.minor.patch with re's three groups.
+func parseVersion(re *regexp.Regexp, out []byte) hyVersion {
 	var v hyVersion
-	if m := versionRe.FindStringSubmatch(string(out)); m != nil {
+	if m := re.FindSubmatch(out); m != nil {
 		for i := range v {
-			v[i], _ = strconv.Atoi(m[i+1])
+			v[i], _ = strconv.Atoi(string(m[i+1]))
 		}
 	}
 	return v

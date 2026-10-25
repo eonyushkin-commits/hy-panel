@@ -19,6 +19,7 @@ type Endpoint struct {
 	Pin      string // hex sha256 of a self-signed cert
 	ECH      string // base64 ECHConfigList, "" if ECH is off
 	Name     string // profile/remark prefix
+	Vless    *Vless // Xray's VLESS + Reality, nil if off
 }
 
 // endpointFor builds the link parameters from the Hysteria config and the
@@ -149,8 +150,89 @@ func (e Endpoint) Mihomo(u User) string {
 	return b.String()
 }
 
+// VlessURI builds the vless:// share link the way v2rayN and the Xray apps
+// (Happ, v2RayTun, Streisand) read it; "" if VLESS is off.
+func (e Endpoint) VlessURI(u User) string {
+	v := e.Vless
+	if v == nil {
+		return ""
+	}
+	q := url.Values{}
+	q.Set("encryption", "none")
+	q.Set("security", "reality")
+	q.Set("sni", v.SNI)
+	q.Set("fp", "chrome") // a browser's TLS handshake: Reality only works with uTLS fingerprints
+	q.Set("pbk", v.PublicKey)
+	if v.ShortID != "" {
+		q.Set("sid", v.ShortID)
+	}
+	q.Set("type", v.Network)
+	if v.Network == "xhttp" {
+		q.Set("path", v.Path)
+		q.Set("mode", v.Mode)
+		if v.Host != "" {
+			q.Set("host", v.Host)
+		}
+	}
+	if v.Flow != "" {
+		q.Set("flow", v.Flow)
+	}
+	l := url.URL{
+		Scheme:   "vless",
+		User:     url.User(u.UUID),
+		Host:     net.JoinHostPort(e.Host, v.Port),
+		RawQuery: q.Encode(),
+		Fragment: e.vlessRemark(u),
+	}
+	return l.String()
+}
+
+func (e Endpoint) vlessRemark(u User) string { return e.remark(u) + "-vless" }
+
+// MihomoVless returns the VLESS proxy list item for mihomo, "" if VLESS is off.
+func (e Endpoint) MihomoVless(u User) string {
+	v := e.Vless
+	if v == nil {
+		return ""
+	}
+	var b strings.Builder
+	w := func(k, v string) { fmt.Fprintf(&b, "    %s: %s\n", k, v) }
+	q := func(k, v string) { w(k, fmt.Sprintf("%q", v)) } // quoted: a hex short-id could read as a number
+	fmt.Fprintf(&b, "  - name: %q\n", e.vlessRemark(u))
+	w("type", "vless")
+	q("server", e.Host)
+	w("port", v.Port)
+	q("uuid", u.UUID)
+	w("udp", "true")
+	w("packet-encoding", "xudp")
+	w("tls", "true")
+	q("servername", v.SNI)
+	w("client-fingerprint", "chrome")
+	w("network", v.Network)
+	if v.Flow != "" {
+		w("flow", v.Flow)
+	}
+	if v.Network == "xhttp" {
+		host := ""
+		if v.Host != "" {
+			host = fmt.Sprintf(", host: %q", v.Host)
+		}
+		fmt.Fprintf(&b, "    xhttp-opts: {path: %q, mode: %q%s}\n", v.Path, v.Mode, host)
+	}
+	fmt.Fprintf(&b, "    reality-opts: {public-key: %q, short-id: %q}\n", v.PublicKey, v.ShortID)
+	return b.String()
+}
+
+// URIs are the share links of every protocol the server runs, Hysteria first.
+func (e Endpoint) URIs(u User) []string {
+	if l := e.VlessURI(u); l != "" {
+		return []string{e.URI(u), l}
+	}
+	return []string{e.URI(u)}
+}
+
 // MihomoDoc is a complete mihomo proxy-provider document for u.
-func (e Endpoint) MihomoDoc(u User) string { return "proxies:\n" + e.Mihomo(u) }
+func (e Endpoint) MihomoDoc(u User) string { return "proxies:\n" + e.Mihomo(u) + e.MihomoVless(u) }
 
 func subscriptionUserinfo(u User) string {
 	return fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", u.Up, u.Down, u.QuotaBytes, u.ExpiresAt)

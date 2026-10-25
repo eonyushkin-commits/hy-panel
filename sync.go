@@ -101,19 +101,155 @@ func (a *App) syncOnce(now time.Time) {
 	// Counters are cleared on read: account them even if /online fails below.
 	tr, errT := a.stats.TrafficAndClear()
 	on, errO := a.stats.Online()
-	a.store.Tick(now, tr, on)
+	xtr, xon, errX := a.xrayStats()
+	a.store.Tick(now, addTraffic(tr, xtr), joinOnline(on, xon))
+	if a.xray != nil {
+		// After Tick: a quota used up just now closes VLESS at once.
+		errX = errors.Join(errX, a.pushXrayUsers(now))
+	}
 	err := errors.Join(errT, errO)
 	a.mu.Lock()
 	if errO == nil {
 		a.online, a.lastSync = on, now
 	}
-	a.hyErr = ""
+	if xon != nil {
+		a.xonline = xon
+	}
+	a.hyErr, a.xrayErr = "", ""
 	if err != nil {
 		a.hyErr = err.Error()
+	}
+	if errX != nil {
+		a.xrayErr = errX.Error()
 	}
 	a.mu.Unlock()
 	if errO == nil {
 		a.enforce(now, on)
+	}
+}
+
+// ---- Xray (VLESS + Reality) ----
+
+// xrayStats reads and clears Xray's per-user counters and counts the users'
+// online client IPs (Xray counts addresses, not sessions).
+func (a *App) xrayStats() (map[string]trafficEntry, map[string]int, error) {
+	if a.xray == nil {
+		return nil, nil, nil
+	}
+	tr, errT := a.xray.TrafficAndClear()
+	on := map[string]int{}
+	for _, u := range a.store.List() {
+		n, err := a.xray.Online(u.Name)
+		if err != nil {
+			return tr, nil, errors.Join(errT, err)
+		}
+		if n > 0 {
+			on[u.Name] = n
+		}
+	}
+	return tr, on, errT
+}
+
+// pushXrayUsers makes the inbound's users exactly the panel's active users.
+// Xray has no auth callback like Hysteria's: whoever is in its list gets in.
+// So blocked, deleted and re-keyed users are taken out (new connections are
+// refused, open ones end when they close), and after an Xray restart (its
+// config lists nobody) everyone is put back.
+func (a *App) pushXrayUsers(now time.Time) error {
+	have, err := a.xray.Users(a.xrayTag)
+	if err != nil {
+		return err
+	}
+	var add []User
+	for _, u := range a.store.List() {
+		if u.Blocked(now) != "" {
+			continue // stays in have: taken out below
+		}
+		if have[u.Name] == u.UUID {
+			delete(have, u.Name)
+			continue
+		}
+		add = append(add, u)
+	}
+	var errs []error
+	var gone, added []string
+	// Removals first: a re-keyed user's e-mail must be free to be added again.
+	for name := range have {
+		if err := a.xray.RemoveUser(a.xrayTag, name); err != nil {
+			errs = append(errs, err)
+		} else {
+			gone = append(gone, name)
+		}
+	}
+	for _, u := range add {
+		if err := a.xray.AddUser(a.xrayTag, u.Name, u.UUID, a.xrayFlow); err != nil {
+			errs = append(errs, err)
+		} else {
+			added = append(added, u.Name)
+		}
+	}
+	if len(gone)+len(added) > 0 {
+		sort.Strings(gone)
+		sort.Strings(added)
+		log.Printf("xray users: -%v +%v", gone, added)
+	}
+	return errors.Join(errs...)
+}
+
+func addTraffic(a, b map[string]trafficEntry) map[string]trafficEntry {
+	if len(b) == 0 {
+		return a
+	}
+	m := make(map[string]trafficEntry, len(a)+len(b))
+	for _, src := range []map[string]trafficEntry{a, b} {
+		for k, e := range src {
+			t := m[k]
+			t.Tx += e.Tx
+			t.Rx += e.Rx
+			m[k] = t
+		}
+	}
+	return m
+}
+
+func joinOnline(a, b map[string]int) map[string]int {
+	if len(b) == 0 {
+		return a
+	}
+	m := make(map[string]int, len(a)+len(b))
+	for _, src := range []map[string]int{a, b} {
+		for k, n := range src {
+			m[k] += n
+		}
+	}
+	return m
+}
+
+// watchTarget checks hourly that the site Reality impersonates still answers
+// like a browser expects. When it is gone, probes of the server get errors
+// instead of that site, and the server stands out. Two failures in a row
+// (a minute apart) raise the banner.
+func (a *App) watchTarget(target, sni string) {
+	fails := 0
+	for {
+		err := checkTarget(target, sni)
+		if err == nil {
+			fails = 0
+		} else {
+			fails++
+			log.Printf("reality target %s: %v", target, err)
+		}
+		a.mu.Lock()
+		a.targetErr = ""
+		if fails >= 2 {
+			a.targetErr = fmt.Sprintf("Сайт для маскировки VLESS (%s) не отвечает по TLS 1.3 + HTTP/2: %v. Смени его: hy-panel xray", sni, err)
+		}
+		a.mu.Unlock()
+		if fails == 1 {
+			time.Sleep(time.Minute)
+		} else {
+			time.Sleep(time.Hour)
+		}
 	}
 }
 

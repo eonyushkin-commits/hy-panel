@@ -17,10 +17,11 @@ import (
 
 var version = "dev" // set by -ldflags "-X main.version=v0.2.0"
 
-const usage = `hy-panel — пользователи для Hysteria 2
+const usage = `hy-panel — пользователи для Hysteria 2 и VLESS + Reality (Xray)
 
   hy-panel install     установить или обновить (повторный запуск ничего не меняет, кроме программы)
   hy-panel settings    поменять порт, обфускацию или сертификат Hysteria
+  hy-panel xray        добавить VLESS + Reality (Xray) или сменить его сайт для маскировки
   hy-panel info        адрес и пароль панели
   hy-panel passwd      новый пароль панели
   hy-panel uninstall   удалить панель; пользователи и настройки сохранятся
@@ -42,6 +43,8 @@ func main() {
 		runUninstall(os.Args[2:])
 	case "settings":
 		runSettings()
+	case "xray":
+		runXray(os.Args[2:])
 	case "info":
 		printInfo(readEnv())
 	case "passwd":
@@ -82,12 +85,34 @@ func serve() {
 		cfg = &hyConfig{}
 	}
 	checkHyConfig(cfg)
+	ep := endpointFor(cfg, env)
+	// VLESS is on once hy-panel xray has set it up.
+	var xs *xraySetup
+	if xp := env["HYP_XRAY_CONFIG"]; xp != "" {
+		if xs, err = readXray(xp); err != nil {
+			log.Printf("WARN: xray %s: %v", xp, err)
+			cfgErr = strings.TrimPrefix(cfgErr+"; конфиг Xray: "+err.Error(), "; ")
+		} else {
+			ep.Vless = &xs.Link
+		}
+	}
 	key := make([]byte, 32)
 	rand.Read(key)
-	app := newApp(store, newStatsClient(cfg.TrafficStats.Listen, cfg.TrafficStats.Secret), endpointFor(cfg, env), env["HYP_PASSWORD"], key)
+	app := newApp(store, newStatsClient(cfg.TrafficStats.Listen, cfg.TrafficStats.Secret), ep, env["HYP_PASSWORD"], key)
 	app.cfgErr = cfgErr
 	log.Printf("hy-panel %s; links: %s:%s sni=%q obfs=%q pinned=%v ech=%v", version,
 		app.ep.Host, app.ep.Port, app.ep.SNI, app.ep.ObfsType, app.ep.Pin != "", app.ep.ECH != "")
+	if xs != nil {
+		app.xray, app.xrayTag, app.xrayFlow = newXrayAPI(xs.API), xs.Tag, xs.Link.Flow
+		if xs.Warn != "" {
+			log.Printf("WARN: xray: %s", xs.Warn)
+			app.warns = append(app.warns, xs.Warn)
+		}
+		log.Printf("vless: :%s/tcp %s sni=%q, inbound %q, api %s", xs.Link.Port, xs.Link.Network, xs.Link.SNI, xs.Tag, xs.API)
+		if xs.Link.Target != "" {
+			go app.watchTarget(xs.Link.Target, xs.Link.SNI)
+		}
+	}
 
 	if port := env["HYP_UI_PORT"]; port != "" && port != "off" {
 		addr := ":" + port
@@ -108,7 +133,7 @@ func serve() {
 			app.subBase = "http://" + net.JoinHostPort(app.ep.Host, p)
 		}
 		if strings.HasPrefix(app.subBase, "http://") {
-			app.warn = "Подписка идёт по открытому HTTP: пароли клиентов видны по пути. Поставь reverse-proxy с TLS и HYP_SUB_URL=https://…"
+			app.warns = append(app.warns, "Подписка идёт по открытому HTTP: пароли клиентов видны по пути. Поставь reverse-proxy с TLS и HYP_SUB_URL=https://…")
 			log.Print("WARN: subscriptions over plain HTTP expose client passwords — put a TLS reverse proxy in front and set HYP_SUB_URL=https://…")
 		}
 		mux := http.NewServeMux()

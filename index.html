@@ -158,7 +158,7 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
       <div class="brand">
         <div class="logo">H</div>
         <div style="min-width:0">
-          <h1>Hysteria 2</h1>
+          <h1 id="title">Hysteria 2</h1>
           <div class="srv" id="srv"></div>
         </div>
       </div>
@@ -190,7 +190,7 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
     <div class="grid">
       <label class="full" id="nameWrap"><span>Имя (a-z 0-9 _ . -)</span><input name="name" required pattern="[A-Za-z0-9_.\-]{1,32}" autocapitalize="off" autocomplete="off"></label>
       <label><span>Лимит трафика, ГБ</span><input name="quota" type="number" min="0" step="any" placeholder="без лимита"></label>
-      <label><span>Устройств одновременно <button type="button" class="tip" onclick="this.focus()" aria-label="Подсказка" data-tip="Телефону лучше разрешить не меньше двух устройств. Когда телефон переключается между Wi-Fi и мобильной сетью, прежнее подключение сохраняется ещё около тридцати секунд и тоже учитывается в лимите."><svg class="i"><use href="#i-info"/></svg></button></span><input name="devices" type="number" min="0" placeholder="без лимита"></label>
+      <label><span>Устройств одновременно <button type="button" class="tip" onclick="this.focus()" aria-label="Подсказка" data-tip="Телефону лучше разрешить не меньше двух устройств. Когда телефон переключается между Wi-Fi и мобильной сетью, прежнее подключение сохраняется ещё около тридцати секунд и тоже учитывается в лимите. Лимит действует на Hysteria: VLESS он не ограничивает."><svg class="i"><use href="#i-info"/></svg></button></span><input name="devices" type="number" min="0" placeholder="без лимита"></label>
       <label><span>Действует до</span><input name="expires" type="date"></label>
       <label><span>Пароль</span><input name="password" autocomplete="off" pattern="[^:\s]{8,128}" title="8–128 символов, без двоеточия и пробелов"></label>
       <label class="full chk"><input type="checkbox" name="monthly" class="sw"> Сбрасывать трафик 1-го числа</label>
@@ -208,7 +208,7 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
   <div class="dlg">
     <div class="dlg-h"><h2 id="shareTitle"></h2><button class="icon ghost" onclick="$('#share').close()" aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
     <div class="seg" id="tabs" style="display:flex;margin-bottom:16px">
-      <button data-t="uri" style="flex:1">Ссылка</button><button data-t="sub" id="subTab" style="flex:1">Подписка</button><button data-t="mihomo" style="flex:1">Mihomo</button>
+      <button data-t="uri" id="uriTab" style="flex:1">Ссылка</button><button data-t="vless" id="vlessTab" style="flex:1">VLESS</button><button data-t="sub" id="subTab" style="flex:1">Подписка</button><button data-t="mihomo" style="flex:1">Mihomo</button>
     </div>
     <img class="qr" id="qr" alt="QR-код">
     <textarea id="shareText" rows="4" readonly></textarea>
@@ -264,8 +264,10 @@ async function logout() { await api('POST', 'api/logout'); showLogin(); }
 async function load() {
   try { S = await api('GET', 'api/state'); } catch { return; }
   $('#login').hidden = true; $('#app').hidden = false;
-  const sv = S.server;
-  $('#srv').innerHTML = [`${sv.host}:${sv.port}`, sv.obfs, sv.pinned && 'self-signed · pin', sv.sni && 'sni ' + sv.sni]
+  const sv = S.server, vl = sv.vless;
+  $('#title').textContent = vl ? 'Hysteria 2 · VLESS' : 'Hysteria 2';
+  $('#srv').innerHTML = [`${sv.host}:${sv.port}`, sv.obfs, sv.pinned && 'self-signed · pin', sv.sni && 'sni ' + sv.sni,
+    vl && `vless :${vl.port}/tcp · ${vl.sni}`]
     .filter(Boolean).map(c => `<span class="chip">${esc(c)}</span>`).join('');
   $('#hyerr').hidden = !S.hyError;
   $('#hyerr').innerHTML = icon('alert') + '<span>' + esc(S.hyError) + '</span>';
@@ -273,13 +275,16 @@ async function load() {
   render();
 }
 
+// Hysteria counts sessions, Xray client IPs: shown apart.
+const isOn = u => u.online || u.xrayOnline;
 function stats() {
-  const us = S.users, on = us.filter(u => u.online);
+  const us = S.users, on = us.filter(isOn);
   const up = us.reduce((s, u) => s + u.up, 0), down = us.reduce((s, u) => s + u.down, 0);
   $('#stUsers').textContent = us.length;
   $('#stUsersSub').textContent = `активны ${us.filter(u => !u.status).length}`;
   $('#stOnline').textContent = on.length;
-  $('#stOnlineSub').textContent = `сессий ${on.reduce((s, u) => s + u.online, 0)}`;
+  $('#stOnlineSub').textContent = `сессий ${on.reduce((s, u) => s + u.online, 0)}` +
+    (S.server.vless ? ` · VLESS ${on.reduce((s, u) => s + u.xrayOnline, 0)}` : '');
   $('#stTraffic').textContent = fmt(up + down);
   $('#stTrafficSub').textContent = `↓ ${fmt(down)} ↑ ${fmt(up)}`;
 }
@@ -298,24 +303,26 @@ function render() {
   }
   const list = S.users.filter(u =>
     (!q || u.name.includes(q) || (u.note || '').toLowerCase().includes(q)) &&
-    (filter === 'all' || (filter === 'online' ? u.online : hasIssue(u))));
+    (filter === 'all' || (filter === 'online' ? isOn(u) : hasIssue(u))));
   if (!list.length) { L.innerHTML = '<div class="empty mute">Ничего не найдено</div>'; return; }
   L.innerHTML = list.map(u => {
     const used = u.up + u.down, st = statusTag[u.status], days = daysLeft(u);
     const pct = u.quotaBytes ? Math.min(100, used / u.quotaBytes * 100) : 0;
     const h = hue(u.name);
+    const onTag = [u.online && 'онлайн' + (u.online > 1 || u.maxDevices ? ' ' + u.online + (u.maxDevices ? '/' + u.maxDevices : '') : ''),
+      u.xrayOnline && 'VLESS' + (u.xrayOnline > 1 ? ' ' + u.xrayOnline : '')].filter(Boolean).join(' · ');
     return `<div class="user${u.enabled ? '' : ' off'}" data-n="${esc(u.name)}">
-      <div class="av${u.online ? ' on' : ''}" style="--h:${h}">${esc(u.name[0])}</div>
+      <div class="av${isOn(u) ? ' on' : ''}" style="--h:${h}">${esc(u.name[0])}</div>
       <div class="body">
         <div class="name">${esc(u.name)}
           ${st ? `<span class="pill ${st[1]}">${st[0]}</span>` : ''}
           ${!st && days !== null && days <= 3 ? `<span class="pill warn">${days > 0 ? days + ' дн.' : 'сегодня'}</span>` : ''}
-          ${u.online ? `<span class="pill ok">онлайн${u.online > 1 || u.maxDevices ? ' ' + u.online + (u.maxDevices ? '/' + u.maxDevices : '') : ''}</span>` : ''}
+          ${onTag ? `<span class="pill ok">${onTag}</span>` : ''}
         </div>
         <div class="meta mute small">
           <span>↓ ${fmt(u.down)} ↑ ${fmt(u.up)}${u.quotaBytes ? ' из ' + fmt(u.quotaBytes) : ''}</span>
           ${u.resetMonthly ? '<span>сброс 1-го</span>' : ''}
-          ${u.online ? '' : `<span>был ${ago(u.lastSeen)}</span>`}
+          ${isOn(u) ? '' : `<span>был ${ago(u.lastSeen)}</span>`}
           ${u.expiresAt ? `<span>до ${new Date(u.expiresAt * 1000).toLocaleDateString('ru-RU')}</span>` : ''}
           ${u.note ? `<span class="note">${esc(u.note)}</span>` : ''}
         </div>
@@ -403,6 +410,8 @@ async function openShare(n) {
   shareUser = find(n);
   $('#shareTitle').textContent = n;
   $('#subTab').hidden = !S.subBase;
+  $('#vlessTab').hidden = !S.server.vless;
+  $('#uriTab').textContent = S.server.vless ? 'Hysteria' : 'Ссылка';
   setTab('uri');
   $('#share').showModal();
 }
@@ -410,15 +419,23 @@ async function setTab(t) {
   $('#tabs').querySelectorAll('button').forEach(b => b.classList.toggle('act', b.dataset.t === t));
   const u = shareUser, q = 'api/users/' + u.name + '/qr.png?t=' + Date.now();
   let text, hint = '', qr = q;
+  const vl = S.server.vless;
   if (t === 'uri') { text = u.uri; hint = 'Hiddify, v2RayTun, Happ, Shadowrocket, v2rayN, официальный клиент.'; }
+  if (t === 'vless') {
+    text = u.vlessUri; qr = q + '&vless=1';
+    hint = `Happ, v2RayTun, Streisand, v2rayN, Hiddify. TCP ${vl.port}: снаружи выглядит как сайт ${vl.sni} — запасной канал, если UDP режут.`;
+  }
   if (t === 'sub') {
     text = S.subBase + u.subPath; qr = q + '&sub=1';
-    hint = 'Клиент сам обновляет конфиг и видит остаток трафика и срок. mihomo получает YAML.';
+    hint = 'Клиент сам обновляет конфиг и видит остаток трафика и срок. mihomo получает YAML.' + (vl ? ' Внутри обе ссылки: Hysteria и VLESS.' : '');
   }
-  if (t === 'mihomo') { text = await api('GET', 'api/users/' + u.name + '/mihomo'); qr = ''; hint = 'Вставь в proxies: конфига mihomo.'; }
+  if (t === 'mihomo') {
+    text = await api('GET', 'api/users/' + u.name + '/mihomo'); qr = '';
+    hint = 'Вставь в proxies: конфига mihomo.' + (vl ? ' На роутере — обе в группу fallback: пропал UDP, и он сам перейдёт на VLESS.' : '');
+  }
   $('#shareText').value = text; $('#shareHint').textContent = hint;
   $('#qr').hidden = !qr; if (qr) $('#qr').src = qr;
-  $('#shareText').rows = t === 'mihomo' ? 10 : 4;
+  $('#shareText').rows = t === 'mihomo' ? (vl ? 18 : 10) : 4;
 }
 $('#tabs').onclick = e => { const b = e.target.closest('button'); if (b) setTab(b.dataset.t); };
 async function copyShare() {

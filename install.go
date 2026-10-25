@@ -349,6 +349,8 @@ func runUninstall(args []string) {
 	}
 	env := readEnv()
 	cfgPath, svc := hyPaths(env)
+	xrayCfg, xraySvc := xrayPaths(env)
+	vless := env["HYP_XRAY_CONFIG"] != ""
 	if err := removePanel(); err != nil {
 		log.Fatalf("✗ %v\nПанель удалена не полностью; пользователи и настройки не тронуты.", err)
 	}
@@ -356,6 +358,9 @@ func runUninstall(args []string) {
 	if !*purge {
 		fmt.Printf("Пользователи и настройки остались (%s, %s).\n", dataDir, envPath)
 		fmt.Println("Пока панели нет, Hysteria не пускает новых клиентов: проверять пароли некому.")
+		if vless {
+			fmt.Println("Xray держит пользователей VLESS до своего перезапуска, после него — никого, пока панель не вернётся.")
+		}
 		fmt.Println("Установить снова — всё вернётся как было:\n    " + installCmd)
 		return
 	}
@@ -366,6 +371,24 @@ func runUninstall(args []string) {
 		fmt.Println("✓ в конфиге Hysteria снова её собственный auth — прежние клиенты работают без панели")
 	} else {
 		fmt.Printf("• своего auth до панели у Hysteria не было: %s остаётся как есть\n", cfgPath)
+	}
+	if vless {
+		// The users are gone: so is their VLESS access, also before Xray's next restart.
+		restored, err := restoreXrayClients(xrayCfg, xrayClientsPath)
+		switch {
+		case err != nil:
+			fmt.Printf("  ✗ вернуть клиентов в %s: %v\n", xrayCfg, err)
+		case restored:
+			fmt.Println("✓ в конфиге Xray снова его прежние клиенты — их ссылки VLESS работают без панели")
+		default:
+			fmt.Printf("• клиентов VLESS до панели не было: в %s их нет (systemctl disable --now %s, если Xray не нужен)\n", xrayCfg, xraySvc)
+		}
+		// Not fatal: the purge must go on to delete the users.
+		if err := systemctl("restart", xraySvc); err != nil {
+			fmt.Printf("  ✗ %v\n", err)
+		} else {
+			fmt.Println("✓ restart " + xraySvc)
+		}
 	}
 	step("remove "+dataDir, os.RemoveAll(dataDir))
 	step("remove "+envPath, os.RemoveAll(envPath))
@@ -434,7 +457,7 @@ func printInfo(env map[string]string) {
 	} else {
 		fmt.Printf("Панель:  ssh -L 8090:%s root@%s, затем http://localhost:8090\n", panelAddr, host)
 	}
-	fmt.Printf("Пароль:  %s\n\nhy-panel info | passwd | settings | uninstall\n", env["HYP_PASSWORD"])
+	fmt.Printf("Пароль:  %s\n\nhy-panel info | passwd | settings | xray | uninstall\n", env["HYP_PASSWORD"])
 }
 
 // runPasswd sets a new random panel password (`hy-panel passwd`).
@@ -449,7 +472,8 @@ func runPasswd() {
 
 // ---- /etc/hy-panel.env ----
 
-var envKeys = []string{"HYP_PASSWORD", "HYP_UI_PATH", "HYP_UI_PORT", "HYP_HOST", "HYP_NAME", "HYP_HY_CONFIG", "HYP_HY_SERVICE", "HYP_SUB_LISTEN", "HYP_SUB_URL"}
+var envKeys = []string{"HYP_PASSWORD", "HYP_UI_PATH", "HYP_UI_PORT", "HYP_HOST", "HYP_NAME", "HYP_HY_CONFIG", "HYP_HY_SERVICE",
+	"HYP_SUB_LISTEN", "HYP_SUB_URL", "HYP_XRAY_CONFIG", "HYP_XRAY_SERVICE"}
 
 func readEnv() map[string]string {
 	env := map[string]string{}
@@ -501,6 +525,9 @@ func checkEnv(env map[string]string) error {
 		if u, err := url.Parse(s); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			bad("HYP_SUB_URL", "нужен адрес вида https://sub.example.com")
 		}
+	}
+	if s := env["HYP_XRAY_CONFIG"]; s != "" && !filepath.IsAbs(s) {
+		bad("HYP_XRAY_CONFIG", "нужен абсолютный путь к конфигу Xray")
 	}
 	if err := errors.Join(errs...); err != nil {
 		return fmt.Errorf("%s: %w", envPath, err)

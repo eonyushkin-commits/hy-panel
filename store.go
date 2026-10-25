@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"log"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ type User struct {
 	Name         string `json:"name"`
 	Password     string `json:"password"`
 	SubToken     string `json:"subToken"`
+	UUID         string `json:"uuid"` // VLESS key (Xray)
 	Enabled      bool   `json:"enabled"`
 	QuotaBytes   int64  `json:"quotaBytes"`   // 0 = unlimited, counts up+down
 	ResetMonthly bool   `json:"resetMonthly"` // zero traffic on the 1st of each month (server time)
@@ -76,8 +78,20 @@ func OpenStore(path string) (*Store, error) {
 	if err := json.Unmarshal(b, &list); err != nil {
 		return nil, err
 	}
+	missing := false
 	for _, u := range list {
 		s.users[u.Name] = u
+		if u.UUID == "" {
+			u.UUID, missing = newUUID(), true
+		}
+	}
+	if missing {
+		// Users from before VLESS: saved now, so their keys do not change on
+		// the next start. A full disk must not keep /auth down: Flush retries.
+		if err := s.writeLocked(); err != nil {
+			log.Printf("WARN: save new VLESS keys: %v", err)
+			s.dirty = true
+		}
 	}
 	return s, nil
 }
@@ -188,6 +202,16 @@ func (s *Store) Resolve(auth string) (User, bool) {
 	return User{}, false
 }
 
+// checkUUID must be called with mu held: two users with one UUID would be one user for Xray.
+func (s *Store) checkUUID(id, self string) error {
+	for _, o := range s.users {
+		if o.Name != self && o.UUID == id {
+			return errors.New("uuid already used by " + o.Name)
+		}
+	}
+	return nil
+}
+
 // checkPassword must be called with mu held.
 func (s *Store) checkPassword(pw, self string) error {
 	if len(pw) < 8 || len(pw) > 128 || strings.ContainsAny(pw, ": \t\r\n") {
@@ -211,6 +235,9 @@ func (s *Store) Create(u User, legacy bool) (User, error) {
 	if u.Password == "" {
 		u.Password = randStr(20)
 	}
+	if u.UUID == "" {
+		u.UUID = newUUID()
+	}
 	now := time.Now()
 	u.SubToken = randStr(24)
 	u.CreatedAt = now.Unix()
@@ -223,6 +250,9 @@ func (s *Store) Create(u User, legacy bool) (User, error) {
 			if err := s.checkPassword(u.Password, u.Name); err != nil {
 				return nil, err
 			}
+		}
+		if err := s.checkUUID(u.UUID, u.Name); err != nil {
+			return nil, err
 		}
 		nu := u // the stored copy is the store's; u is returned
 		s.users[u.Name] = &nu
@@ -247,6 +277,12 @@ func (s *Store) Update(name string, fn func(*User) error) (User, error) {
 		}
 		if u.Password != old.Password {
 			if err := s.checkPassword(u.Password, name); err != nil {
+				undo()
+				return nil, err
+			}
+		}
+		if u.UUID != old.UUID {
+			if err := s.checkUUID(u.UUID, name); err != nil {
 				undo()
 				return nil, err
 			}
