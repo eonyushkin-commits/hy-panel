@@ -136,7 +136,8 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
 #login form{margin-top:18px;display:grid;gap:12px}
 
 /* toast */
-#toasts{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);display:grid;gap:8px;z-index:20;width:max-content;max-width:calc(100vw - 32px)}
+#toasts{position:fixed;inset:auto;left:50%;bottom:20px;transform:translateX(-50%);display:grid;gap:8px;z-index:20;width:max-content;max-width:calc(100vw - 32px);margin:0;padding:0;border:0;background:none;color:inherit;overflow:visible}
+#toasts[popover]:not(:popover-open){display:none}
 .toast{background:var(--fg);color:var(--bg);padding:9px 14px;border-radius:10px;font-size:13px;box-shadow:var(--shadow-lg);animation:pop .18s ease-out}
 .toast.bad{background:var(--bad);color:#fff}
 
@@ -303,7 +304,7 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
   </div>
 </dialog>
 
-<div id="toasts" aria-live="polite"></div>
+<div id="toasts" popover="manual" aria-live="polite"></div>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -326,10 +327,17 @@ function ago(t) {
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const icon = n => `<svg class="i"><use href="#i-${n}"/></svg>`;
 
+// Toasts live in the top layer (a popover), shown again on each one so
+// they stand above an open dialog, which is there too.
 function toast(msg, bad) {
-  const t = document.createElement('div');
+  const box = $('#toasts'), t = document.createElement('div');
   t.className = 'toast' + (bad ? ' bad' : ''); t.textContent = msg;
-  $('#toasts').append(t); setTimeout(() => t.remove(), bad ? 5000 : 2200);
+  box.append(t);
+  try { if (box.matches(':popover-open')) box.hidePopover(); box.showPopover(); } catch {}
+  setTimeout(() => {
+    t.remove();
+    if (!box.children.length) try { box.hidePopover(); } catch {}
+  }, bad ? 5000 : 2200);
 }
 
 async function api(method, path, body) {
