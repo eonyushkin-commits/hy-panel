@@ -88,7 +88,7 @@ func TestLinksGolden(t *testing.T) {
 		a.ep = sv.ep
 		for _, u := range users {
 			u.Enabled = true
-			if _, err := a.store.Create(u, true); err != nil {
+			if _, err := a.store.Create(u); err != nil {
 				t.Fatal(err)
 			}
 			a.store.Update(u.Name, func(s *User) error { s.SubToken = u.SubToken; s.AWGKey, s.AWGIndex = u.AWGKey, u.AWGIndex; return nil })

@@ -318,7 +318,7 @@ func (a *App) handleCreate(w http.ResponseWriter, r *http.Request) {
 	u := User{Name: p.Name, Enabled: true}
 	p.Enabled, p.ResetTraffic, p.NewKey = nil, false, false
 	p.apply(&u, time.Now())
-	u, err := a.store.Create(u, false)
+	u, err := a.store.Create(u)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

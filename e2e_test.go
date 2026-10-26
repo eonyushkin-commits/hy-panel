@@ -123,8 +123,8 @@ func TestE2EXray(t *testing.T) {
 	}
 	t.Logf("clients connect to %s", host)
 	a.ep = Endpoint{Host: host, Port: "1", Name: "T", Vless: &xs.Link} // Hysteria: a placeholder
-	alice := mustCreate(t, a.store, User{Name: "alice"}, false)
-	mustCreate(t, a.store, User{Name: "bob"}, false)
+	alice := mustCreate(t, a.store, User{Name: "alice"})
+	mustCreate(t, a.store, User{Name: "bob"})
 	sync := func() {
 		a.syncOnce(time.Now())
 		if syncState(a, protoVless).err != "" {

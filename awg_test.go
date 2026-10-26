@@ -120,12 +120,12 @@ func TestStoreAWGKeys(t *testing.T) {
 	if a.AWGKey == "" || a.AWGIndex != 3 { // 2 is b's
 		t.Fatalf("%+v", a)
 	}
-	c := mustCreate(t, s, User{Name: "c"}, false)
+	c := mustCreate(t, s, User{Name: "c"})
 	if c.AWGIndex != 4 {
 		t.Fatalf("%+v", c)
 	}
 	s.Delete("a")
-	if d := mustCreate(t, s, User{Name: "d"}, false); d.AWGIndex != 3 {
+	if d := mustCreate(t, s, User{Name: "d"}); d.AWGIndex != 3 {
 		t.Fatalf("freed index not reused: %+v", d)
 	}
 }
@@ -186,7 +186,7 @@ func TestAWGHandshake(t *testing.T) {
 	a := testApp(t, nil)
 	a.addBackend(newAWGBackend(newAWGClient(sock)))
 	a.ep = ep
-	mustCreate(t, a.store, u, false)
+	mustCreate(t, a.store, u)
 	a.syncOnce(time.Now())
 	if l := syncState(a, protoAWG); l.err != "" || l.fails != 0 {
 		t.Fatal(l.err)

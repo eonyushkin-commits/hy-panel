@@ -196,8 +196,8 @@ func (s *Store) Empty() bool {
 }
 
 // Resolve maps a Hysteria auth string to a user: "name:password" (as with
-// Hysteria's userpass, name case-insensitive) or a bare password (clients of a
-// former `auth.type: password` setup, and apps that send only the password).
+// Hysteria's userpass, name case-insensitive) or a bare password (apps that
+// send only the password).
 func (s *Store) Resolve(auth string) (User, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -250,9 +250,8 @@ func (s *Store) checkPassword(pw, self string) error {
 	return nil
 }
 
-// Create adds a user. Imported passwords (legacy=true) skip the format check,
-// since they must stay exactly as old clients send them.
-func (s *Store) Create(u User, legacy bool) (User, error) {
+// Create adds a user; an empty password or UUID is generated.
+func (s *Store) Create(u User) (User, error) {
 	u.Name = strings.ToLower(u.Name)
 	if !nameRe.MatchString(u.Name) {
 		return User{}, errors.New("name: 1-32 chars of a-z 0-9 _ . -")
@@ -271,10 +270,8 @@ func (s *Store) Create(u User, legacy bool) (User, error) {
 		if _, ok := s.users[u.Name]; ok {
 			return nil, errors.New("user exists")
 		}
-		if !legacy {
-			if err := s.checkPassword(u.Password, u.Name); err != nil {
-				return nil, err
-			}
+		if err := s.checkPassword(u.Password, u.Name); err != nil {
+			return nil, err
 		}
 		if err := s.checkUUID(u.UUID, u.Name); err != nil {
 			return nil, err

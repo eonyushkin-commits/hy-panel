@@ -80,7 +80,7 @@ func jobArgs(action string, p map[string]string) ([]string, error) {
 		if err := f.check(); err != nil {
 			return nil, err
 		}
-		args := []string{"settings", "-y"}
+		args := []string{"settings"}
 		for _, kv := range [][2]string{{"port", f.port}, {"obfs", f.obfs}, {"cert", f.cert}, {"domain", f.domain}, {"email", f.email}} {
 			if kv[1] != "" {
 				args = append(args, "-"+kv[0], kv[1])
@@ -88,7 +88,7 @@ func jobArgs(action string, p map[string]string) ([]string, error) {
 		}
 		return args, nil
 	case "vless":
-		args := []string{"xray", "-y"}
+		args := []string{"xray"}
 		if port := p["port"]; port != "" {
 			if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
 				return nil, fmt.Errorf("порт %q: нужен 1–65535", port)
@@ -101,7 +101,7 @@ func jobArgs(action string, p map[string]string) ([]string, error) {
 		}
 		return append(args, "-target", t), nil
 	case "awg":
-		args := []string{"awg", "-y"}
+		args := []string{"awg"}
 		if port := p["port"]; port != "" {
 			if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
 				return nil, fmt.Errorf("порт %q: нужен 1–65535", port)

@@ -17,19 +17,20 @@ import (
 
 var version = "dev" // set by -ldflags "-X main.version=v0.2.0"
 
-const usage = `hy-panel — пользователи для Hysteria 2 и VLESS + Reality (Xray)
+const usage = `hy-panel — VPN-панель: Hysteria 2, AmneziaWG 3.1, VLESS + Reality (Xray)
 
-  hy-panel install     установить или обновить (повторный запуск ничего не меняет, кроме программы)
-  hy-panel settings    поменять порт, обфускацию или сертификат Hysteria
-  hy-panel xray        добавить VLESS + Reality (Xray) или сменить его сайт для маскировки
-  hy-panel awg         добавить AmneziaWG 3.1 или сменить его порт
+  hy-panel install     поставить панель или обновить программу (настройки и пользователи остаются);
+                       протоколы ставятся и настраиваются в самой панели
   hy-panel info        адрес и пароль панели
   hy-panel passwd      новый пароль панели
-  hy-panel uninstall   удалить панель; пользователи и настройки сохранятся
+  hy-panel uninstall -y          удалить панель; пользователи и настройки сохранятся
                        (-purge — удалить и их)
-  hy-panel fetch hysteria|xray   поставить или обновить сервер протокола из официального релиза
-  hy-panel serve       запуск панели (его делает systemd)
-  hy-panel agent       root-помощник панели (его делает systemd)
+
+Их запускает агент панели (из окон «Протоколы»), можно и вручную, только с флагами:
+  hy-panel settings -port … -obfs … -cert …   Hysteria: установить, сменить порт, обфускацию, сертификат
+  hy-panel xray -target сайт [-port 443]       VLESS + Reality: установить или сменить сайт для маскировки
+  hy-panel awg [-port …]                       AmneziaWG: установить или сменить порт
+  hy-panel fetch hysteria|xray                 поставить или обновить сервер из официального релиза
 `
 
 func main() {
@@ -93,7 +94,7 @@ func serve() {
 	var warns []string
 	switch {
 	case kind == cfgOwnAuth:
-		warns = append(warns, "Hysteria работает со своими паролями, не через панель: подключи её командой hy-panel install")
+		warns = append(warns, "Hysteria настроена не панелью и проверяет пароли сама: «Настроить» на карточке Hysteria перепишет её конфиг (прежний сохранится в .bak-hy-panel)")
 	case kindErr(kind) != nil:
 		// Keep /auth up, but hand out no links built from a config we could not read.
 		log.Printf("WARN: %s: %v", cfgPath, kindErr(kind))

@@ -35,10 +35,10 @@ func newStore(t *testing.T) *Store {
 	return s
 }
 
-func mustCreate(t *testing.T, s *Store, u User, legacy bool) User {
+func mustCreate(t *testing.T, s *Store, u User) User {
 	t.Helper()
 	u.Enabled = true
-	got, err := s.Create(u, legacy)
+	got, err := s.Create(u)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,14 +47,12 @@ func mustCreate(t *testing.T, s *Store, u User, legacy bool) User {
 
 func TestResolve(t *testing.T) {
 	s := newStore(t)
-	mustCreate(t, s, User{Name: "Phone", Password: "secret123"}, false)
-	mustCreate(t, s, User{Name: "default", Password: "old:legacy pw"}, true)
+	mustCreate(t, s, User{Name: "Phone", Password: "secret123"})
 
 	cases := map[string]string{
 		"phone:secret123": "phone",
 		"PHONE:secret123": "phone", // Hysteria userpass: names are case-insensitive
 		"secret123":       "phone", // bare password
-		"old:legacy pw":   "default",
 		"phone:wrong":     "",
 		"":                "",
 		"default:":        "",
@@ -69,19 +67,19 @@ func TestResolve(t *testing.T) {
 
 func TestPasswordRules(t *testing.T) {
 	s := newStore(t)
-	a := mustCreate(t, s, User{Name: "a"}, false)
+	a := mustCreate(t, s, User{Name: "a"})
 	if len(a.Password) != 20 {
 		t.Fatalf("generated password %q", a.Password)
 	}
 	for _, pw := range []string{"short", "has:colon1", "has space1", a.Password} {
-		if _, err := s.Create(User{Name: "b", Password: pw}, false); err == nil {
+		if _, err := s.Create(User{Name: "b", Password: pw}); err == nil {
 			t.Errorf("Create with password %q succeeded", pw)
 		}
 	}
-	if _, err := s.Create(User{Name: "Bad Name"}, false); err == nil {
+	if _, err := s.Create(User{Name: "Bad Name"}); err == nil {
 		t.Error("bad name accepted")
 	}
-	b := mustCreate(t, s, User{Name: "b"}, false)
+	b := mustCreate(t, s, User{Name: "b"})
 	// Duplicate on update is rejected and leaves the user untouched.
 	if _, err := s.Update("b", func(u *User) error { u.Password = a.Password; u.Note = "x"; return nil }); err == nil {
 		t.Fatal("duplicate password accepted on update")
@@ -99,7 +97,7 @@ func TestPasswordRules(t *testing.T) {
 func TestBlockedAndMonthlyReset(t *testing.T) {
 	s := newStore(t)
 	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.Local)
-	mustCreate(t, s, User{Name: "q", QuotaBytes: 100}, false)
+	mustCreate(t, s, User{Name: "q", QuotaBytes: 100})
 	s.Tick(now, map[string]trafficEntry{"q": {Tx: 40, Rx: 60}}, nil)
 	if u, _ := s.Get("q"); u.Blocked(now) != "quota" || u.Up != 40 || u.Down != 60 {
 		t.Fatalf("quota: %+v %q", u, u.Blocked(now))
@@ -336,7 +334,7 @@ func syncState(a *App, p string) live {
 func TestEnforceLeavesNoStaleKicks(t *testing.T) {
 	f, sc := newFakeHy(t)
 	a := testApp(t, sc)
-	mustCreate(t, a.store, User{Name: "u"}, false)
+	mustCreate(t, a.store, User{Name: "u"})
 	tick := func() { a.syncOnce(time.Now()) }
 
 	// Two active sessions, user disabled: one kick at a time, both closed, no flag left.
@@ -393,8 +391,8 @@ func TestEnforceLeavesNoStaleKicks(t *testing.T) {
 func TestPasswordChangeRevokesSessions(t *testing.T) {
 	f, sc := newFakeHy(t)
 	a := testApp(t, sc)
-	mustCreate(t, a.store, User{Name: "u"}, false)
-	mustCreate(t, a.store, User{Name: "off"}, false)
+	mustCreate(t, a.store, User{Name: "u"})
+	mustCreate(t, a.store, User{Name: "off"})
 	f.connect("u")
 	a.syncOnce(time.Now())
 
@@ -427,7 +425,7 @@ func TestPasswordChangeRevokesSessions(t *testing.T) {
 func TestTrafficKeptWhenOnlineFails(t *testing.T) {
 	f, sc := newFakeHy(t)
 	a := testApp(t, sc)
-	mustCreate(t, a.store, User{Name: "u"}, false)
+	mustCreate(t, a.store, User{Name: "u"})
 	f.connect("u")
 	f.send("u")
 	f.failOn = true
@@ -447,7 +445,7 @@ func TestTrafficKeptWhenOnlineFails(t *testing.T) {
 func TestAuthEndpoint(t *testing.T) {
 	_, sc := newFakeHy(t)
 	a := testApp(t, sc)
-	u := mustCreate(t, a.store, User{Name: "u", MaxDevices: 1}, false)
+	u := mustCreate(t, a.store, User{Name: "u", MaxDevices: 1})
 	call := func(remote, auth string, hdr ...string) (int, map[string]any) {
 		r := httptest.NewRequest("POST", "/auth", strings.NewReader(`{"addr":"1.2.3.4:5","auth":"`+auth+`","tx":0}`))
 		r.RemoteAddr = remote
@@ -572,39 +570,6 @@ func TestClassify(t *testing.T) {
 	}
 }
 
-// The install decision never depends on whether Hysteria runs (facts has no
-// such field), and a re-run is always an update that leaves Hysteria alone.
-func TestPlanInstall(t *testing.T) {
-	cases := []struct {
-		f    facts
-		want plan
-		err  bool
-	}{
-		{facts{kind: cfgNone, hysteria: true}, plan{fresh: true}, false},
-		{facts{kind: cfgNone}, plan{noHysteria: true}, false},                                // clean server: panel only, protocols from the panel
-		{facts{installed: true, kind: cfgNone}, plan{update: true, noHysteria: true}, false}, // update of a panel without Hysteria
-		{facts{kind: cfgOwnAuth, hysteria: true}, plan{connect: true}, false},
-		{facts{kind: cfgPanel, hysteria: true}, plan{}, false}, // after uninstall -purge: keep port/obfs/cert
-		{facts{installed: true, kind: cfgPanel}, plan{update: true}, false},
-		{facts{installed: true, kind: cfgOwnAuth}, plan{update: true, connect: true}, false},
-		{facts{installed: true, kind: cfgNone, hysteria: true}, plan{update: true, fresh: true}, false}, // config deleted/reset: ask again, panel settings stay
-		{facts{kind: cfgOwnAuth}, plan{connect: true}, false},                                           // connecting needs no official binary/unit
-		{facts{kind: cfgOther, hysteria: true}, plan{}, true},
-		{facts{kind: cfgRealm, hysteria: true}, plan{}, true},
-		{facts{kind: cfgBroken, hysteria: true}, plan{}, true},
-		{facts{v01: true, installed: true, kind: cfgPanel}, plan{}, true},
-	}
-	for _, c := range cases {
-		got, err := planInstall(c.f)
-		if (err != nil) != c.err || got != c.want {
-			t.Errorf("planInstall(%+v) = %+v, %v; want %+v, err=%v", c.f, got, err, c.want, c.err)
-		}
-		if got.fresh && c.f.kind != cfgNone {
-			t.Errorf("a working Hysteria config must never be rewritten: %+v", c.f)
-		}
-	}
-}
-
 func TestApplyOptsKeepsLinks(t *testing.T) {
 	dir := t.TempDir()
 	// A new config from the answers.
@@ -647,32 +612,9 @@ func TestApplyOptsKeepsLinks(t *testing.T) {
 	}
 }
 
-func TestOwnAuthRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath, saved := filepath.Join(dir, "config.yaml"), filepath.Join(dir, "data", "auth.yaml")
-	orig := "listen: :8443\nauth:\n  type: userpass\n  userpass:\n    evo: secret12\n"
-	d, _ := parseDoc([]byte(orig))
-	if err := saveOwnAuth(d, saved); err != nil {
-		t.Fatal(err)
-	}
-	d.connectPanel()
-	b, _ := d.bytes()
-	os.WriteFile(cfgPath, b, 0o640)
-	if ok, err := restoreOwnAuth(cfgPath, saved); !ok || err != nil {
-		t.Fatal(ok, err)
-	}
-	c, _ := loadHyConfig(cfgPath)
-	if c.Auth.Type != "userpass" || c.Auth.UserPass["evo"] != "secret12" || c.TrafficStats.Listen != "" || c.Listen != ":8443" {
-		t.Fatalf("restored: %+v", c)
-	}
-	if ok, _ := restoreOwnAuth(cfgPath, filepath.Join(dir, "none")); ok {
-		t.Fatal("nothing saved must restore nothing")
-	}
-}
-
 func TestCountersFlushedLater(t *testing.T) {
 	s := newStore(t)
-	mustCreate(t, s, User{Name: "u"}, false)
+	mustCreate(t, s, User{Name: "u"})
 	disk := func() int64 {
 		s2, _ := OpenStore(s.path)
 		u, _ := s2.Get("u")
@@ -696,7 +638,7 @@ func TestCountersFlushedLater(t *testing.T) {
 func TestDeviceLimitUsesSnapshot(t *testing.T) {
 	f, sc := newFakeHy(t)
 	a := testApp(t, sc)
-	u := mustCreate(t, a.store, User{Name: "u", MaxDevices: 1}, false)
+	u := mustCreate(t, a.store, User{Name: "u", MaxDevices: 1})
 	if ok, _, _ := a.authorize("u:" + u.Password); !ok {
 		t.Fatal("first device refused")
 	}
@@ -744,7 +686,7 @@ func TestKindErr(t *testing.T) {
 
 func TestPrivateResponsesNotCached(t *testing.T) {
 	a := testApp(t, nil)
-	mustCreate(t, a.store, User{Name: "u"}, false)
+	mustCreate(t, a.store, User{Name: "u"})
 	for _, h := range []http.HandlerFunc{a.handleState, a.handleMihomo} {
 		r := httptest.NewRequest("GET", "/", nil)
 		r.SetPathValue("name", "u")

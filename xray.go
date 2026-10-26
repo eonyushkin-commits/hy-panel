@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/ecdh"
 	"crypto/rand"
-	"crypto/sha1"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
@@ -61,9 +60,8 @@ type xrayInbound struct {
 	Port     jsonPort `json:"port"`
 	Protocol string   `json:"protocol"`
 	Settings struct {
-		Clients    []xrayUser `json:"clients"`
-		Decryption string     `json:"decryption"`
-		Flow       string     `json:"flow"` // default for clients without one
+		Decryption string `json:"decryption"`
+		Flow       string `json:"flow"`
 	} `json:"settings"`
 	StreamSettings struct {
 		Network   string    `json:"network"`
@@ -81,12 +79,6 @@ type xrayInbound struct {
 }
 
 type xhttpOpts struct{ Path, Mode, Host string }
-
-type xrayUser struct {
-	ID    string `json:"id"`
-	Email string `json:"email"`
-	Flow  string `json:"flow"`
-}
 
 // jsonPort is a port written as a number or a string, as Xray accepts.
 type jsonPort string
@@ -237,15 +229,6 @@ func vlessLink(in *xrayInbound) (Vless, error) {
 		target = net.JoinHostPort("127.0.0.1", target)
 	}
 	v.Target = target
-	for _, c := range in.Settings.Clients {
-		f := c.Flow
-		if f == "" {
-			f = in.Settings.Flow
-		}
-		if f != v.Flow {
-			return v, fmt.Errorf("клиент %q: flow %q, а панель выдаёт всем %q", c.Email, f, v.Flow)
-		}
-	}
 	return v, nil
 }
 
@@ -350,26 +333,6 @@ func newUUID() string {
 func fmtUUID(b []byte) string {
 	h := hex.EncodeToString(b)
 	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
-}
-
-// xrayUUID is the UUID Xray makes of a client id: a UUID as is, or a short
-// string (1-30 characters) hashed like Xray's uuid.ParseString does.
-func xrayUUID(id string) (string, error) {
-	if l := len(id); l < 32 || l > 36 {
-		if l == 0 || l > 30 {
-			return "", fmt.Errorf("id %q: не UUID", id)
-		}
-		h := sha1.Sum(append(make([]byte, 16), id...))
-		u := h[:16]
-		u[6] = u[6]&0x0f | 0x50
-		u[8] = u[8]&0x3f | 0x80
-		return fmtUUID(u), nil
-	}
-	b, err := hex.DecodeString(strings.ReplaceAll(id, "-", ""))
-	if err != nil || len(b) != 16 {
-		return "", fmt.Errorf("id %q: не UUID", id)
-	}
-	return fmtUUID(b), nil
 }
 
 // ---- the site Reality impersonates ----

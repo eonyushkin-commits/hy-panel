@@ -203,9 +203,9 @@ func xrayApp(t *testing.T) (*App, *fakeHy, *fakeXray) {
 
 func TestXrayUsersFollowPanel(t *testing.T) {
 	a, _, fx := xrayApp(t)
-	alice := mustCreate(t, a.store, User{Name: "alice"}, false)
-	bob := mustCreate(t, a.store, User{Name: "bob"}, false)
-	mustCreate(t, a.store, User{Name: "off"}, false)
+	alice := mustCreate(t, a.store, User{Name: "alice"})
+	bob := mustCreate(t, a.store, User{Name: "bob"})
+	mustCreate(t, a.store, User{Name: "off"})
 	a.store.Update("off", func(u *User) error { u.Enabled = false; return nil })
 	// Xray's own leftovers: a stranger, a disabled user, alice with an old key.
 	fx.users["stranger"], fx.users["off"], fx.users["alice"] = newUUID(), "x", newUUID()
@@ -271,8 +271,8 @@ func TestXrayTrafficAndOnline(t *testing.T) {
 	for _, old := range []bool{false, true} {
 		a, hy, fx := xrayApp(t)
 		fx.oldErr = old
-		mustCreate(t, a.store, User{Name: "u"}, false)
-		mustCreate(t, a.store, User{Name: "idle"}, false)
+		mustCreate(t, a.store, User{Name: "u"})
+		mustCreate(t, a.store, User{Name: "idle"})
 		hy.connect("u")
 		hy.send("u") // Rx 1000 over Hysteria
 		fx.traffic["u"] = trafficEntry{Tx: 5, Rx: 7}
@@ -295,7 +295,7 @@ func TestXrayTrafficAndOnline(t *testing.T) {
 
 func TestXrayDownKeepsHysteria(t *testing.T) {
 	a, hy, fx := xrayApp(t)
-	mustCreate(t, a.store, User{Name: "u"}, false)
+	mustCreate(t, a.store, User{Name: "u"})
 	fx.down = true
 	hy.connect("u")
 	hy.send("u")
@@ -364,21 +364,6 @@ func TestRealityKeysAndUUIDs(t *testing.T) {
 	if _, err := realityPublicKey(newRealityKey()); err != nil {
 		t.Error(err)
 	}
-	for id, want := range map[string]string{
-		"my-secret":                            "b9fedf3b-ab02-5906-b6de-c5b0af9884b4",
-		"router":                               "a90a1c2f-d1c0-5dad-bc5e-3b0a0352a8cd",
-		"2B1C3D4E-5F60-4A7B-8C9D-0E1F2A3B4C5D": "2b1c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d",
-		"2b1c3d4e5f604a7b8c9d0e1f2a3b4c5d":     "2b1c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d",
-	} {
-		if got, err := xrayUUID(id); err != nil || got != want {
-			t.Errorf("xrayUUID(%q) = %s, %v", id, got, err)
-		}
-	}
-	for _, bad := range []string{"", strings.Repeat("x", 31), "zz1c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d"} {
-		if _, err := xrayUUID(bad); err == nil {
-			t.Errorf("xrayUUID(%q) accepted", bad)
-		}
-	}
 	if u := newUUID(); len(u) != 36 || u[14] != '4' {
 		t.Errorf("uuid %s", u)
 	}
@@ -419,11 +404,8 @@ func TestParseXray(t *testing.T) {
 		"port range":       {edit(func(d *xrayDoc) { d.inbound().set("port", "1000-2000") }), "port"},
 		"no api":           {edit(func(d *xrayDoc) { d.root.obj("api").set("listen", ""); d.root.obj("api").set("tag", "") }), "api"},
 		"no stats service": {edit(func(d *xrayDoc) { d.root.obj("api").set("services", []any{"HandlerService"}) }), "StatsService"},
-		"vision on xhttp": {edit(func(d *xrayDoc) {
-			d.inbound().obj("settings").set("clients", []any{newObjKV("id", newUUID(), "flow", visionFlow)})
-		}), "flow"},
-		"bad key":         {edit(func(d *xrayDoc) { stream(d).obj("realitySettings").set("privateKey", "nope") }), "privateKey"},
-		"tcp gets vision": {edit(func(d *xrayDoc) { stream(d).set("network", "raw") }), ""},
+		"bad key":          {edit(func(d *xrayDoc) { stream(d).obj("realitySettings").set("privateKey", "nope") }), "privateKey"},
+		"tcp gets vision":  {edit(func(d *xrayDoc) { stream(d).set("network", "raw") }), ""},
 		"legacy api inbound": {edit(func(d *xrayDoc) {
 			d.root.obj("api").set("listen", "")
 			ins, _ := d.root.get("inbounds").([]any)
@@ -454,48 +436,6 @@ func newObjKV(kv ...any) *jobj {
 		o.set(kv[i].(string), kv[i+1])
 	}
 	return o
-}
-
-func TestConnectPanelEditsInPlace(t *testing.T) {
-	src := strings.Replace(docConfig, `"log": { "loglevel": "warning" },`, "// managed by hand\n  \"log\": { \"loglevel\": \"warning\" }, /* level */", 1)
-	d, kind := classifyXray([]byte(src), nil)
-	if kind != xrayVless {
-		t.Fatalf("kind %d", kind)
-	}
-	clients := d.connectPanel()
-	out, _ := d.bytes()
-	xs, err := parseXray(out)
-	if err != nil {
-		t.Fatalf("%v\n%s", err, out)
-	}
-	if xs.Tag != xrayTag || xs.API != xrayAPIAddr || xs.Warn != "" || xs.Link.SNI != "lurkpro.tech" || xs.Link.Path != "/a1b2c3d4e5f6" {
-		t.Fatalf("%+v", xs)
-	}
-	var c xrayConfig
-	json.Unmarshal(out, &c)
-	if n := len(c.vlessInbound().Settings.Clients); n != 0 || len(clients) != 1 {
-		t.Fatalf("clients left in config: %d, taken: %d", n, len(clients))
-	}
-	// Key order stays: the original keys first, in their order; new ones after.
-	keys := d.root.keys
-	if !slices.Equal(keys, []string{"log", "inbounds", "outbounds", "routing", "api", "stats", "policy"}) {
-		t.Fatalf("top-level keys %v", keys)
-	}
-	if k := d.inbound().keys; !slices.Equal(k, []string{"listen", "port", "protocol", "settings", "streamSettings", "sniffing", "tag"}) {
-		t.Fatalf("inbound keys %v", k)
-	}
-	if !strings.Contains(string(out), `"geoip:private"`) {
-		t.Fatalf("%s", out)
-	}
-
-	// The site changes under the key the config uses.
-	dest := strings.Replace(docConfig, `"target"`, `"dest"`, 1)
-	d2, _ := classifyXray([]byte(dest), nil)
-	d2.setTarget("api.ilexa.online")
-	b, _ := d2.bytes()
-	if s := string(b); strings.Contains(s, `"target"`) || !strings.Contains(s, `"dest": "api.ilexa.online:443"`) || !strings.Contains(s, `"api.ilexa.online"`) {
-		t.Fatalf("%s", b)
-	}
 }
 
 func TestClassifyXray(t *testing.T) {
@@ -594,7 +534,7 @@ func TestSubscriptionHasBothProtocols(t *testing.T) {
 	a, _, _ := xrayApp(t)
 	xs, _ := parseXray(freshXray("443", "lurkpro.tech"))
 	a.ep = Endpoint{Host: "203.0.113.7", Port: "443", ObfsType: "salamander", ObfsPass: "o", Vless: &xs.Link}
-	u := mustCreate(t, a.store, User{Name: "u"}, false)
+	u := mustCreate(t, a.store, User{Name: "u"})
 	get := func(q, ua string) string {
 		r := httptest.NewRequest("GET", "/sub/"+u.SubToken+q, nil)
 		r.SetPathValue("token", u.SubToken)
@@ -626,7 +566,7 @@ func TestStateShowsVless(t *testing.T) {
 	a, _, fx := xrayApp(t)
 	xs, _ := parseXray(freshXray("443", "lurkpro.tech"))
 	a.ep = Endpoint{Host: "203.0.113.7", Port: "443", Vless: &xs.Link}
-	mustCreate(t, a.store, User{Name: "u"}, false)
+	mustCreate(t, a.store, User{Name: "u"})
 	fx.online["u"] = 1
 	a.syncOnce(time.Now())
 	w := httptest.NewRecorder()
@@ -659,51 +599,8 @@ func TestStoreGivesOldUsersUUIDs(t *testing.T) {
 	if u2, _ := s2.Get("old"); len(u.UUID) != 36 || u2.UUID != u.UUID {
 		t.Fatalf("%q %q", u.UUID, u2.UUID)
 	}
-	if _, err := s.Create(User{Name: "dup", UUID: u.UUID}, false); err == nil {
+	if _, err := s.Create(User{Name: "dup", UUID: u.UUID}); err == nil {
 		t.Fatal("duplicate UUID accepted")
-	}
-}
-
-func TestImportXrayClients(t *testing.T) {
-	s := newStore(t)
-	router := mustCreate(t, s, User{Name: "router"}, false) // also a Hysteria user
-	id1 := "2b1c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d"
-	id3 := newUUID()
-	clients := []xrayUser{{ID: id1, Email: "Router"}, {ID: "my-secret", Email: "phone@home"}, {ID: id3}, {ID: "bad id that is far too long to be a uuid"}}
-	importXrayClients(s, clients)
-	importXrayClients(s, clients) // a re-run changes nothing
-	r, _ := s.Get("router")
-	p, _ := s.Get("phone")
-	x, ok := s.Get("xray-" + id3[:8])
-	if r.UUID != id1 || r.Password != router.Password || p.UUID != "b9fedf3b-ab02-5906-b6de-c5b0af9884b4" || !ok || x.UUID != id3 || len(s.List()) != 3 {
-		t.Fatalf("%+v %+v %+v %v", r, p, x, s.List())
-	}
-}
-
-func TestRestoreXrayClients(t *testing.T) {
-	dir := t.TempDir()
-	cfg := filepath.Join(dir, "config.json")
-	d, _ := classifyXray([]byte(docConfig), nil)
-	clients := d.connectPanel()
-	out, _ := d.bytes()
-	os.WriteFile(cfg, out, 0o644)
-	saved := filepath.Join(dir, "clients.json")
-	var b strings.Builder
-	encodeJSON(&b, clients, "  ")
-	os.WriteFile(saved, []byte(b.String()), 0o600)
-
-	ok, err := restoreXrayClients(cfg, saved)
-	if err != nil || !ok {
-		t.Fatal(ok, err)
-	}
-	var c xrayConfig
-	nb, _ := os.ReadFile(cfg)
-	json.Unmarshal(nb, &c)
-	if cl := c.vlessInbound().Settings.Clients; len(cl) != 1 || cl[0].Email != "router" {
-		t.Fatalf("%s", nb)
-	}
-	if ok, err := restoreXrayClients(cfg, filepath.Join(dir, "none.json")); ok || err != nil {
-		t.Fatal("nothing saved: nothing to restore")
 	}
 }
 
@@ -722,7 +619,7 @@ func TestUserProtocolsOff(t *testing.T) {
 	a, hy, fx := xrayApp(t)
 	xs, _ := parseXray(freshXray("443", "lurkpro.tech"))
 	a.ep = Endpoint{Host: "203.0.113.7", Port: "443", Name: "NL", Vless: &xs.Link}
-	u := mustCreate(t, a.store, User{Name: "u", Password: "secret123"}, false)
+	u := mustCreate(t, a.store, User{Name: "u", Password: "secret123"})
 	hy.connect("u")
 	a.syncOnce(time.Now())
 	if _, in := fx.snapshot()["u"]; !in {

@@ -446,7 +446,7 @@ function openHy() {
   f.cert.value = c && c.domain ? 'acme' : 'self';
   f.domain.value = c ? c.domain : ''; f.email.value = c ? c.email : '';
   $('#hyBtn').textContent = c ? 'Применить' : 'Установить';
-  $('#hyHint').textContent = c ? 'Ссылки и QR клиентов изменятся: подписка обновится сама, остальным нужно выдать новые.' : 'Панель скачает официальный релиз Hysteria (с проверкой SHA-256), напишет конфиг и запустит службу.';
+  $('#hyHint').textContent = c ? 'Ссылки и QR клиентов изменятся: подписка обновится сама, остальным нужно выдать новые.' : 'Панель скачает официальный релиз Hysteria (с проверкой SHA-256), напишет конфиг и запустит службу. Конфиг Hysteria, написанный не панелью, заменится (прежний сохранится в .bak-hy-panel).';
   hyToggle(); $('#hyDlg').returnValue = ''; $('#hyDlg').showModal();
 }
 function hyToggle() {
@@ -471,7 +471,7 @@ function openVl() {
   $('#vlBtn').textContent = c ? 'Сменить сайт' : 'Установить';
   $('#vlHint').textContent = c
     ? `Сейчас сайт — ${c.sni}. Смени, если он перестал отвечать: в ссылках VLESS изменится sni, подписка обновится сама.`
-    : 'Панель скачает официальный релиз Xray (с проверкой SHA-256), сделает ключи Reality и запустит службу. Если Xray уже настроен вручную, панель подключится к нему, сохранив ключи и клиентов.';
+    : 'Панель скачает официальный релиз Xray (с проверкой SHA-256), сделает ключи Reality и запустит службу. Конфиг Xray, написанный не панелью, заменится (прежний сохранится в .bak-hy-panel).';
   $('#vlDlg').returnValue = ''; $('#vlDlg').showModal();
 }
 // findSites does what the guide did by hand: RealiTLScanner over the
