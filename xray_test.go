@@ -197,7 +197,7 @@ func xrayApp(t *testing.T) (*App, *fakeHy, *fakeXray) {
 	hy, sc := newFakeHy(t)
 	fx, api := newFakeXray(t)
 	a := testApp(t, sc)
-	a.xray, a.xrayTag = api, "in"
+	a.addBackend(&xrayBackend{api: api, tag: "in"})
 	return a, hy, fx
 }
 
@@ -211,8 +211,8 @@ func TestXrayUsersFollowPanel(t *testing.T) {
 	fx.users["stranger"], fx.users["off"], fx.users["alice"] = newUUID(), "x", newUUID()
 
 	a.syncOnce(time.Now())
-	if a.xrayErr != "" {
-		t.Fatal(a.xrayErr)
+	if syncState(a, protoVless).err != "" {
+		t.Fatal(syncState(a, protoVless).err)
 	}
 	want := map[string]string{"alice": alice.UUID, "bob": bob.UUID}
 	if got := fx.snapshot(); !mapsEqual(got, want) {
@@ -278,12 +278,12 @@ func TestXrayTrafficAndOnline(t *testing.T) {
 		fx.traffic["u"] = trafficEntry{Tx: 5, Rx: 7}
 		fx.online["u"] = 2
 		a.syncOnce(time.Now())
-		if a.xrayErr != "" {
-			t.Fatalf("old=%v: %s", old, a.xrayErr)
+		if syncState(a, protoVless).err != "" {
+			t.Fatalf("old=%v: %s", old, syncState(a, protoVless).err)
 		}
 		u, _ := a.store.Get("u")
-		if u.Up != 5 || u.Down != 1007 || a.xonline["u"] != 2 || a.online["u"] != 1 || len(a.xonline) != 1 {
-			t.Fatalf("old=%v: %+v xonline=%v online=%v", old, u, a.xonline, a.online)
+		if u.Up != 5 || u.Down != 1007 || a.onlineOf(protoVless)["u"] != 2 || a.onlineOf(protoHy2)["u"] != 1 || len(a.onlineOf(protoVless)) != 1 {
+			t.Fatalf("old=%v: %+v xonline=%v online=%v", old, u, a.onlineOf(protoVless), a.onlineOf(protoHy2))
 		}
 		// Counters were reset by the read: nothing is counted twice.
 		a.syncOnce(time.Now())
@@ -301,13 +301,13 @@ func TestXrayDownKeepsHysteria(t *testing.T) {
 	hy.send("u")
 	a.syncOnce(time.Now())
 	a.syncOnce(time.Now())
-	if u, _ := a.store.Get("u"); u.Down != 1000 || a.hyErr != "" || !strings.Contains(a.xrayErr, "unavailable") {
-		t.Fatalf("%+v hyErr=%q xrayErr=%q", u, a.hyErr, a.xrayErr)
+	if u, _ := a.store.Get("u"); u.Down != 1000 || syncState(a, protoHy2).err != "" || !strings.Contains(syncState(a, protoVless).err, "unavailable") {
+		t.Fatalf("%+v hyErr=%q xrayErr=%q", u, syncState(a, protoHy2).err, syncState(a, protoVless).err)
 	}
 	fx.down = false
 	a.syncOnce(time.Now())
-	if a.xrayErr != "" || len(fx.snapshot()) != 1 {
-		t.Fatalf("after recovery: %q %v", a.xrayErr, fx.snapshot())
+	if syncState(a, protoVless).err != "" || len(fx.snapshot()) != 1 {
+		t.Fatalf("after recovery: %q %v", syncState(a, protoVless).err, fx.snapshot())
 	}
 }
 
@@ -633,13 +633,14 @@ func TestStateShowsVless(t *testing.T) {
 	a.handleState(w, httptest.NewRequest("GET", "/api/state", nil))
 	var st struct {
 		Users []struct {
-			VlessURI   string `json:"vlessUri"`
-			XrayOnline int    `json:"xrayOnline"`
+			Online map[string]int `json:"online"`
+			Links  []link         `json:"links"`
 		}
 		Server struct{ Vless map[string]any }
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &st); err != nil || len(st.Users) != 1 ||
-		!strings.HasPrefix(st.Users[0].VlessURI, "vless://") || st.Users[0].XrayOnline != 1 || st.Server.Vless["sni"] != "lurkpro.tech" {
+	if err := json.Unmarshal(w.Body.Bytes(), &st); err != nil || len(st.Users) != 1 || len(st.Users[0].Links) != 2 ||
+		!strings.HasPrefix(st.Users[0].Links[1].URI, "vless://") || st.Users[0].Online[protoVless] != 1 ||
+		len(st.Users[0].Online) != 1 || st.Server.Vless["sni"] != "lurkpro.tech" {
 		t.Fatalf("%v %s", err, w.Body)
 	}
 }

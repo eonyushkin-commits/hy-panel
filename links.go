@@ -6,7 +6,6 @@ import (
 	"log"
 	"net"
 	"net/url"
-	"slices"
 	"strings"
 )
 
@@ -120,6 +119,17 @@ func (e Endpoint) URI(u User) string {
 	return v.String()
 }
 
+// hy2Proto is Hysteria 2: on when the server has its config (a port).
+type hy2Proto struct{}
+
+func (hy2Proto) ID() string                          { return protoHy2 }
+func (hy2Proto) Title() string                       { return "Hysteria 2" }
+func (hy2Proto) On(e Endpoint) bool                  { return e.Port != "" }
+func (hy2Proto) Link(e Endpoint, u User) string      { return e.URI(u) }
+func (hy2Proto) InSubscription() bool                { return true }
+func (hy2Proto) ProxyName(e Endpoint, u User) string { return e.remark(u) }
+func (hy2Proto) Mihomo(e Endpoint, u User) string    { return e.Mihomo(u) }
+
 // Mihomo returns a proxy list item for mihomo (Clash Meta).
 func (e Endpoint) Mihomo(u User) string {
 	var b strings.Builder
@@ -151,6 +161,17 @@ func (e Endpoint) Mihomo(u User) string {
 	}
 	return b.String()
 }
+
+// vlessProto is VLESS + Reality (Xray): on once hy-panel xray set it up.
+type vlessProto struct{}
+
+func (vlessProto) ID() string                          { return protoVless }
+func (vlessProto) Title() string                       { return "VLESS" }
+func (vlessProto) On(e Endpoint) bool                  { return e.Vless != nil }
+func (vlessProto) Link(e Endpoint, u User) string      { return e.VlessURI(u) }
+func (vlessProto) InSubscription() bool                { return true }
+func (vlessProto) ProxyName(e Endpoint, u User) string { return e.vlessRemark(u) }
+func (vlessProto) Mihomo(e Endpoint, u User) string    { return e.MihomoVless(u) }
 
 // realityFP is the browser whose TLS handshake VLESS clients imitate
 // (Reality only works with uTLS fingerprints). Not chrome: its post-quantum
@@ -230,141 +251,6 @@ func (e Endpoint) MihomoVless(u User) string {
 	}
 	fmt.Fprintf(&b, "    reality-opts: {public-key: %q, short-id: %q}\n", v.PublicKey, v.ShortID)
 	return b.String()
-}
-
-// ---- protocols ----
-
-const (
-	protoHy2   = "hysteria2"
-	protoVless = "vless"
-)
-
-// protoTitles name the protocols in the panel, in fallback order: Hysteria
-// (fast, UDP) first, then AmneziaWG (UDP, looks different), VLESS over TCP
-// when UDP is cut.
-var protoTitles = []struct{ ID, Title string }{
-	{protoHy2, "Hysteria 2"},
-	{protoAWG, "AmneziaWG"},
-	{protoVless, "VLESS"},
-}
-
-func knownProto(id string) bool {
-	return slices.ContainsFunc(protoTitles, func(p struct{ ID, Title string }) bool { return p.ID == id })
-}
-
-func protoTitle(id string) string {
-	for _, p := range protoTitles {
-		if p.ID == id {
-			return p.Title
-		}
-	}
-	return id
-}
-
-// Protocols the server runs, in fallback order.
-func (e Endpoint) Protocols() []string {
-	var ps []string
-	for _, p := range protoTitles {
-		switch {
-		case p.ID == protoHy2 && e.Port != "", p.ID == protoVless && e.Vless != nil, p.ID == protoAWG && e.AWG != nil:
-			ps = append(ps, p.ID)
-		}
-	}
-	return ps
-}
-
-// UserProtocols are the server's protocols u may use, in fallback order.
-func (e Endpoint) UserProtocols(u User) []string {
-	var ps []string
-	for _, p := range e.Protocols() {
-		if u.Uses(p) {
-			ps = append(ps, p)
-		}
-	}
-	return ps
-}
-
-// Link is u's share link for one protocol; for AmneziaWG, the .conf text.
-func (e Endpoint) Link(proto string, u User) string {
-	switch proto {
-	case protoHy2:
-		return e.URI(u)
-	case protoVless:
-		return e.VlessURI(u)
-	case protoAWG:
-		return e.AWGConf(u)
-	}
-	return ""
-}
-
-// URIs are u's share links for subscriptions, in fallback order. AmneziaWG
-// has no link scheme the apps take from a subscription: it is left out.
-func (e Endpoint) URIs(u User) []string {
-	var ls []string
-	for _, p := range e.UserProtocols(u) {
-		if p != protoAWG {
-			ls = append(ls, e.Link(p, u))
-		}
-	}
-	return ls
-}
-
-// proxyName is the name of u's proxy for proto in mihomo and the apps.
-func (e Endpoint) proxyName(proto string, u User) string {
-	switch proto {
-	case protoVless:
-		return e.vlessRemark(u)
-	case protoAWG:
-		return e.awgRemark(u)
-	}
-	return e.remark(u)
-}
-
-// MihomoProxy is the proxy list item of one protocol.
-func (e Endpoint) MihomoProxy(proto string, u User) string {
-	switch proto {
-	case protoHy2:
-		return e.Mihomo(u)
-	case protoVless:
-		return e.MihomoVless(u)
-	case protoAWG:
-		return e.MihomoAWG(u)
-	}
-	return ""
-}
-
-// MihomoDoc is a complete mihomo proxy-provider document for u: a proxy
-// for each of u's protocols.
-func (e Endpoint) MihomoDoc(u User) string {
-	var b strings.Builder
-	b.WriteString("proxies:\n")
-	for _, p := range e.UserProtocols(u) {
-		b.WriteString(e.MihomoProxy(p, u))
-	}
-	return b.String()
-}
-
-// MihomoFallback is u's proxies plus a fallback group over them in the
-// panel's order: when a protocol is blocked, mihomo moves to the next one.
-func (e Endpoint) MihomoFallback(u User) string {
-	var names []string
-	for _, p := range e.UserProtocols(u) {
-		names = append(names, fmt.Sprintf("%q", e.proxyName(p, u)))
-	}
-	return e.MihomoDoc(u) + fmt.Sprintf(`proxy-groups:
-  - name: %q
-    type: fallback
-    proxies: [%s]
-    url: https://www.gstatic.com/generate_204
-    interval: 120
-`, e.groupName(), strings.Join(names, ", "))
-}
-
-func (e Endpoint) groupName() string {
-	if e.Name == "" {
-		return "VPN"
-	}
-	return e.Name
 }
 
 func subscriptionUserinfo(u User) string {

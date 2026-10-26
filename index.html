@@ -371,8 +371,8 @@ async function load() {
   try { S = await api('GET', 'api/state'); } catch { return; }
   $('#login').hidden = true; $('#app').hidden = false;
   $('#host').textContent = 'Сервер ' + S.server.host; // protocol details are on their cards
-  $('#hyerr').hidden = !S.hyError;
-  $('#hyerr').innerHTML = icon('alert') + '<span>' + esc(S.hyError) + '</span>';
+  $('#hyerr').hidden = !S.problems;
+  $('#hyerr').innerHTML = icon('alert') + '<span>' + esc(S.problems) + '</span>';
   stats();
   render();
 }
@@ -571,10 +571,11 @@ async function startJob(action, params, title) {
   }
 }
 
-// Hysteria counts sessions, Xray client IPs: shown apart, per protocol.
+// Online per protocol: Hysteria counts sessions, Xray client IPs,
+// AmneziaWG a recent handshake. Shown apart, per protocol.
 const short = {hysteria2: 'Hy2', vless: 'VLESS', awg: 'AWG'};
-const liveOn = (u, p) => ({hysteria2: u.online, vless: u.xrayOnline, awg: u.awgOnline})[p] || 0;
-const isOn = u => u.online || u.xrayOnline || u.awgOnline;
+const liveOn = (u, p) => u.online[p] || 0;
+const isOn = u => Object.values(u.online).some(n => n > 0);
 const protos = () => S.server.protocols || [];
 const userProtos = u => u.links.map(l => l.proto);
 function stats() {
@@ -583,9 +584,7 @@ function stats() {
   $('#stUsers').textContent = us.length;
   $('#stUsersSub').textContent = `активны ${us.filter(u => !u.status).length}`;
   $('#stOnline').textContent = on.length;
-  $('#stOnlineSub').textContent = `сессий ${on.reduce((s, u) => s + u.online, 0)}` +
-    (S.server.vless ? ` · VLESS ${on.reduce((s, u) => s + u.xrayOnline, 0)}` : '') +
-    (protos().some(p => p.id === 'awg') ? ` · AWG ${on.reduce((s, u) => s + u.awgOnline, 0)}` : '');
+  $('#stOnlineSub').textContent = protos().map(p => `${short[p.id] || p.title} ${on.reduce((s, u) => s + liveOn(u, p.id), 0)}`).join(' · ');
   $('#stTraffic').textContent = fmt(up + down);
   $('#stTrafficSub').textContent = `↓ ${fmt(down)} ↑ ${fmt(up)}`;
 }

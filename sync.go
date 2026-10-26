@@ -62,7 +62,7 @@ func (a *App) authorize(auth string) (bool, string, string) {
 	}
 	if u.MaxDevices > 0 {
 		a.mu.RLock()
-		n := a.online[u.Name]
+		n := a.onlineOf(protoHy2)[u.Name]
 		a.mu.RUnlock()
 		if n >= u.MaxDevices {
 			return false, u.Name, fmt.Sprintf("device limit %d", u.MaxDevices)
@@ -100,41 +100,87 @@ func (a *App) requestSync() {
 	}
 }
 
+// A backend is a protocol's server as the panel drives it: it reports the
+// traffic since the last sync and who is online, and is told who may
+// connect. Hysteria asks the panel itself (/auth) and needs no telling.
+type backend interface {
+	proto() string
+	// stats reads and clears the server's counters. A nil online map means
+	// the server could not say; the traffic counts anyway.
+	stats(now time.Time, users []User) (map[string]trafficEntry, map[string]int, error)
+	// push makes the server's users the panel's active users of this
+	// protocol: new and unblocked ones in, blocked, deleted and re-keyed
+	// ones out, everyone back after the server restarts.
+	push(now time.Time, users []User) error
+	// errText leads its sync errors in the panel's banner.
+	errText() string
+}
+
+// live is what the syncs learned about one protocol's server.
+type live struct {
+	online map[string]int // per user: Hysteria sessions, Xray client IPs, AmneziaWG 1
+	err    string         // shown once it repeats
+	fails  int            // syncs failed in a row
+}
+
+func (a *App) addBackend(b backend) { a.backends = append(a.backends, b) }
+
+// onlineOf is the last known online map of protocol p; a.mu held.
+func (a *App) onlineOf(p string) map[string]int {
+	if l := a.live[p]; l != nil {
+		return l.online
+	}
+	return nil
+}
+
 func (a *App) syncOnce(now time.Time) {
-	// Counters are cleared on read: account them even if /online fails below.
-	var tr map[string]trafficEntry
-	on, errT, errO := map[string]int{}, error(nil), error(nil)
-	if a.stats != nil { // nil: Hysteria is not set up
-		tr, errT = a.stats.TrafficAndClear()
-		on, errO = a.stats.Online()
+	// Counters are cleared on read: account them even if a server fails below.
+	type result struct {
+		online map[string]int
+		err    error
 	}
-	xtr, xon, errX := a.xrayStats()
-	atr, aon, errA := a.awgStats(now)
-	a.store.Tick(now, addTraffic(addTraffic(tr, xtr), atr), joinOnline(joinOnline(on, xon), aon))
+	res := make([]result, len(a.backends))
+	var traffic map[string]trafficEntry
+	var online map[string]int
+	users := a.store.List()
+	for i, b := range a.backends {
+		tr, on, err := b.stats(now, users)
+		traffic, online = addTraffic(traffic, tr), joinOnline(online, on)
+		res[i] = result{on, err}
+	}
+	a.store.Tick(now, traffic, online)
 	// After Tick: a quota used up just now closes VLESS and AmneziaWG at once.
-	if a.xray != nil {
-		errX = errors.Join(errX, a.pushXrayUsers(now))
+	users = a.store.List()
+	for i, b := range a.backends {
+		res[i].err = errors.Join(res[i].err, b.push(now, users))
 	}
-	if a.awg != nil && errA == nil {
-		errA = a.pushAWGPeers(now)
+	// Hysteria's sessions drive the device limit and the kicks; without
+	// Hysteria nobody is online there.
+	hyOn := map[string]int{}
+	if a.hy != nil {
+		hyOn = nil
 	}
-	err := errors.Join(errT, errO)
 	a.mu.Lock()
-	if errO == nil {
-		a.online, a.lastSync = on, now
+	for i, b := range a.backends {
+		l := a.live[b.proto()]
+		if l == nil {
+			l = &live{}
+			a.live[b.proto()] = l
+		}
+		if res[i].online != nil {
+			l.online = res[i].online
+			if b.proto() == protoHy2 {
+				hyOn = res[i].online
+			}
+		}
+		l.err, l.fails = failing(l.fails, res[i].err)
 	}
-	if xon != nil {
-		a.xonline = xon
+	if hyOn != nil {
+		a.lastSync = now
 	}
-	if aon != nil {
-		a.aonline = aon
-	}
-	a.awgErr, a.awgFails = failing(a.awgFails, errA)
-	a.hyErr, a.hyFails = failing(a.hyFails, err)
-	a.xrayErr, a.xrayFails = failing(a.xrayFails, errX)
 	a.mu.Unlock()
-	if errO == nil {
-		a.enforce(now, on)
+	if hyOn != nil {
+		a.enforce(now, hyOn)
 	}
 }
 
@@ -150,18 +196,46 @@ func failing(n int, err error) (string, int) {
 	return err.Error(), n
 }
 
+// ---- Hysteria ----
+
+// hyBackend is Hysteria's trafficStats API: traffic, sessions and kicks.
+type hyBackend struct{ c *statsClient }
+
+func (b *hyBackend) proto() string   { return protoHy2 }
+func (b *hyBackend) errText() string { return "Нет связи с trafficStats Hysteria: " }
+
+func (b *hyBackend) stats(time.Time, []User) (map[string]trafficEntry, map[string]int, error) {
+	tr, errT := b.c.TrafficAndClear()
+	on, errO := b.c.Online()
+	if errO != nil {
+		on = nil
+	}
+	return tr, on, errors.Join(errT, errO)
+}
+
+// push: Hysteria asks the panel at every connect (/auth), and enforce
+// closes sessions that must go.
+func (b *hyBackend) push(time.Time, []User) error { return nil }
+
 // ---- Xray (VLESS + Reality) ----
 
-// xrayStats reads and clears Xray's per-user counters and counts the users'
+// xrayBackend is Xray's gRPC API for the VLESS inbound the panel keeps.
+type xrayBackend struct {
+	api  *xrayAPI
+	tag  string // the inbound
+	flow string // given to every user: xtls-rprx-vision on TCP, none with XHTTP
+}
+
+func (b *xrayBackend) proto() string   { return protoVless }
+func (b *xrayBackend) errText() string { return "Нет связи с API Xray: " }
+
+// stats reads and clears Xray's per-user counters and counts the users'
 // online client IPs (Xray counts addresses, not sessions).
-func (a *App) xrayStats() (map[string]trafficEntry, map[string]int, error) {
-	if a.xray == nil {
-		return nil, nil, nil
-	}
-	tr, errT := a.xray.TrafficAndClear()
+func (b *xrayBackend) stats(_ time.Time, users []User) (map[string]trafficEntry, map[string]int, error) {
+	tr, errT := b.api.TrafficAndClear()
 	on := map[string]int{}
-	for _, u := range a.store.List() {
-		n, err := a.xray.Online(u.Name)
+	for _, u := range users {
+		n, err := b.api.Online(u.Name)
 		if err != nil {
 			return tr, nil, errors.Join(errT, err)
 		}
@@ -172,18 +246,18 @@ func (a *App) xrayStats() (map[string]trafficEntry, map[string]int, error) {
 	return tr, on, errT
 }
 
-// pushXrayUsers makes the inbound's users exactly the panel's active users.
-// Xray has no auth callback like Hysteria's: whoever is in its list gets in.
-// So blocked, deleted and re-keyed users are taken out (new connections are
+// push makes the inbound's users exactly the panel's active users. Xray
+// has no auth callback like Hysteria's: whoever is in its list gets in. So
+// blocked, deleted and re-keyed users are taken out (new connections are
 // refused, open ones end when they close), and after an Xray restart (its
 // config lists nobody) everyone is put back.
-func (a *App) pushXrayUsers(now time.Time) error {
-	have, err := a.xray.Users(a.xrayTag)
+func (b *xrayBackend) push(now time.Time, users []User) error {
+	have, err := b.api.Users(b.tag)
 	if err != nil {
 		return err
 	}
 	var add []User
-	for _, u := range a.store.List() {
+	for _, u := range users {
 		if u.Blocked(now) != "" || !u.Uses(protoVless) {
 			continue // stays in have: taken out below
 		}
@@ -197,14 +271,14 @@ func (a *App) pushXrayUsers(now time.Time) error {
 	var gone, added []string
 	// Removals first: a re-keyed user's e-mail must be free to be added again.
 	for name := range have {
-		if err := a.xray.RemoveUser(a.xrayTag, name); err != nil {
+		if err := b.api.RemoveUser(b.tag, name); err != nil {
 			errs = append(errs, err)
 		} else {
 			gone = append(gone, name)
 		}
 	}
 	for _, u := range add {
-		if err := a.xray.AddUser(a.xrayTag, u.Name, u.UUID, a.xrayFlow); err != nil {
+		if err := b.api.AddUser(b.tag, u.Name, u.UUID, b.flow); err != nil {
 			errs = append(errs, err)
 		} else {
 			added = append(added, u.Name)
@@ -220,27 +294,38 @@ func (a *App) pushXrayUsers(now time.Time) error {
 
 // ---- AmneziaWG ----
 
-func (a *App) awgPub(priv string) string {
-	if a.awgPubs == nil {
-		a.awgPubs = map[string]string{}
+// awgBackend is the AmneziaWG service's control socket.
+type awgBackend struct {
+	c      *awgClient
+	seen   map[string]awgPeer // last counters per public key
+	pubs   map[string]string  // private → public key, cached
+	peered bool               // the last stats call got the peers
+}
+
+func newAWGBackend(c *awgClient) *awgBackend { return &awgBackend{c: c} }
+
+func (b *awgBackend) proto() string   { return protoAWG }
+func (b *awgBackend) errText() string { return "Нет связи с AmneziaWG: " }
+
+func (b *awgBackend) pub(priv string) string {
+	if b.pubs == nil {
+		b.pubs = map[string]string{}
 	}
-	pub, ok := a.awgPubs[priv]
+	pub, ok := b.pubs[priv]
 	if !ok {
 		pub, _ = wgPublic(priv)
-		a.awgPubs[priv] = pub
+		b.pubs[priv] = pub
 	}
 	return pub
 }
 
-// awgStats turns the service's cumulative counters into deltas since the
+// stats turns the service's cumulative counters into deltas since the
 // last sync (a peer that was re-added or a restarted service starts from
 // zero) and counts a user online after a handshake in the last 3 minutes:
 // WireGuard re-handshakes every 2 while traffic flows.
-func (a *App) awgStats(now time.Time) (map[string]trafficEntry, map[string]int, error) {
-	if a.awg == nil {
-		return nil, nil, nil
-	}
-	peers, err := a.awg.Peers()
+func (b *awgBackend) stats(now time.Time, users []User) (map[string]trafficEntry, map[string]int, error) {
+	peers, err := b.c.Peers()
+	b.peered = err == nil
 	if err != nil {
 		return nil, nil, err
 	}
@@ -249,12 +334,12 @@ func (a *App) awgStats(now time.Time) (map[string]trafficEntry, map[string]int, 
 		byKey[p.Key] = p
 	}
 	tr, on := map[string]trafficEntry{}, map[string]int{}
-	for _, u := range a.store.List() {
-		p, ok := byKey[a.awgPub(u.AWGKey)]
+	for _, u := range users {
+		p, ok := byKey[b.pub(u.AWGKey)]
 		if !ok {
 			continue
 		}
-		last := a.awgSeen[p.Key]
+		last := b.seen[p.Key]
 		d := trafficEntry{Tx: p.Rx - last.Rx, Rx: p.Tx - last.Tx} // Tx: from the client
 		if d.Tx < 0 || d.Rx < 0 {
 			d = trafficEntry{Tx: p.Rx, Rx: p.Tx}
@@ -266,20 +351,24 @@ func (a *App) awgStats(now time.Time) (map[string]trafficEntry, map[string]int, 
 			on[u.Name] = 1
 		}
 	}
-	a.awgSeen = byKey
+	b.seen = byKey
 	return tr, on, nil
 }
 
-// pushAWGPeers makes the service's peers exactly the active users with
-// AmneziaWG on. A removed peer is cut off at once: its session dies with it.
-func (a *App) pushAWGPeers(now time.Time) error {
+// push makes the service's peers exactly the active users with AmneziaWG
+// on. A removed peer is cut off at once: its session dies with it. Not
+// while the service does not answer: the stats error says so already.
+func (b *awgBackend) push(now time.Time, users []User) error {
+	if !b.peered {
+		return nil
+	}
 	want := []awgPeer{}
-	for _, u := range a.store.List() {
+	for _, u := range users {
 		if u.Blocked(now) == "" && u.Uses(protoAWG) && u.AWGKey != "" {
-			want = append(want, awgPeer{Key: a.awgPub(u.AWGKey), IP: awgIP(u.AWGIndex)})
+			want = append(want, awgPeer{Key: b.pub(u.AWGKey), IP: awgIP(u.AWGIndex)})
 		}
 	}
-	return a.awg.SetPeers(want)
+	return b.c.SetPeers(want)
 }
 
 func addTraffic(a, b map[string]trafficEntry) map[string]trafficEntry {
@@ -392,7 +481,7 @@ func (a *App) enforce(now time.Time, on map[string]int) {
 	}
 	sort.Strings(kick)
 	log.Printf("kick %v", kick)
-	if err := a.stats.Kick(kick); err != nil {
+	if err := a.hy.c.Kick(kick); err != nil {
 		log.Printf("kick: %v", err)
 		for _, n := range kick {
 			delete(a.kicked, n)

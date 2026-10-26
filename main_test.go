@@ -325,6 +325,14 @@ func testApp(t *testing.T, sc *statsClient) *App {
 	return newApp(newStore(t), sc, Endpoint{}, "", make([]byte, 32))
 }
 
+// syncState is what the syncs learned about protocol p (zero if nothing yet).
+func syncState(a *App, p string) live {
+	if l := a.live[p]; l != nil {
+		return *l
+	}
+	return live{}
+}
+
 func TestEnforceLeavesNoStaleKicks(t *testing.T) {
 	f, sc := newFakeHy(t)
 	a := testApp(t, sc)
@@ -424,14 +432,14 @@ func TestTrafficKeptWhenOnlineFails(t *testing.T) {
 	f.send("u")
 	f.failOn = true
 	a.syncOnce(time.Now())
-	if a.hyErr != "" {
+	if syncState(a, protoHy2).err != "" {
 		t.Fatal("one failed sync already shown")
 	}
 	a.syncOnce(time.Now())
 	if u, _ := a.store.Get("u"); u.Down != 1000 {
 		t.Fatalf("traffic lost when /online failed: %+v", u)
 	}
-	if a.hyErr == "" {
+	if syncState(a, protoHy2).err == "" {
 		t.Fatal("error not reported")
 	}
 }

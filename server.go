@@ -29,14 +29,9 @@ var assets embed.FS
 
 type App struct {
 	store    *Store
-	stats    *statsClient
-	xray     *xrayAPI // nil: no VLESS
-	xrayTag  string   // the inbound whose users the panel keeps
-	xrayFlow string
-	awg      *awgClient         // nil: no AmneziaWG
-	awgSeen  map[string]awgPeer // syncLoop only: last counters per public key
-	awgPubs  map[string]string  // private → public key, cached
-	hyOpts   *hyOpts            // Hysteria's port, obfs, certificate; nil: not set up
+	hy       *hyBackend // nil: Hysteria not set up
+	backends []backend  // the protocols' servers the panel syncs, Hysteria's first
+	hyOpts   *hyOpts    // Hysteria's port, obfs, certificate; nil: not set up
 	agent    *agentClient
 	siteScan scanState // the search for a Reality site
 	ep       Endpoint
@@ -49,27 +44,26 @@ type App struct {
 	poke     chan struct{}
 
 	mu        sync.RWMutex
-	online    map[string]int
-	xonline   map[string]int // Xray: online client IPs per user
-	aonline   map[string]int // AmneziaWG: 1 if a handshake in the last 3 minutes
-	awgErr    string
-	awgFails  int
-	hyErr     string
-	xrayErr   string
-	hyFails   int // syncs failed in a row
-	xrayFails int
+	live      map[string]*live // per protocol: who is online, sync errors
 	targetErr string
-	lastSync  time.Time
+	lastSync  time.Time             // Hysteria's sessions were last read
 	revoked   map[string]revocation // password changed: drop old sessions
 	listenErr map[string]string     // public listener → why it does not run
 
 	kicked map[string]int // syncLoop only: pending kick -> online count when sent
 }
 
+// newApp makes the panel; stats is Hysteria's trafficStats, nil if it is
+// not set up. Xray's and AmneziaWG's backends are added after.
 func newApp(store *Store, stats *statsClient, ep Endpoint, password string, key []byte) *App {
-	return &App{store: store, stats: stats, ep: ep, password: password, key: key,
-		poke: make(chan struct{}, 1), online: map[string]int{}, revoked: map[string]revocation{},
+	a := &App{store: store, ep: ep, password: password, key: key,
+		poke: make(chan struct{}, 1), live: map[string]*live{}, revoked: map[string]revocation{},
 		listenErr: map[string]string{}, kicked: map[string]int{}}
+	if stats != nil {
+		a.hy = &hyBackend{c: stats}
+		a.addBackend(a.hy)
+	}
+	return a
 }
 
 func server(addr string, h http.Handler) *http.Server {
@@ -155,14 +149,10 @@ func (a *App) guard(h http.HandlerFunc) http.HandlerFunc {
 
 type userView struct {
 	User
-	Online     int    `json:"online"`     // Hysteria sessions
-	XrayOnline int    `json:"xrayOnline"` // VLESS client IPs
-	AWGOnline  int    `json:"awgOnline"`  // AmneziaWG: recent handshake
-	Status     string `json:"status"`     // "", disabled, expired, quota
-	URI        string `json:"uri"`
-	VlessURI   string `json:"vlessUri"`
-	Links      []link `json:"links"` // the user's protocols, in fallback order
-	SubPath    string `json:"subPath"`
+	Online  map[string]int `json:"online"` // per protocol: Hysteria sessions, VLESS client IPs, AmneziaWG 1
+	Status  string         `json:"status"` // "", disabled, expired, quota
+	Links   []link         `json:"links"`  // the user's protocols, in fallback order
+	SubPath string         `json:"subPath"`
 }
 
 type link struct {
@@ -172,7 +162,11 @@ type link struct {
 
 func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 	a.mu.RLock()
-	on, xon, aon, last := a.online, a.xonline, a.aonline, a.lastSync
+	online := map[string]map[string]int{}
+	for p, l := range a.live {
+		online[p] = l.online
+	}
+	last := a.lastSync
 	var listen []string
 	for name, e := range a.listenErr {
 		listen = append(listen, name+": "+e)
@@ -183,14 +177,10 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 		problems = append(problems, a.cfgErr)
 	}
 	problems = append(problems, a.warns...)
-	if a.hyErr != "" {
-		problems = append(problems, "Нет связи с trafficStats Hysteria: "+a.hyErr)
-	}
-	if a.xrayErr != "" {
-		problems = append(problems, "Нет связи с API Xray: "+a.xrayErr)
-	}
-	if a.awgErr != "" {
-		problems = append(problems, "Нет связи с AmneziaWG: "+a.awgErr)
+	for _, b := range a.backends {
+		if l := a.live[b.proto()]; l != nil && l.err != "" {
+			problems = append(problems, b.errText()+l.err)
+		}
 	}
 	if a.targetErr != "" {
 		problems = append(problems, a.targetErr)
@@ -201,15 +191,19 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 	users := a.store.List()
 	views := make([]userView, len(users))
 	for i, u := range users {
-		views[i] = userView{User: u, Online: on[u.Name], XrayOnline: xon[u.Name], AWGOnline: aon[u.Name], Status: u.Blocked(now),
-			URI: a.ep.URI(u), VlessURI: a.ep.VlessURI(u), Links: []link{}, SubPath: "/sub/" + u.SubToken}
-		for _, p := range a.ep.UserProtocols(u) {
-			views[i].Links = append(views[i].Links, link{p, a.ep.Link(p, u)})
+		views[i] = userView{User: u, Online: map[string]int{}, Status: u.Blocked(now), Links: []link{}, SubPath: "/sub/" + u.SubToken}
+		for p, on := range online {
+			if n := on[u.Name]; n > 0 {
+				views[i].Online[p] = n
+			}
+		}
+		for _, p := range a.ep.userProtos(u) {
+			views[i].Links = append(views[i].Links, link{p.ID(), p.Link(a.ep, u)})
 		}
 	}
 	protos := []map[string]string{}
-	for _, p := range a.ep.Protocols() {
-		protos = append(protos, map[string]string{"id": p, "title": protoTitle(p)})
+	for _, p := range a.ep.running() {
+		protos = append(protos, map[string]string{"id": p.ID(), "title": p.Title()})
 	}
 	var vless any
 	if v := a.ep.Vless; v != nil {
@@ -219,7 +213,7 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 		"users": views,
 		"server": map[string]any{"host": a.ep.Host, "port": a.ep.Port, "obfs": a.ep.ObfsType, "sni": a.ep.SNI, "pinned": a.ep.Pin != "",
 			"vless": vless, "protocols": protos},
-		"hyError":  strings.Join(problems, "; "),
+		"problems": strings.Join(problems, "; "),
 		"lastSync": last.Unix(),
 		"subBase":  a.subBase,
 	})

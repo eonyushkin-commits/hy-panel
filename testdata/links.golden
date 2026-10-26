@@ -1,0 +1,1199 @@
+=== server full
+protocols [{"id":"hysteria2","title":"Hysteria 2"},{"id":"awg","title":"AmneziaWG"},{"id":"vless","title":"VLESS"}]
+state alice link {"proto":"hysteria2","uri":"hysteria2://alice:alice-pass-1@203.0.113.10:20000/?ech=AEX%2BDQBB\u0026insecure=1\u0026mport=20000-50000\u0026obfs=salamander\u0026obfs-password=obfs-pass\u0026pcs=ab12cd34\u0026pinSHA256=ab12cd34\u0026sni=vpn.example.com#NL-alice"}
+state alice link {"proto":"awg","uri":"[Interface]\nPrivateKey = 8Pm2s6Oz1VRrWEc0bNKIhPpz3e0YVxUJsS0Ywr0lE1s=\nAddress = 10.66.0.2/32\nDNS = 1.1.1.1, 1.0.0.1\nMTU = 1280\nJc = 5\nJmin = 40\nJmax = 70\nS1 = 20\nS2 = 30\nS3 = 14\nS4 = 16\nH1 = 1\nH2 = 2\nH3 = 3\nH4 = 4\nI1 = \u003cr 2\u003e\u003cb 0x01000001000000000000\u003e\u003cb 0x0a\u003e\u003crc 10\u003e\u003cb 0x03636f6d00\u003e\u003cb 0x00010001\u003e\nHeaderProtectionKey = oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE=\nContentPaddingAddition = 0-32\n\n[Peer]\nPublicKey = LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E=\nEndpoint = 203.0.113.10:51820\nAllowedIPs = 0.0.0.0/0, ::/0\nPersistentKeepalive = 25\n"}
+state alice link {"proto":"vless","uri":"vless://46d502e8-e63c-4b3e-893f-519135ad1de3@203.0.113.10:443?encryption=none\u0026fp=safari\u0026mode=auto\u0026path=%2F2b1f2de74ce6\u0026pbk=pbk-xhttp\u0026security=reality\u0026sid=1187d00c55ca4d4c\u0026sni=www.example.org\u0026type=xhttp#NL-alice-vless"}
+state bob link {"proto":"hysteria2","uri":"hysteria2://bob:bob-pass-12@203.0.113.10:20000/?ech=AEX%2BDQBB\u0026insecure=1\u0026mport=20000-50000\u0026obfs=salamander\u0026obfs-password=obfs-pass\u0026pcs=ab12cd34\u0026pinSHA256=ab12cd34\u0026sni=vpn.example.com#NL-bob"}
+state bob link {"proto":"awg","uri":"[Interface]\nPrivateKey = GKl3f0Wd1pW0vXq9Kpj6zv8ZfP4Vb9oQ3sXh2nL5mGc=\nAddress = 10.66.0.3/32\nDNS = 1.1.1.1, 1.0.0.1\nMTU = 1280\nJc = 5\nJmin = 40\nJmax = 70\nS1 = 20\nS2 = 30\nS3 = 14\nS4 = 16\nH1 = 1\nH2 = 2\nH3 = 3\nH4 = 4\nI1 = \u003cr 2\u003e\u003cb 0x01000001000000000000\u003e\u003cb 0x0a\u003e\u003crc 10\u003e\u003cb 0x03636f6d00\u003e\u003cb 0x00010001\u003e\nHeaderProtectionKey = oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE=\nContentPaddingAddition = 0-32\n\n[Peer]\nPublicKey = LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E=\nEndpoint = 203.0.113.10:51820\nAllowedIPs = 0.0.0.0/0, ::/0\nPersistentKeepalive = 25\n"}
+state carol link {"proto":"vless","uri":"vless://9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4@203.0.113.10:443?encryption=none\u0026fp=safari\u0026mode=auto\u0026path=%2F2b1f2de74ce6\u0026pbk=pbk-xhttp\u0026security=reality\u0026sid=1187d00c55ca4d4c\u0026sni=www.example.org\u0026type=xhttp#NL-carol-vless"}
+== full / alice
+--- sub format=raw: 200
+Content-Disposition: attachment; filename*=UTF-8''NL-alice
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:TkwtYWxpY2U=
+hysteria2://alice:alice-pass-1@203.0.113.10:20000/?ech=AEX%2BDQBB&insecure=1&mport=20000-50000&obfs=salamander&obfs-password=obfs-pass&pcs=ab12cd34&pinSHA256=ab12cd34&sni=vpn.example.com#NL-alice
+vless://46d502e8-e63c-4b3e-893f-519135ad1de3@203.0.113.10:443?encryption=none&fp=safari&mode=auto&path=%2F2b1f2de74ce6&pbk=pbk-xhttp&security=reality&sid=1187d00c55ca4d4c&sni=www.example.org&type=xhttp#NL-alice-vless
+
+--- sub format=mihomo: 200
+Content-Disposition: attachment; filename*=UTF-8''NL-alice
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:TkwtYWxpY2U=
+proxies:
+  - name: "NL-alice"
+    type: hysteria2
+    server: "203.0.113.10"
+    port: 20000
+    ports: "20000-50000"
+    password: "alice:alice-pass-1"
+    obfs: salamander
+    obfs-password: "obfs-pass"
+    sni: "vpn.example.com"
+    fingerprint: "ab12cd34"
+    ech-opts: {enable: true, config: "AEX+DQBB"}
+  - name: "NL-alice-awg"
+    type: wireguard
+    server: "203.0.113.10"
+    port: 51820
+    ip: "10.66.0.2"
+    private-key: "8Pm2s6Oz1VRrWEc0bNKIhPpz3e0YVxUJsS0Ywr0lE1s="
+    public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
+    udp: true
+    mtu: 1280
+    amnezia-wg-option:
+      version: 3
+      jc: 5
+      jmin: 40
+      jmax: 70
+      s1: 20
+      s2: 30
+      s3: 14
+      s4: 16
+      h1: "1"
+      h2: "2"
+      h3: "3"
+      h4: "4"
+      i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
+      header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
+      content-padding-addition: "0-32"
+  - name: "NL-alice-vless"
+    type: vless
+    server: "203.0.113.10"
+    port: 443
+    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.org"
+    client-fingerprint: safari
+    network: xhttp
+    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
+    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
+
+--- sub format=: 200
+Content-Disposition: attachment; filename*=UTF-8''NL-alice
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:TkwtYWxpY2U=
+aHlzdGVyaWEyOi8vYWxpY2U6YWxpY2UtcGFzcy0xQDIwMy4wLjExMy4xMDoyMDAwMC8/ZWNoPUFFWCUyQkRRQkImaW5zZWN1cmU9MSZtcG9ydD0yMDAwMC01MDAwMCZvYmZzPXNhbGFtYW5kZXImb2Jmcy1wYXNzd29yZD1vYmZzLXBhc3MmcGNzPWFiMTJjZDM0JnBpblNIQTI1Nj1hYjEyY2QzNCZzbmk9dnBuLmV4YW1wbGUuY29tI05MLWFsaWNlCnZsZXNzOi8vNDZkNTAyZTgtZTYzYy00YjNlLTg5M2YtNTE5MTM1YWQxZGUzQDIwMy4wLjExMy4xMDo0NDM/ZW5jcnlwdGlvbj1ub25lJmZwPXNhZmFyaSZtb2RlPWF1dG8mcGF0aD0lMkYyYjFmMmRlNzRjZTYmcGJrPXBiay14aHR0cCZzZWN1cml0eT1yZWFsaXR5JnNpZD0xMTg3ZDAwYzU1Y2E0ZDRjJnNuaT13d3cuZXhhbXBsZS5vcmcmdHlwZT14aHR0cCNOTC1hbGljZS12bGVzcwo=
+--- sub clash UA: 200
+Content-Disposition: attachment; filename*=UTF-8''NL-alice
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:TkwtYWxpY2U=
+proxies:
+  - name: "NL-alice"
+    type: hysteria2
+    server: "203.0.113.10"
+    port: 20000
+    ports: "20000-50000"
+    password: "alice:alice-pass-1"
+    obfs: salamander
+    obfs-password: "obfs-pass"
+    sni: "vpn.example.com"
+    fingerprint: "ab12cd34"
+    ech-opts: {enable: true, config: "AEX+DQBB"}
+  - name: "NL-alice-awg"
+    type: wireguard
+    server: "203.0.113.10"
+    port: 51820
+    ip: "10.66.0.2"
+    private-key: "8Pm2s6Oz1VRrWEc0bNKIhPpz3e0YVxUJsS0Ywr0lE1s="
+    public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
+    udp: true
+    mtu: 1280
+    amnezia-wg-option:
+      version: 3
+      jc: 5
+      jmin: 40
+      jmax: 70
+      s1: 20
+      s2: 30
+      s3: 14
+      s4: 16
+      h1: "1"
+      h2: "2"
+      h3: "3"
+      h4: "4"
+      i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
+      header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
+      content-padding-addition: "0-32"
+  - name: "NL-alice-vless"
+    type: vless
+    server: "203.0.113.10"
+    port: 443
+    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.org"
+    client-fingerprint: safari
+    network: xhttp
+    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
+    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
+
+--- mihomo: 200
+proxies:
+  - name: "NL-alice"
+    type: hysteria2
+    server: "203.0.113.10"
+    port: 20000
+    ports: "20000-50000"
+    password: "alice:alice-pass-1"
+    obfs: salamander
+    obfs-password: "obfs-pass"
+    sni: "vpn.example.com"
+    fingerprint: "ab12cd34"
+    ech-opts: {enable: true, config: "AEX+DQBB"}
+  - name: "NL-alice-awg"
+    type: wireguard
+    server: "203.0.113.10"
+    port: 51820
+    ip: "10.66.0.2"
+    private-key: "8Pm2s6Oz1VRrWEc0bNKIhPpz3e0YVxUJsS0Ywr0lE1s="
+    public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
+    udp: true
+    mtu: 1280
+    amnezia-wg-option:
+      version: 3
+      jc: 5
+      jmin: 40
+      jmax: 70
+      s1: 20
+      s2: 30
+      s3: 14
+      s4: 16
+      h1: "1"
+      h2: "2"
+      h3: "3"
+      h4: "4"
+      i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
+      header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
+      content-padding-addition: "0-32"
+  - name: "NL-alice-vless"
+    type: vless
+    server: "203.0.113.10"
+    port: 443
+    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.org"
+    client-fingerprint: safari
+    network: xhttp
+    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
+    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
+
+--- mihomo fallback: 200
+proxies:
+  - name: "NL-alice"
+    type: hysteria2
+    server: "203.0.113.10"
+    port: 20000
+    ports: "20000-50000"
+    password: "alice:alice-pass-1"
+    obfs: salamander
+    obfs-password: "obfs-pass"
+    sni: "vpn.example.com"
+    fingerprint: "ab12cd34"
+    ech-opts: {enable: true, config: "AEX+DQBB"}
+  - name: "NL-alice-awg"
+    type: wireguard
+    server: "203.0.113.10"
+    port: 51820
+    ip: "10.66.0.2"
+    private-key: "8Pm2s6Oz1VRrWEc0bNKIhPpz3e0YVxUJsS0Ywr0lE1s="
+    public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
+    udp: true
+    mtu: 1280
+    amnezia-wg-option:
+      version: 3
+      jc: 5
+      jmin: 40
+      jmax: 70
+      s1: 20
+      s2: 30
+      s3: 14
+      s4: 16
+      h1: "1"
+      h2: "2"
+      h3: "3"
+      h4: "4"
+      i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
+      header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
+      content-padding-addition: "0-32"
+  - name: "NL-alice-vless"
+    type: vless
+    server: "203.0.113.10"
+    port: 443
+    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.org"
+    client-fingerprint: safari
+    network: xhttp
+    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
+    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
+proxy-groups:
+  - name: "NL"
+    type: fallback
+    proxies: ["NL-alice", "NL-alice-awg", "NL-alice-vless"]
+    url: https://www.gstatic.com/generate_204
+    interval: 120
+
+--- mihomo proto=hysteria2: 200
+proxies:
+  - name: "NL-alice"
+    type: hysteria2
+    server: "203.0.113.10"
+    port: 20000
+    ports: "20000-50000"
+    password: "alice:alice-pass-1"
+    obfs: salamander
+    obfs-password: "obfs-pass"
+    sni: "vpn.example.com"
+    fingerprint: "ab12cd34"
+    ech-opts: {enable: true, config: "AEX+DQBB"}
+
+--- qr proto=hysteria2: 200
+png 320x320 sha256 054b7a91e150f9754095e2981350f478400918108e3ac1a051074784378452bb
+
+--- mihomo proto=awg: 200
+proxies:
+  - name: "NL-alice-awg"
+    type: wireguard
+    server: "203.0.113.10"
+    port: 51820
+    ip: "10.66.0.2"
+    private-key: "8Pm2s6Oz1VRrWEc0bNKIhPpz3e0YVxUJsS0Ywr0lE1s="
+    public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
+    udp: true
+    mtu: 1280
+    amnezia-wg-option:
+      version: 3
+      jc: 5
+      jmin: 40
+      jmax: 70
+      s1: 20
+      s2: 30
+      s3: 14
+      s4: 16
+      h1: "1"
+      h2: "2"
+      h3: "3"
+      h4: "4"
+      i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
+      header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
+      content-padding-addition: "0-32"
+
+--- qr proto=awg: 200
+png 480x480 sha256 047086d4a51d6ae1aae4bffebff60300cded731e67517617748883f115fe213e
+
+--- mihomo proto=vless: 200
+proxies:
+  - name: "NL-alice-vless"
+    type: vless
+    server: "203.0.113.10"
+    port: 443
+    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.org"
+    client-fingerprint: safari
+    network: xhttp
+    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
+    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
+
+--- qr proto=vless: 200
+png 320x320 sha256 874eada7d19befd9f754da143ce29d0d70f53167e6e082b2b309b070065d97fc
+
+--- qr: 200
+png 320x320 sha256 054b7a91e150f9754095e2981350f478400918108e3ac1a051074784378452bb
+
+--- awg.conf: 200
+Content-Disposition: attachment; filename="NL-alice-awg.conf"
+[Interface]
+PrivateKey = 8Pm2s6Oz1VRrWEc0bNKIhPpz3e0YVxUJsS0Ywr0lE1s=
+Address = 10.66.0.2/32
+DNS = 1.1.1.1, 1.0.0.1
+MTU = 1280
+Jc = 5
+Jmin = 40
+Jmax = 70
+S1 = 20
+S2 = 30
+S3 = 14
+S4 = 16
+H1 = 1
+H2 = 2
+H3 = 3
+H4 = 4
+I1 = <r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>
+HeaderProtectionKey = oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE=
+ContentPaddingAddition = 0-32
+
+[Peer]
+PublicKey = LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E=
+Endpoint = 203.0.113.10:51820
+AllowedIPs = 0.0.0.0/0, ::/0
+PersistentKeepalive = 25
+
+== full / bob
+--- sub format=raw: 200
+Content-Disposition: attachment; filename*=UTF-8''NL-bob
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:TkwtYm9i
+hysteria2://bob:bob-pass-12@203.0.113.10:20000/?ech=AEX%2BDQBB&insecure=1&mport=20000-50000&obfs=salamander&obfs-password=obfs-pass&pcs=ab12cd34&pinSHA256=ab12cd34&sni=vpn.example.com#NL-bob
+
+--- sub format=mihomo: 200
+Content-Disposition: attachment; filename*=UTF-8''NL-bob
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:TkwtYm9i
+proxies:
+  - name: "NL-bob"
+    type: hysteria2
+    server: "203.0.113.10"
+    port: 20000
+    ports: "20000-50000"
+    password: "bob:bob-pass-12"
+    obfs: salamander
+    obfs-password: "obfs-pass"
+    sni: "vpn.example.com"
+    fingerprint: "ab12cd34"
+    ech-opts: {enable: true, config: "AEX+DQBB"}
+  - name: "NL-bob-awg"
+    type: wireguard
+    server: "203.0.113.10"
+    port: 51820
+    ip: "10.66.0.3"
+    private-key: "GKl3f0Wd1pW0vXq9Kpj6zv8ZfP4Vb9oQ3sXh2nL5mGc="
+    public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
+    udp: true
+    mtu: 1280
+    amnezia-wg-option:
+      version: 3
+      jc: 5
+      jmin: 40
+      jmax: 70
+      s1: 20
+      s2: 30
+      s3: 14
+      s4: 16
+      h1: "1"
+      h2: "2"
+      h3: "3"
+      h4: "4"
+      i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
+      header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
+      content-padding-addition: "0-32"
+
+--- sub format=: 200
+Content-Disposition: attachment; filename*=UTF-8''NL-bob
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:TkwtYm9i
+aHlzdGVyaWEyOi8vYm9iOmJvYi1wYXNzLTEyQDIwMy4wLjExMy4xMDoyMDAwMC8/ZWNoPUFFWCUyQkRRQkImaW5zZWN1cmU9MSZtcG9ydD0yMDAwMC01MDAwMCZvYmZzPXNhbGFtYW5kZXImb2Jmcy1wYXNzd29yZD1vYmZzLXBhc3MmcGNzPWFiMTJjZDM0JnBpblNIQTI1Nj1hYjEyY2QzNCZzbmk9dnBuLmV4YW1wbGUuY29tI05MLWJvYgo=
+--- sub clash UA: 200
+Content-Disposition: attachment; filename*=UTF-8''NL-bob
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:TkwtYm9i
+proxies:
+  - name: "NL-bob"
+    type: hysteria2
+    server: "203.0.113.10"
+    port: 20000
+    ports: "20000-50000"
+    password: "bob:bob-pass-12"
+    obfs: salamander
+    obfs-password: "obfs-pass"
+    sni: "vpn.example.com"
+    fingerprint: "ab12cd34"
+    ech-opts: {enable: true, config: "AEX+DQBB"}
+  - name: "NL-bob-awg"
+    type: wireguard
+    server: "203.0.113.10"
+    port: 51820
+    ip: "10.66.0.3"
+    private-key: "GKl3f0Wd1pW0vXq9Kpj6zv8ZfP4Vb9oQ3sXh2nL5mGc="
+    public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
+    udp: true
+    mtu: 1280
+    amnezia-wg-option:
+      version: 3
+      jc: 5
+      jmin: 40
+      jmax: 70
+      s1: 20
+      s2: 30
+      s3: 14
+      s4: 16
+      h1: "1"
+      h2: "2"
+      h3: "3"
+      h4: "4"
+      i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
+      header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
+      content-padding-addition: "0-32"
+
+--- mihomo: 200
+proxies:
+  - name: "NL-bob"
+    type: hysteria2
+    server: "203.0.113.10"
+    port: 20000
+    ports: "20000-50000"
+    password: "bob:bob-pass-12"
+    obfs: salamander
+    obfs-password: "obfs-pass"
+    sni: "vpn.example.com"
+    fingerprint: "ab12cd34"
+    ech-opts: {enable: true, config: "AEX+DQBB"}
+  - name: "NL-bob-awg"
+    type: wireguard
+    server: "203.0.113.10"
+    port: 51820
+    ip: "10.66.0.3"
+    private-key: "GKl3f0Wd1pW0vXq9Kpj6zv8ZfP4Vb9oQ3sXh2nL5mGc="
+    public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
+    udp: true
+    mtu: 1280
+    amnezia-wg-option:
+      version: 3
+      jc: 5
+      jmin: 40
+      jmax: 70
+      s1: 20
+      s2: 30
+      s3: 14
+      s4: 16
+      h1: "1"
+      h2: "2"
+      h3: "3"
+      h4: "4"
+      i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
+      header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
+      content-padding-addition: "0-32"
+
+--- mihomo fallback: 200
+proxies:
+  - name: "NL-bob"
+    type: hysteria2
+    server: "203.0.113.10"
+    port: 20000
+    ports: "20000-50000"
+    password: "bob:bob-pass-12"
+    obfs: salamander
+    obfs-password: "obfs-pass"
+    sni: "vpn.example.com"
+    fingerprint: "ab12cd34"
+    ech-opts: {enable: true, config: "AEX+DQBB"}
+  - name: "NL-bob-awg"
+    type: wireguard
+    server: "203.0.113.10"
+    port: 51820
+    ip: "10.66.0.3"
+    private-key: "GKl3f0Wd1pW0vXq9Kpj6zv8ZfP4Vb9oQ3sXh2nL5mGc="
+    public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
+    udp: true
+    mtu: 1280
+    amnezia-wg-option:
+      version: 3
+      jc: 5
+      jmin: 40
+      jmax: 70
+      s1: 20
+      s2: 30
+      s3: 14
+      s4: 16
+      h1: "1"
+      h2: "2"
+      h3: "3"
+      h4: "4"
+      i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
+      header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
+      content-padding-addition: "0-32"
+proxy-groups:
+  - name: "NL"
+    type: fallback
+    proxies: ["NL-bob", "NL-bob-awg"]
+    url: https://www.gstatic.com/generate_204
+    interval: 120
+
+--- mihomo proto=hysteria2: 200
+proxies:
+  - name: "NL-bob"
+    type: hysteria2
+    server: "203.0.113.10"
+    port: 20000
+    ports: "20000-50000"
+    password: "bob:bob-pass-12"
+    obfs: salamander
+    obfs-password: "obfs-pass"
+    sni: "vpn.example.com"
+    fingerprint: "ab12cd34"
+    ech-opts: {enable: true, config: "AEX+DQBB"}
+
+--- qr proto=hysteria2: 200
+png 320x320 sha256 7ec14b995b6a12034829df495581dfd9e23c0a93b23cb3edfc7ae267d3027bd3
+
+--- mihomo proto=awg: 200
+proxies:
+  - name: "NL-bob-awg"
+    type: wireguard
+    server: "203.0.113.10"
+    port: 51820
+    ip: "10.66.0.3"
+    private-key: "GKl3f0Wd1pW0vXq9Kpj6zv8ZfP4Vb9oQ3sXh2nL5mGc="
+    public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
+    udp: true
+    mtu: 1280
+    amnezia-wg-option:
+      version: 3
+      jc: 5
+      jmin: 40
+      jmax: 70
+      s1: 20
+      s2: 30
+      s3: 14
+      s4: 16
+      h1: "1"
+      h2: "2"
+      h3: "3"
+      h4: "4"
+      i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
+      header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
+      content-padding-addition: "0-32"
+
+--- qr proto=awg: 200
+png 480x480 sha256 3e1fba3117bf137b638b29a3f9d559392fcc838e1c379849844b54f1f1cbff0a
+
+--- mihomo proto=vless: 200
+proxies:
+  - name: "NL-bob-vless"
+    type: vless
+    server: "203.0.113.10"
+    port: 443
+    uuid: "0b5e3b1a-6a8e-4c39-9d1f-2f1c6c0f2b7e"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.org"
+    client-fingerprint: safari
+    network: xhttp
+    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
+    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
+
+--- qr proto=vless: 200
+png 320x320 sha256 46793f746077f4030a6309b2bf0211a946f1d60c8ec0256bd6dd36da423ec2ee
+
+--- qr: 200
+png 320x320 sha256 7ec14b995b6a12034829df495581dfd9e23c0a93b23cb3edfc7ae267d3027bd3
+
+--- awg.conf: 200
+Content-Disposition: attachment; filename="NL-bob-awg.conf"
+[Interface]
+PrivateKey = GKl3f0Wd1pW0vXq9Kpj6zv8ZfP4Vb9oQ3sXh2nL5mGc=
+Address = 10.66.0.3/32
+DNS = 1.1.1.1, 1.0.0.1
+MTU = 1280
+Jc = 5
+Jmin = 40
+Jmax = 70
+S1 = 20
+S2 = 30
+S3 = 14
+S4 = 16
+H1 = 1
+H2 = 2
+H3 = 3
+H4 = 4
+I1 = <r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>
+HeaderProtectionKey = oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE=
+ContentPaddingAddition = 0-32
+
+[Peer]
+PublicKey = LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E=
+Endpoint = 203.0.113.10:51820
+AllowedIPs = 0.0.0.0/0, ::/0
+PersistentKeepalive = 25
+
+== full / carol
+--- sub format=raw: 200
+Content-Disposition: attachment; filename*=UTF-8''NL-carol
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:TkwtY2Fyb2w=
+vless://9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4@203.0.113.10:443?encryption=none&fp=safari&mode=auto&path=%2F2b1f2de74ce6&pbk=pbk-xhttp&security=reality&sid=1187d00c55ca4d4c&sni=www.example.org&type=xhttp#NL-carol-vless
+
+--- sub format=mihomo: 200
+Content-Disposition: attachment; filename*=UTF-8''NL-carol
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:TkwtY2Fyb2w=
+proxies:
+  - name: "NL-carol-vless"
+    type: vless
+    server: "203.0.113.10"
+    port: 443
+    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.org"
+    client-fingerprint: safari
+    network: xhttp
+    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
+    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
+
+--- sub format=: 200
+Content-Disposition: attachment; filename*=UTF-8''NL-carol
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:TkwtY2Fyb2w=
+dmxlc3M6Ly85YzNmMWE3Ny0yZDRiLTRlOGEtYjZjNS03MWUwZDNmOWEyYjRAMjAzLjAuMTEzLjEwOjQ0Mz9lbmNyeXB0aW9uPW5vbmUmZnA9c2FmYXJpJm1vZGU9YXV0byZwYXRoPSUyRjJiMWYyZGU3NGNlNiZwYms9cGJrLXhodHRwJnNlY3VyaXR5PXJlYWxpdHkmc2lkPTExODdkMDBjNTVjYTRkNGMmc25pPXd3dy5leGFtcGxlLm9yZyZ0eXBlPXhodHRwI05MLWNhcm9sLXZsZXNzCg==
+--- sub clash UA: 200
+Content-Disposition: attachment; filename*=UTF-8''NL-carol
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:TkwtY2Fyb2w=
+proxies:
+  - name: "NL-carol-vless"
+    type: vless
+    server: "203.0.113.10"
+    port: 443
+    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.org"
+    client-fingerprint: safari
+    network: xhttp
+    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
+    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
+
+--- mihomo: 200
+proxies:
+  - name: "NL-carol-vless"
+    type: vless
+    server: "203.0.113.10"
+    port: 443
+    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.org"
+    client-fingerprint: safari
+    network: xhttp
+    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
+    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
+
+--- mihomo fallback: 200
+proxies:
+  - name: "NL-carol-vless"
+    type: vless
+    server: "203.0.113.10"
+    port: 443
+    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.org"
+    client-fingerprint: safari
+    network: xhttp
+    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
+    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
+proxy-groups:
+  - name: "NL"
+    type: fallback
+    proxies: ["NL-carol-vless"]
+    url: https://www.gstatic.com/generate_204
+    interval: 120
+
+--- mihomo proto=hysteria2: 200
+proxies:
+  - name: "NL-carol"
+    type: hysteria2
+    server: "203.0.113.10"
+    port: 20000
+    ports: "20000-50000"
+    password: "carol:carol-pass-1"
+    obfs: salamander
+    obfs-password: "obfs-pass"
+    sni: "vpn.example.com"
+    fingerprint: "ab12cd34"
+    ech-opts: {enable: true, config: "AEX+DQBB"}
+
+--- qr proto=hysteria2: 200
+png 320x320 sha256 f3ad873ae5a937c1bfa34762d3fbdcf0f5561704330f311c5a918906e423a4d5
+
+--- mihomo proto=awg: 200
+proxies:
+  - name: "NL-carol-awg"
+    type: wireguard
+    server: "203.0.113.10"
+    port: 51820
+    ip: "10.66.0.4"
+    private-key: "eHk1c2VjcmV0LWtleS0zMi1ieXRlcy1sb25nLWFiY2Q="
+    public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
+    udp: true
+    mtu: 1280
+    amnezia-wg-option:
+      version: 3
+      jc: 5
+      jmin: 40
+      jmax: 70
+      s1: 20
+      s2: 30
+      s3: 14
+      s4: 16
+      h1: "1"
+      h2: "2"
+      h3: "3"
+      h4: "4"
+      i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
+      header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
+      content-padding-addition: "0-32"
+
+--- qr proto=awg: 200
+png 480x480 sha256 fbbe5e748d2c3847d1f56a08d3b2628d6cf1992c4a47f3ac5afbdd9bb54af263
+
+--- mihomo proto=vless: 200
+proxies:
+  - name: "NL-carol-vless"
+    type: vless
+    server: "203.0.113.10"
+    port: 443
+    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.org"
+    client-fingerprint: safari
+    network: xhttp
+    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
+    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
+
+--- qr proto=vless: 200
+png 320x320 sha256 b376b67b7c06e007207c8168aa8386979acb6b940057f489e6adde69857103b0
+
+--- qr: 200
+png 320x320 sha256 f3ad873ae5a937c1bfa34762d3fbdcf0f5561704330f311c5a918906e423a4d5
+
+--- awg.conf: 404
+404 page not found
+
+=== server plain
+protocols [{"id":"hysteria2","title":"Hysteria 2"},{"id":"vless","title":"VLESS"}]
+state alice link {"proto":"hysteria2","uri":"hysteria2://alice:alice-pass-1@vpn.example.net:443/#alice"}
+state alice link {"proto":"vless","uri":"vless://46d502e8-e63c-4b3e-893f-519135ad1de3@vpn.example.net:8443?encryption=none\u0026flow=xtls-rprx-vision\u0026fp=safari\u0026pbk=pbk-tcp\u0026security=reality\u0026sni=www.example.com\u0026type=tcp#alice-vless"}
+state bob link {"proto":"hysteria2","uri":"hysteria2://bob:bob-pass-12@vpn.example.net:443/#bob"}
+state carol link {"proto":"vless","uri":"vless://9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4@vpn.example.net:8443?encryption=none\u0026flow=xtls-rprx-vision\u0026fp=safari\u0026pbk=pbk-tcp\u0026security=reality\u0026sni=www.example.com\u0026type=tcp#carol-vless"}
+== plain / alice
+--- sub format=raw: 200
+Content-Disposition: attachment; filename*=UTF-8''alice
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:YWxpY2U=
+hysteria2://alice:alice-pass-1@vpn.example.net:443/#alice
+vless://46d502e8-e63c-4b3e-893f-519135ad1de3@vpn.example.net:8443?encryption=none&flow=xtls-rprx-vision&fp=safari&pbk=pbk-tcp&security=reality&sni=www.example.com&type=tcp#alice-vless
+
+--- sub format=mihomo: 200
+Content-Disposition: attachment; filename*=UTF-8''alice
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:YWxpY2U=
+proxies:
+  - name: "alice"
+    type: hysteria2
+    server: "vpn.example.net"
+    port: 443
+    password: "alice:alice-pass-1"
+  - name: "alice-vless"
+    type: vless
+    server: "vpn.example.net"
+    port: 8443
+    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.com"
+    client-fingerprint: safari
+    network: tcp
+    flow: xtls-rprx-vision
+    reality-opts: {public-key: "pbk-tcp", short-id: ""}
+
+--- sub format=: 200
+Content-Disposition: attachment; filename*=UTF-8''alice
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:YWxpY2U=
+aHlzdGVyaWEyOi8vYWxpY2U6YWxpY2UtcGFzcy0xQHZwbi5leGFtcGxlLm5ldDo0NDMvI2FsaWNlCnZsZXNzOi8vNDZkNTAyZTgtZTYzYy00YjNlLTg5M2YtNTE5MTM1YWQxZGUzQHZwbi5leGFtcGxlLm5ldDo4NDQzP2VuY3J5cHRpb249bm9uZSZmbG93PXh0bHMtcnByeC12aXNpb24mZnA9c2FmYXJpJnBiaz1wYmstdGNwJnNlY3VyaXR5PXJlYWxpdHkmc25pPXd3dy5leGFtcGxlLmNvbSZ0eXBlPXRjcCNhbGljZS12bGVzcwo=
+--- sub clash UA: 200
+Content-Disposition: attachment; filename*=UTF-8''alice
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:YWxpY2U=
+proxies:
+  - name: "alice"
+    type: hysteria2
+    server: "vpn.example.net"
+    port: 443
+    password: "alice:alice-pass-1"
+  - name: "alice-vless"
+    type: vless
+    server: "vpn.example.net"
+    port: 8443
+    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.com"
+    client-fingerprint: safari
+    network: tcp
+    flow: xtls-rprx-vision
+    reality-opts: {public-key: "pbk-tcp", short-id: ""}
+
+--- mihomo: 200
+proxies:
+  - name: "alice"
+    type: hysteria2
+    server: "vpn.example.net"
+    port: 443
+    password: "alice:alice-pass-1"
+  - name: "alice-vless"
+    type: vless
+    server: "vpn.example.net"
+    port: 8443
+    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.com"
+    client-fingerprint: safari
+    network: tcp
+    flow: xtls-rprx-vision
+    reality-opts: {public-key: "pbk-tcp", short-id: ""}
+
+--- mihomo fallback: 200
+proxies:
+  - name: "alice"
+    type: hysteria2
+    server: "vpn.example.net"
+    port: 443
+    password: "alice:alice-pass-1"
+  - name: "alice-vless"
+    type: vless
+    server: "vpn.example.net"
+    port: 8443
+    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.com"
+    client-fingerprint: safari
+    network: tcp
+    flow: xtls-rprx-vision
+    reality-opts: {public-key: "pbk-tcp", short-id: ""}
+proxy-groups:
+  - name: "VPN"
+    type: fallback
+    proxies: ["alice", "alice-vless"]
+    url: https://www.gstatic.com/generate_204
+    interval: 120
+
+--- mihomo proto=hysteria2: 200
+proxies:
+  - name: "alice"
+    type: hysteria2
+    server: "vpn.example.net"
+    port: 443
+    password: "alice:alice-pass-1"
+
+--- qr proto=hysteria2: 200
+png 320x320 sha256 4e810a4501c5dda73e1756b43cf55df9ed807e9fc709f251773420114185d61f
+
+--- mihomo proto=awg: 200
+proxies:
+  - name: "alice"
+    type: hysteria2
+    server: "vpn.example.net"
+    port: 443
+    password: "alice:alice-pass-1"
+  - name: "alice-vless"
+    type: vless
+    server: "vpn.example.net"
+    port: 8443
+    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.com"
+    client-fingerprint: safari
+    network: tcp
+    flow: xtls-rprx-vision
+    reality-opts: {public-key: "pbk-tcp", short-id: ""}
+
+--- qr proto=awg: 200
+png 320x320 sha256 4e810a4501c5dda73e1756b43cf55df9ed807e9fc709f251773420114185d61f
+
+--- mihomo proto=vless: 200
+proxies:
+  - name: "alice-vless"
+    type: vless
+    server: "vpn.example.net"
+    port: 8443
+    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.com"
+    client-fingerprint: safari
+    network: tcp
+    flow: xtls-rprx-vision
+    reality-opts: {public-key: "pbk-tcp", short-id: ""}
+
+--- qr proto=vless: 200
+png 320x320 sha256 210807bab70e2fbd831696c2663d95ce02fe93d7aca8b4db268cdf7bd7fe6ada
+
+--- qr: 200
+png 320x320 sha256 4e810a4501c5dda73e1756b43cf55df9ed807e9fc709f251773420114185d61f
+
+--- awg.conf: 404
+404 page not found
+
+== plain / bob
+--- sub format=raw: 200
+Content-Disposition: attachment; filename*=UTF-8''bob
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:Ym9i
+hysteria2://bob:bob-pass-12@vpn.example.net:443/#bob
+
+--- sub format=mihomo: 200
+Content-Disposition: attachment; filename*=UTF-8''bob
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:Ym9i
+proxies:
+  - name: "bob"
+    type: hysteria2
+    server: "vpn.example.net"
+    port: 443
+    password: "bob:bob-pass-12"
+
+--- sub format=: 200
+Content-Disposition: attachment; filename*=UTF-8''bob
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:Ym9i
+aHlzdGVyaWEyOi8vYm9iOmJvYi1wYXNzLTEyQHZwbi5leGFtcGxlLm5ldDo0NDMvI2JvYgo=
+--- sub clash UA: 200
+Content-Disposition: attachment; filename*=UTF-8''bob
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:Ym9i
+proxies:
+  - name: "bob"
+    type: hysteria2
+    server: "vpn.example.net"
+    port: 443
+    password: "bob:bob-pass-12"
+
+--- mihomo: 200
+proxies:
+  - name: "bob"
+    type: hysteria2
+    server: "vpn.example.net"
+    port: 443
+    password: "bob:bob-pass-12"
+
+--- mihomo fallback: 200
+proxies:
+  - name: "bob"
+    type: hysteria2
+    server: "vpn.example.net"
+    port: 443
+    password: "bob:bob-pass-12"
+proxy-groups:
+  - name: "VPN"
+    type: fallback
+    proxies: ["bob"]
+    url: https://www.gstatic.com/generate_204
+    interval: 120
+
+--- mihomo proto=hysteria2: 200
+proxies:
+  - name: "bob"
+    type: hysteria2
+    server: "vpn.example.net"
+    port: 443
+    password: "bob:bob-pass-12"
+
+--- qr proto=hysteria2: 200
+png 320x320 sha256 b7e42aee5227bb7444f39146bf63781cc26e123dba71394b7ca587cf1e814b2f
+
+--- mihomo proto=awg: 200
+proxies:
+  - name: "bob"
+    type: hysteria2
+    server: "vpn.example.net"
+    port: 443
+    password: "bob:bob-pass-12"
+
+--- qr proto=awg: 200
+png 320x320 sha256 b7e42aee5227bb7444f39146bf63781cc26e123dba71394b7ca587cf1e814b2f
+
+--- mihomo proto=vless: 200
+proxies:
+  - name: "bob-vless"
+    type: vless
+    server: "vpn.example.net"
+    port: 8443
+    uuid: "0b5e3b1a-6a8e-4c39-9d1f-2f1c6c0f2b7e"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.com"
+    client-fingerprint: safari
+    network: tcp
+    flow: xtls-rprx-vision
+    reality-opts: {public-key: "pbk-tcp", short-id: ""}
+
+--- qr proto=vless: 200
+png 320x320 sha256 057b886036751cc141a8a89987910d5ce91ef97caf18ed78b47de457db2618a8
+
+--- qr: 200
+png 320x320 sha256 b7e42aee5227bb7444f39146bf63781cc26e123dba71394b7ca587cf1e814b2f
+
+--- awg.conf: 404
+404 page not found
+
+== plain / carol
+--- sub format=raw: 200
+Content-Disposition: attachment; filename*=UTF-8''carol
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:Y2Fyb2w=
+vless://9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4@vpn.example.net:8443?encryption=none&flow=xtls-rprx-vision&fp=safari&pbk=pbk-tcp&security=reality&sni=www.example.com&type=tcp#carol-vless
+
+--- sub format=mihomo: 200
+Content-Disposition: attachment; filename*=UTF-8''carol
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:Y2Fyb2w=
+proxies:
+  - name: "carol-vless"
+    type: vless
+    server: "vpn.example.net"
+    port: 8443
+    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.com"
+    client-fingerprint: safari
+    network: tcp
+    flow: xtls-rprx-vision
+    reality-opts: {public-key: "pbk-tcp", short-id: ""}
+
+--- sub format=: 200
+Content-Disposition: attachment; filename*=UTF-8''carol
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:Y2Fyb2w=
+dmxlc3M6Ly85YzNmMWE3Ny0yZDRiLTRlOGEtYjZjNS03MWUwZDNmOWEyYjRAdnBuLmV4YW1wbGUubmV0Ojg0NDM/ZW5jcnlwdGlvbj1ub25lJmZsb3c9eHRscy1ycHJ4LXZpc2lvbiZmcD1zYWZhcmkmcGJrPXBiay10Y3Amc2VjdXJpdHk9cmVhbGl0eSZzbmk9d3d3LmV4YW1wbGUuY29tJnR5cGU9dGNwI2Nhcm9sLXZsZXNzCg==
+--- sub clash UA: 200
+Content-Disposition: attachment; filename*=UTF-8''carol
+Subscription-Userinfo: upload=0; download=0; total=0; expire=0
+Profile-Title: base64:Y2Fyb2w=
+proxies:
+  - name: "carol-vless"
+    type: vless
+    server: "vpn.example.net"
+    port: 8443
+    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.com"
+    client-fingerprint: safari
+    network: tcp
+    flow: xtls-rprx-vision
+    reality-opts: {public-key: "pbk-tcp", short-id: ""}
+
+--- mihomo: 200
+proxies:
+  - name: "carol-vless"
+    type: vless
+    server: "vpn.example.net"
+    port: 8443
+    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.com"
+    client-fingerprint: safari
+    network: tcp
+    flow: xtls-rprx-vision
+    reality-opts: {public-key: "pbk-tcp", short-id: ""}
+
+--- mihomo fallback: 200
+proxies:
+  - name: "carol-vless"
+    type: vless
+    server: "vpn.example.net"
+    port: 8443
+    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.com"
+    client-fingerprint: safari
+    network: tcp
+    flow: xtls-rprx-vision
+    reality-opts: {public-key: "pbk-tcp", short-id: ""}
+proxy-groups:
+  - name: "VPN"
+    type: fallback
+    proxies: ["carol-vless"]
+    url: https://www.gstatic.com/generate_204
+    interval: 120
+
+--- mihomo proto=hysteria2: 200
+proxies:
+  - name: "carol"
+    type: hysteria2
+    server: "vpn.example.net"
+    port: 443
+    password: "carol:carol-pass-1"
+
+--- qr proto=hysteria2: 200
+png 320x320 sha256 28d5308d8b4e397b8022663b1a3bed15cf3e4bbd681d8f222780b8b6720bbc5e
+
+--- mihomo proto=awg: 200
+proxies:
+  - name: "carol-vless"
+    type: vless
+    server: "vpn.example.net"
+    port: 8443
+    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.com"
+    client-fingerprint: safari
+    network: tcp
+    flow: xtls-rprx-vision
+    reality-opts: {public-key: "pbk-tcp", short-id: ""}
+
+--- qr proto=awg: 200
+png 320x320 sha256 28d5308d8b4e397b8022663b1a3bed15cf3e4bbd681d8f222780b8b6720bbc5e
+
+--- mihomo proto=vless: 200
+proxies:
+  - name: "carol-vless"
+    type: vless
+    server: "vpn.example.net"
+    port: 8443
+    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.com"
+    client-fingerprint: safari
+    network: tcp
+    flow: xtls-rprx-vision
+    reality-opts: {public-key: "pbk-tcp", short-id: ""}
+
+--- qr proto=vless: 200
+png 320x320 sha256 4284b99d33bf7545fc3b5a3e376b9c0931292d717ac079ff82fab16e89c19764
+
+--- qr: 200
+png 320x320 sha256 28d5308d8b4e397b8022663b1a3bed15cf3e4bbd681d8f222780b8b6720bbc5e
+
+--- awg.conf: 404
+404 page not found
+

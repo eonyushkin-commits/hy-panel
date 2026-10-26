@@ -188,6 +188,18 @@ func (e Endpoint) AWGConf(u User) string {
 
 func (e Endpoint) awgRemark(u User) string { return e.remark(u) + "-awg" }
 
+// awgProto is AmneziaWG: on once hy-panel awg set it up. Its link is the
+// .conf text; the apps take no AmneziaWG links from a subscription.
+type awgProto struct{}
+
+func (awgProto) ID() string                          { return protoAWG }
+func (awgProto) Title() string                       { return "AmneziaWG" }
+func (awgProto) On(e Endpoint) bool                  { return e.AWG != nil }
+func (awgProto) Link(e Endpoint, u User) string      { return e.AWGConf(u) }
+func (awgProto) InSubscription() bool                { return false }
+func (awgProto) ProxyName(e Endpoint, u User) string { return e.awgRemark(u) }
+func (awgProto) Mihomo(e Endpoint, u User) string    { return e.MihomoAWG(u) }
+
 // MihomoAWG is the proxy list item: mihomo's wireguard with AmneziaWG v3.
 func (e Endpoint) MihomoAWG(u User) string {
 	c := e.AWG
