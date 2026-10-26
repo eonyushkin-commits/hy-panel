@@ -242,7 +242,7 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
     <img class="qr" id="qr" alt="QR-код">
     <textarea id="shareText" rows="4" readonly></textarea>
     <div class="mute small hint" id="shareHint"></div>
-    <div class="row"><button id="dlConf" onclick="location.href='api/users/' + encodeURIComponent(shareUser.name) + '/awg.conf'">Скачать .conf</button><button class="pri" onclick="copyShare()"><svg class="i"><use href="#i-copy"/></svg>Копировать</button></div>
+    <div class="row"><button id="dlConf" onclick="location.href=dlURL">Скачать</button><button class="pri" onclick="copyShare()"><svg class="i"><use href="#i-copy"/></svg>Копировать</button></div>
   </div>
 </dialog>
 
@@ -712,7 +712,7 @@ async function rekey() {
   $('#edit').close(); await load(); openShare(n);
 }
 const localDate = t => { const d = new Date(t * 1000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
-let shareTab = '', mihomoView = '';
+let shareTab = '', mihomoView = '', dlURL = '';
 async function openShare(n) {
   shareUser = find(n);
   $('#shareTitle').textContent = n;
@@ -721,7 +721,7 @@ async function openShare(n) {
   if (S.subBase) tabs.push(['sub', 'Подписка']);
   if (u.links.length) tabs.push(['mihomo', 'Mihomo']);
   $('#tabs').innerHTML = tabs.map(([t, title]) => `<button data-t="${esc(t)}" style="flex:1">${esc(title)}</button>`).join('');
-  mihomoView = many ? 'fallback' : (u.links[0] || {}).proto;
+  mihomoView = 'router';
   setTab(tabs.length ? tabs[0][0] : '');
   $('#share').showModal();
 }
@@ -741,25 +741,35 @@ async function setTab(t) {
   if (l) { text = l.uri; qr = q + '&proto=' + t; hint = typeof hints[t] === 'function' ? hints[t]() : hints[t] || ''; }
   if (t === 'sub') {
     text = S.subBase + u.subPath; qr = q + '&sub=1';
-    hint = 'Клиент сам обновляет конфиг и видит остаток трафика и срок. mihomo получает YAML.' + (names.length > 1 ? ' Внутри: ' + names.join(', ') + '.' : '');
+    hint = 'Клиент сам обновляет конфиг и видит остаток трафика и срок. Clash Verge и mihomo получают полный конфиг (как «Mihomo → Компьютер»).' + (names.length > 1 ? ' Внутри: ' + names.join(', ') + '.' : '');
   }
   $('#mtabs').hidden = t !== 'mihomo';
   if (t === 'mihomo') {
-    const views = u.links.map(l => [l.proto, protoName(l.proto)]);
-    if (views.length > 1) views.push(['fallback', 'Все + fallback']);
-    $('#mtabs').hidden = views.length < 2;
-    $('#mtabs').innerHTML = views.map(([v, title]) => `<button data-v="${esc(v)}" style="flex:1" class="${v === mihomoView ? 'act' : ''}">${esc(title)}</button>`).join('');
-    const path = 'api/users/' + u.name + '/mihomo' + (mihomoView === 'fallback' ? '?fallback=1' : '?proto=' + mihomoView);
-    text = await api('GET', path);
-    hint = mihomoView === 'fallback'
-      ? `Готовый кусок конфига: прокси и группа fallback в порядке ${names.join(' → ')} — пропал первый протокол, mihomo сам перейдёт на следующий. Группу выбери в rules.`
-      : `Прокси ${protoName(mihomoView)}: вставь в proxies: конфига mihomo.`;
+    // Whole configs first, then the pieces for one's own config.
+    const parts = u.links.map(l => [l.proto, short[l.proto] || protoName(l.proto)]);
+    if (parts.length > 1) parts.push(['fallback', 'Все + fallback']);
+    const btn = ([v, title]) => `<button data-v="${esc(v)}" style="flex:1" class="${v === mihomoView ? 'act' : ''}">${esc(title)}</button>`;
+    $('#mtabs').innerHTML = [['router', 'Роутер (XKeen)'], ['desktop', 'Компьютер (Clash Verge)']].map(btn).join('') +
+      '<div style="flex-basis:100%;height:4px"></div>' + parts.map(btn).join('');
+    const base = 'api/users/' + encodeURIComponent(u.name) + '/mihomo';
+    const full = mihomoView === 'router' || mihomoView === 'desktop';
+    const path = base + (full ? '?full=' + mihomoView : mihomoView === 'fallback' ? '?fallback=1' : '?proto=' + mihomoView);
+    try { text = await api('GET', path); } catch { text = ''; }
+    if (full) dlURL = path + '&download=1';
+    hint = {
+      fallback: `Кусок для своего конфига: прокси и группа fallback в порядке ${names.join(' → ')} — пропал первый протокол, mihomo сам перейдёт на следующий. Допиши в свои proxies: и proxy-groups: (второй раз эти ключи писать нельзя), группу выбери в rules.`,
+      router: 'Полный конфиг для mihomo в XKeen на роутере: прокси пользователя, группы и правила (заблокированное — через VPN, остальное напрямую). Замени им конфиг mihomo в XKeen (обычно /opt/etc/mihomo/config.yaml). Панель zashboard: http://<роутер>:9090/ui, пароль — secret в конфиге.',
+      desktop: 'Полный конфиг для Clash Verge и mihomo на компьютере: в Clash Verge — «Профили» → «Новый» → Local, стереть всё и вставить целиком, или скачать файл и импортировать. Ссылка «Подписка» отдаёт Clash Verge тот же конфиг, и он обновляется сам.',
+    }[mihomoView] || `Прокси ${protoName(mihomoView)}: вставь в proxies: конфига mihomo.`;
   }
   $('#shareText').value = text; $('#shareHint').textContent = hint;
   $('#qr').hidden = !qr; if (qr) $('#qr').src = qr;
   $('#qr').style.width = $('#qr').style.height = t === 'awg' ? '300px' : ''; // a long config: a denser code
-  $('#shareText').rows = t === 'mihomo' ? (mihomoView === 'fallback' ? 20 : 12) : t === 'awg' ? 10 : 4;
-  $('#dlConf').hidden = t !== 'awg';
+  const full = t === 'mihomo' && (mihomoView === 'router' || mihomoView === 'desktop');
+  $('#shareText').rows = t === 'mihomo' ? (mihomoView === 'fallback' || full ? 20 : 12) : t === 'awg' ? 10 : 4;
+  if (t === 'awg') dlURL = 'api/users/' + encodeURIComponent(u.name) + '/awg.conf';
+  $('#dlConf').hidden = t !== 'awg' && !full;
+  $('#dlConf').textContent = t === 'awg' ? 'Скачать .conf' : 'Скачать .yaml';
 }
 $('#tabs').onclick = e => { const b = e.target.closest('button'); if (b) setTab(b.dataset.t); };
 $('#mtabs').onclick = e => { const b = e.target.closest('button'); if (b) { mihomoView = b.dataset.v; setTab('mihomo'); } };

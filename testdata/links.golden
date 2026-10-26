@@ -18,56 +18,66 @@ vless://46d502e8-e63c-4b3e-893f-519135ad1de3@203.0.113.10:443?encryption=none&fp
 Content-Disposition: attachment; filename*=UTF-8''NL-alice
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:TkwtYWxpY2U=
-proxies:
-  - name: "NL-alice"
-    type: hysteria2
-    server: "203.0.113.10"
-    port: 20000
-    ports: "20000-50000"
-    password: "alice:alice-pass-1"
-    obfs: salamander
-    obfs-password: "obfs-pass"
-    sni: "vpn.example.com"
-    fingerprint: "ab12cd34"
-    ech-opts: {enable: true, config: "AEX+DQBB"}
-  - name: "NL-alice-awg"
-    type: wireguard
-    server: "203.0.113.10"
-    port: 51820
-    ip: "10.66.0.2"
-    private-key: "8Pm2s6Oz1VRrWEc0bNKIhPpz3e0YVxUJsS0Ywr0lE1s="
-    public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
-    udp: true
-    mtu: 1280
-    amnezia-wg-option:
-      version: 3
-      jc: 5
-      jmin: 40
-      jmax: 70
-      s1: 20
-      s2: 30
-      s3: 14
-      s4: 16
-      h1: "1"
-      h2: "2"
-      h3: "3"
-      h4: "4"
-      i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
-      header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
-      content-padding-addition: "0-32"
-  - name: "NL-alice-vless"
-    type: vless
-    server: "203.0.113.10"
-    port: 443
-    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
-    udp: true
-    packet-encoding: xudp
-    tls: true
-    servername: "www.example.org"
-    client-fingerprint: safari
-    network: xhttp
-    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
-    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ proxies:
++   - name: "NL-alice"
++     type: hysteria2
++     server: "203.0.113.10"
++     port: 20000
++     ports: "20000-50000"
++     password: "alice:alice-pass-1"
++     obfs: salamander
++     obfs-password: "obfs-pass"
++     sni: "vpn.example.com"
++     fingerprint: "ab12cd34"
++     ech-opts: {enable: true, config: "AEX+DQBB"}
++   - name: "NL-alice-awg"
++     type: wireguard
++     server: "203.0.113.10"
++     port: 51820
++     ip: "10.66.0.2"
++     private-key: "8Pm2s6Oz1VRrWEc0bNKIhPpz3e0YVxUJsS0Ywr0lE1s="
++     public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
++     udp: true
++     mtu: 1280
++     amnezia-wg-option:
++       version: 3
++       jc: 5
++       jmin: 40
++       jmax: 70
++       s1: 20
++       s2: 30
++       s3: 14
++       s4: 16
++       h1: "1"
++       h2: "2"
++       h3: "3"
++       h4: "4"
++       i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
++       header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
++       content-padding-addition: "0-32"
++   - name: "NL-alice-vless"
++     type: vless
++     server: "203.0.113.10"
++     port: 443
++     uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.org"
++     client-fingerprint: safari
++     network: xhttp
++     xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
++     reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
++   - IP-CIDR,203.0.113.10/32,DIRECT,no-resolve # свой сервер напрямую
+- redir-port: 5000
+- tproxy-port: 5001
+- routing-mark: 255
+- external-controller: 0.0.0.0:9090
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- external-ui: zashboard
+- external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+- proxies: [] # заполняет панель
 
 --- sub format=: 200
 Content-Disposition: attachment; filename*=UTF-8''NL-alice
@@ -78,56 +88,66 @@ aHlzdGVyaWEyOi8vYWxpY2U6YWxpY2UtcGFzcy0xQDIwMy4wLjExMy4xMDoyMDAwMC8/ZWNoPUFFWCUy
 Content-Disposition: attachment; filename*=UTF-8''NL-alice
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:TkwtYWxpY2U=
-proxies:
-  - name: "NL-alice"
-    type: hysteria2
-    server: "203.0.113.10"
-    port: 20000
-    ports: "20000-50000"
-    password: "alice:alice-pass-1"
-    obfs: salamander
-    obfs-password: "obfs-pass"
-    sni: "vpn.example.com"
-    fingerprint: "ab12cd34"
-    ech-opts: {enable: true, config: "AEX+DQBB"}
-  - name: "NL-alice-awg"
-    type: wireguard
-    server: "203.0.113.10"
-    port: 51820
-    ip: "10.66.0.2"
-    private-key: "8Pm2s6Oz1VRrWEc0bNKIhPpz3e0YVxUJsS0Ywr0lE1s="
-    public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
-    udp: true
-    mtu: 1280
-    amnezia-wg-option:
-      version: 3
-      jc: 5
-      jmin: 40
-      jmax: 70
-      s1: 20
-      s2: 30
-      s3: 14
-      s4: 16
-      h1: "1"
-      h2: "2"
-      h3: "3"
-      h4: "4"
-      i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
-      header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
-      content-padding-addition: "0-32"
-  - name: "NL-alice-vless"
-    type: vless
-    server: "203.0.113.10"
-    port: 443
-    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
-    udp: true
-    packet-encoding: xudp
-    tls: true
-    servername: "www.example.org"
-    client-fingerprint: safari
-    network: xhttp
-    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
-    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ proxies:
++   - name: "NL-alice"
++     type: hysteria2
++     server: "203.0.113.10"
++     port: 20000
++     ports: "20000-50000"
++     password: "alice:alice-pass-1"
++     obfs: salamander
++     obfs-password: "obfs-pass"
++     sni: "vpn.example.com"
++     fingerprint: "ab12cd34"
++     ech-opts: {enable: true, config: "AEX+DQBB"}
++   - name: "NL-alice-awg"
++     type: wireguard
++     server: "203.0.113.10"
++     port: 51820
++     ip: "10.66.0.2"
++     private-key: "8Pm2s6Oz1VRrWEc0bNKIhPpz3e0YVxUJsS0Ywr0lE1s="
++     public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
++     udp: true
++     mtu: 1280
++     amnezia-wg-option:
++       version: 3
++       jc: 5
++       jmin: 40
++       jmax: 70
++       s1: 20
++       s2: 30
++       s3: 14
++       s4: 16
++       h1: "1"
++       h2: "2"
++       h3: "3"
++       h4: "4"
++       i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
++       header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
++       content-padding-addition: "0-32"
++   - name: "NL-alice-vless"
++     type: vless
++     server: "203.0.113.10"
++     port: 443
++     uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.org"
++     client-fingerprint: safari
++     network: xhttp
++     xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
++     reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
++   - IP-CIDR,203.0.113.10/32,DIRECT,no-resolve # свой сервер напрямую
+- redir-port: 5000
+- tproxy-port: 5001
+- routing-mark: 255
+- external-controller: 0.0.0.0:9090
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- external-ui: zashboard
+- external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+- proxies: [] # заполняет панель
 
 --- mihomo: 200
 proxies:
@@ -239,6 +259,126 @@ proxy-groups:
     url: https://www.gstatic.com/generate_204
     interval: 120
 
+--- mihomo full router: 200
+Content-Disposition: attachment; filename="NL-alice-router.yaml"
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ secret: 'c2555bde7e4041ce' # пароль панели управления (zashboard)
++ proxies:
++   - name: "NL-alice"
++     type: hysteria2
++     server: "203.0.113.10"
++     port: 20000
++     ports: "20000-50000"
++     password: "alice:alice-pass-1"
++     obfs: salamander
++     obfs-password: "obfs-pass"
++     sni: "vpn.example.com"
++     fingerprint: "ab12cd34"
++     ech-opts: {enable: true, config: "AEX+DQBB"}
++   - name: "NL-alice-awg"
++     type: wireguard
++     server: "203.0.113.10"
++     port: 51820
++     ip: "10.66.0.2"
++     private-key: "8Pm2s6Oz1VRrWEc0bNKIhPpz3e0YVxUJsS0Ywr0lE1s="
++     public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
++     udp: true
++     mtu: 1280
++     amnezia-wg-option:
++       version: 3
++       jc: 5
++       jmin: 40
++       jmax: 70
++       s1: 20
++       s2: 30
++       s3: 14
++       s4: 16
++       h1: "1"
++       h2: "2"
++       h3: "3"
++       h4: "4"
++       i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
++       header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
++       content-padding-addition: "0-32"
++   - name: "NL-alice-vless"
++     type: vless
++     server: "203.0.113.10"
++     port: 443
++     uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.org"
++     client-fingerprint: safari
++     network: xhttp
++     xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
++     reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
++   - IP-CIDR,203.0.113.10/32,DIRECT,no-resolve # свой сервер напрямую
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- proxies: [] # заполняет панель
+
+--- mihomo full desktop: 200
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ proxies:
++   - name: "NL-alice"
++     type: hysteria2
++     server: "203.0.113.10"
++     port: 20000
++     ports: "20000-50000"
++     password: "alice:alice-pass-1"
++     obfs: salamander
++     obfs-password: "obfs-pass"
++     sni: "vpn.example.com"
++     fingerprint: "ab12cd34"
++     ech-opts: {enable: true, config: "AEX+DQBB"}
++   - name: "NL-alice-awg"
++     type: wireguard
++     server: "203.0.113.10"
++     port: 51820
++     ip: "10.66.0.2"
++     private-key: "8Pm2s6Oz1VRrWEc0bNKIhPpz3e0YVxUJsS0Ywr0lE1s="
++     public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
++     udp: true
++     mtu: 1280
++     amnezia-wg-option:
++       version: 3
++       jc: 5
++       jmin: 40
++       jmax: 70
++       s1: 20
++       s2: 30
++       s3: 14
++       s4: 16
++       h1: "1"
++       h2: "2"
++       h3: "3"
++       h4: "4"
++       i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
++       header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
++       content-padding-addition: "0-32"
++   - name: "NL-alice-vless"
++     type: vless
++     server: "203.0.113.10"
++     port: 443
++     uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.org"
++     client-fingerprint: safari
++     network: xhttp
++     xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
++     reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
++   - IP-CIDR,203.0.113.10/32,DIRECT,no-resolve # свой сервер напрямую
+- redir-port: 5000
+- tproxy-port: 5001
+- routing-mark: 255
+- external-controller: 0.0.0.0:9090
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- external-ui: zashboard
+- external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+- proxies: [] # заполняет панель
+
 --- mihomo proto=hysteria2: 200
 proxies:
   - name: "NL-alice"
@@ -348,43 +488,53 @@ hysteria2://bob:bob-pass-12@203.0.113.10:20000/?ech=AEX%2BDQBB&insecure=1&mport=
 Content-Disposition: attachment; filename*=UTF-8''NL-bob
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:TkwtYm9i
-proxies:
-  - name: "NL-bob"
-    type: hysteria2
-    server: "203.0.113.10"
-    port: 20000
-    ports: "20000-50000"
-    password: "bob:bob-pass-12"
-    obfs: salamander
-    obfs-password: "obfs-pass"
-    sni: "vpn.example.com"
-    fingerprint: "ab12cd34"
-    ech-opts: {enable: true, config: "AEX+DQBB"}
-  - name: "NL-bob-awg"
-    type: wireguard
-    server: "203.0.113.10"
-    port: 51820
-    ip: "10.66.0.3"
-    private-key: "GKl3f0Wd1pW0vXq9Kpj6zv8ZfP4Vb9oQ3sXh2nL5mGc="
-    public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
-    udp: true
-    mtu: 1280
-    amnezia-wg-option:
-      version: 3
-      jc: 5
-      jmin: 40
-      jmax: 70
-      s1: 20
-      s2: 30
-      s3: 14
-      s4: 16
-      h1: "1"
-      h2: "2"
-      h3: "3"
-      h4: "4"
-      i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
-      header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
-      content-padding-addition: "0-32"
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ proxies:
++   - name: "NL-bob"
++     type: hysteria2
++     server: "203.0.113.10"
++     port: 20000
++     ports: "20000-50000"
++     password: "bob:bob-pass-12"
++     obfs: salamander
++     obfs-password: "obfs-pass"
++     sni: "vpn.example.com"
++     fingerprint: "ab12cd34"
++     ech-opts: {enable: true, config: "AEX+DQBB"}
++   - name: "NL-bob-awg"
++     type: wireguard
++     server: "203.0.113.10"
++     port: 51820
++     ip: "10.66.0.3"
++     private-key: "GKl3f0Wd1pW0vXq9Kpj6zv8ZfP4Vb9oQ3sXh2nL5mGc="
++     public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
++     udp: true
++     mtu: 1280
++     amnezia-wg-option:
++       version: 3
++       jc: 5
++       jmin: 40
++       jmax: 70
++       s1: 20
++       s2: 30
++       s3: 14
++       s4: 16
++       h1: "1"
++       h2: "2"
++       h3: "3"
++       h4: "4"
++       i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
++       header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
++       content-padding-addition: "0-32"
++   - IP-CIDR,203.0.113.10/32,DIRECT,no-resolve # свой сервер напрямую
+- redir-port: 5000
+- tproxy-port: 5001
+- routing-mark: 255
+- external-controller: 0.0.0.0:9090
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- external-ui: zashboard
+- external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+- proxies: [] # заполняет панель
 
 --- sub format=: 200
 Content-Disposition: attachment; filename*=UTF-8''NL-bob
@@ -395,43 +545,53 @@ aHlzdGVyaWEyOi8vYm9iOmJvYi1wYXNzLTEyQDIwMy4wLjExMy4xMDoyMDAwMC8/ZWNoPUFFWCUyQkRR
 Content-Disposition: attachment; filename*=UTF-8''NL-bob
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:TkwtYm9i
-proxies:
-  - name: "NL-bob"
-    type: hysteria2
-    server: "203.0.113.10"
-    port: 20000
-    ports: "20000-50000"
-    password: "bob:bob-pass-12"
-    obfs: salamander
-    obfs-password: "obfs-pass"
-    sni: "vpn.example.com"
-    fingerprint: "ab12cd34"
-    ech-opts: {enable: true, config: "AEX+DQBB"}
-  - name: "NL-bob-awg"
-    type: wireguard
-    server: "203.0.113.10"
-    port: 51820
-    ip: "10.66.0.3"
-    private-key: "GKl3f0Wd1pW0vXq9Kpj6zv8ZfP4Vb9oQ3sXh2nL5mGc="
-    public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
-    udp: true
-    mtu: 1280
-    amnezia-wg-option:
-      version: 3
-      jc: 5
-      jmin: 40
-      jmax: 70
-      s1: 20
-      s2: 30
-      s3: 14
-      s4: 16
-      h1: "1"
-      h2: "2"
-      h3: "3"
-      h4: "4"
-      i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
-      header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
-      content-padding-addition: "0-32"
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ proxies:
++   - name: "NL-bob"
++     type: hysteria2
++     server: "203.0.113.10"
++     port: 20000
++     ports: "20000-50000"
++     password: "bob:bob-pass-12"
++     obfs: salamander
++     obfs-password: "obfs-pass"
++     sni: "vpn.example.com"
++     fingerprint: "ab12cd34"
++     ech-opts: {enable: true, config: "AEX+DQBB"}
++   - name: "NL-bob-awg"
++     type: wireguard
++     server: "203.0.113.10"
++     port: 51820
++     ip: "10.66.0.3"
++     private-key: "GKl3f0Wd1pW0vXq9Kpj6zv8ZfP4Vb9oQ3sXh2nL5mGc="
++     public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
++     udp: true
++     mtu: 1280
++     amnezia-wg-option:
++       version: 3
++       jc: 5
++       jmin: 40
++       jmax: 70
++       s1: 20
++       s2: 30
++       s3: 14
++       s4: 16
++       h1: "1"
++       h2: "2"
++       h3: "3"
++       h4: "4"
++       i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
++       header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
++       content-padding-addition: "0-32"
++   - IP-CIDR,203.0.113.10/32,DIRECT,no-resolve # свой сервер напрямую
+- redir-port: 5000
+- tproxy-port: 5001
+- routing-mark: 255
+- external-controller: 0.0.0.0:9090
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- external-ui: zashboard
+- external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+- proxies: [] # заполняет панель
 
 --- mihomo: 200
 proxies:
@@ -516,6 +676,100 @@ proxy-groups:
     proxies: ["NL-bob", "NL-bob-awg"]
     url: https://www.gstatic.com/generate_204
     interval: 120
+
+--- mihomo full router: 200
+Content-Disposition: attachment; filename="NL-bob-router.yaml"
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ secret: 'd7075cfe08f254a8' # пароль панели управления (zashboard)
++ proxies:
++   - name: "NL-bob"
++     type: hysteria2
++     server: "203.0.113.10"
++     port: 20000
++     ports: "20000-50000"
++     password: "bob:bob-pass-12"
++     obfs: salamander
++     obfs-password: "obfs-pass"
++     sni: "vpn.example.com"
++     fingerprint: "ab12cd34"
++     ech-opts: {enable: true, config: "AEX+DQBB"}
++   - name: "NL-bob-awg"
++     type: wireguard
++     server: "203.0.113.10"
++     port: 51820
++     ip: "10.66.0.3"
++     private-key: "GKl3f0Wd1pW0vXq9Kpj6zv8ZfP4Vb9oQ3sXh2nL5mGc="
++     public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
++     udp: true
++     mtu: 1280
++     amnezia-wg-option:
++       version: 3
++       jc: 5
++       jmin: 40
++       jmax: 70
++       s1: 20
++       s2: 30
++       s3: 14
++       s4: 16
++       h1: "1"
++       h2: "2"
++       h3: "3"
++       h4: "4"
++       i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
++       header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
++       content-padding-addition: "0-32"
++   - IP-CIDR,203.0.113.10/32,DIRECT,no-resolve # свой сервер напрямую
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- proxies: [] # заполняет панель
+
+--- mihomo full desktop: 200
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ proxies:
++   - name: "NL-bob"
++     type: hysteria2
++     server: "203.0.113.10"
++     port: 20000
++     ports: "20000-50000"
++     password: "bob:bob-pass-12"
++     obfs: salamander
++     obfs-password: "obfs-pass"
++     sni: "vpn.example.com"
++     fingerprint: "ab12cd34"
++     ech-opts: {enable: true, config: "AEX+DQBB"}
++   - name: "NL-bob-awg"
++     type: wireguard
++     server: "203.0.113.10"
++     port: 51820
++     ip: "10.66.0.3"
++     private-key: "GKl3f0Wd1pW0vXq9Kpj6zv8ZfP4Vb9oQ3sXh2nL5mGc="
++     public-key: "LY3HAnYBhLSxLlMVzw8SVXC3BqzCELYIcrrEW+BLH0E="
++     udp: true
++     mtu: 1280
++     amnezia-wg-option:
++       version: 3
++       jc: 5
++       jmin: 40
++       jmax: 70
++       s1: 20
++       s2: 30
++       s3: 14
++       s4: 16
++       h1: "1"
++       h2: "2"
++       h3: "3"
++       h4: "4"
++       i1: "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>"
++       header-protection-key: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE="
++       content-padding-addition: "0-32"
++   - IP-CIDR,203.0.113.10/32,DIRECT,no-resolve # свой сервер напрямую
+- redir-port: 5000
+- tproxy-port: 5001
+- routing-mark: 255
+- external-controller: 0.0.0.0:9090
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- external-ui: zashboard
+- external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+- proxies: [] # заполняет панель
 
 --- mihomo proto=hysteria2: 200
 proxies:
@@ -626,20 +880,30 @@ vless://9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4@203.0.113.10:443?encryption=none&fp
 Content-Disposition: attachment; filename*=UTF-8''NL-carol
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:TkwtY2Fyb2w=
-proxies:
-  - name: "NL-carol-vless"
-    type: vless
-    server: "203.0.113.10"
-    port: 443
-    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
-    udp: true
-    packet-encoding: xudp
-    tls: true
-    servername: "www.example.org"
-    client-fingerprint: safari
-    network: xhttp
-    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
-    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ proxies:
++   - name: "NL-carol-vless"
++     type: vless
++     server: "203.0.113.10"
++     port: 443
++     uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.org"
++     client-fingerprint: safari
++     network: xhttp
++     xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
++     reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
++   - IP-CIDR,203.0.113.10/32,DIRECT,no-resolve # свой сервер напрямую
+- redir-port: 5000
+- tproxy-port: 5001
+- routing-mark: 255
+- external-controller: 0.0.0.0:9090
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- external-ui: zashboard
+- external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+- proxies: [] # заполняет панель
 
 --- sub format=: 200
 Content-Disposition: attachment; filename*=UTF-8''NL-carol
@@ -650,20 +914,30 @@ dmxlc3M6Ly85YzNmMWE3Ny0yZDRiLTRlOGEtYjZjNS03MWUwZDNmOWEyYjRAMjAzLjAuMTEzLjEwOjQ0
 Content-Disposition: attachment; filename*=UTF-8''NL-carol
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:TkwtY2Fyb2w=
-proxies:
-  - name: "NL-carol-vless"
-    type: vless
-    server: "203.0.113.10"
-    port: 443
-    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
-    udp: true
-    packet-encoding: xudp
-    tls: true
-    servername: "www.example.org"
-    client-fingerprint: safari
-    network: xhttp
-    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
-    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ proxies:
++   - name: "NL-carol-vless"
++     type: vless
++     server: "203.0.113.10"
++     port: 443
++     uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.org"
++     client-fingerprint: safari
++     network: xhttp
++     xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
++     reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
++   - IP-CIDR,203.0.113.10/32,DIRECT,no-resolve # свой сервер напрямую
+- redir-port: 5000
+- tproxy-port: 5001
+- routing-mark: 255
+- external-controller: 0.0.0.0:9090
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- external-ui: zashboard
+- external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+- proxies: [] # заполняет панель
 
 --- mihomo: 200
 proxies:
@@ -702,6 +976,54 @@ proxy-groups:
     proxies: ["NL-carol-vless"]
     url: https://www.gstatic.com/generate_204
     interval: 120
+
+--- mihomo full router: 200
+Content-Disposition: attachment; filename="NL-carol-router.yaml"
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ secret: '699a99bdedbbff15' # пароль панели управления (zashboard)
++ proxies:
++   - name: "NL-carol-vless"
++     type: vless
++     server: "203.0.113.10"
++     port: 443
++     uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.org"
++     client-fingerprint: safari
++     network: xhttp
++     xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
++     reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
++   - IP-CIDR,203.0.113.10/32,DIRECT,no-resolve # свой сервер напрямую
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- proxies: [] # заполняет панель
+
+--- mihomo full desktop: 200
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ proxies:
++   - name: "NL-carol-vless"
++     type: vless
++     server: "203.0.113.10"
++     port: 443
++     uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.org"
++     client-fingerprint: safari
++     network: xhttp
++     xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
++     reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c"}
++   - IP-CIDR,203.0.113.10/32,DIRECT,no-resolve # свой сервер напрямую
+- redir-port: 5000
+- tproxy-port: 5001
+- routing-mark: 255
+- external-controller: 0.0.0.0:9090
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- external-ui: zashboard
+- external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+- proxies: [] # заполняет панель
 
 --- mihomo proto=hysteria2: 200
 proxies:
@@ -794,25 +1116,35 @@ vless://46d502e8-e63c-4b3e-893f-519135ad1de3@vpn.example.net:8443?encryption=non
 Content-Disposition: attachment; filename*=UTF-8''alice
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:YWxpY2U=
-proxies:
-  - name: "alice"
-    type: hysteria2
-    server: "vpn.example.net"
-    port: 443
-    password: "alice:alice-pass-1"
-  - name: "alice-vless"
-    type: vless
-    server: "vpn.example.net"
-    port: 8443
-    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
-    udp: true
-    packet-encoding: xudp
-    tls: true
-    servername: "www.example.com"
-    client-fingerprint: safari
-    network: tcp
-    flow: xtls-rprx-vision
-    reality-opts: {public-key: "pbk-tcp", short-id: ""}
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ proxies:
++   - name: "alice"
++     type: hysteria2
++     server: "vpn.example.net"
++     port: 443
++     password: "alice:alice-pass-1"
++   - name: "alice-vless"
++     type: vless
++     server: "vpn.example.net"
++     port: 8443
++     uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.com"
++     client-fingerprint: safari
++     network: tcp
++     flow: xtls-rprx-vision
++     reality-opts: {public-key: "pbk-tcp", short-id: ""}
++   - DOMAIN,vpn.example.net,DIRECT # свой сервер напрямую
+- redir-port: 5000
+- tproxy-port: 5001
+- routing-mark: 255
+- external-controller: 0.0.0.0:9090
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- external-ui: zashboard
+- external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+- proxies: [] # заполняет панель
 
 --- sub format=: 200
 Content-Disposition: attachment; filename*=UTF-8''alice
@@ -823,25 +1155,35 @@ aHlzdGVyaWEyOi8vYWxpY2U6YWxpY2UtcGFzcy0xQHZwbi5leGFtcGxlLm5ldDo0NDMvI2FsaWNlCnZs
 Content-Disposition: attachment; filename*=UTF-8''alice
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:YWxpY2U=
-proxies:
-  - name: "alice"
-    type: hysteria2
-    server: "vpn.example.net"
-    port: 443
-    password: "alice:alice-pass-1"
-  - name: "alice-vless"
-    type: vless
-    server: "vpn.example.net"
-    port: 8443
-    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
-    udp: true
-    packet-encoding: xudp
-    tls: true
-    servername: "www.example.com"
-    client-fingerprint: safari
-    network: tcp
-    flow: xtls-rprx-vision
-    reality-opts: {public-key: "pbk-tcp", short-id: ""}
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ proxies:
++   - name: "alice"
++     type: hysteria2
++     server: "vpn.example.net"
++     port: 443
++     password: "alice:alice-pass-1"
++   - name: "alice-vless"
++     type: vless
++     server: "vpn.example.net"
++     port: 8443
++     uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.com"
++     client-fingerprint: safari
++     network: tcp
++     flow: xtls-rprx-vision
++     reality-opts: {public-key: "pbk-tcp", short-id: ""}
++   - DOMAIN,vpn.example.net,DIRECT # свой сервер напрямую
+- redir-port: 5000
+- tproxy-port: 5001
+- routing-mark: 255
+- external-controller: 0.0.0.0:9090
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- external-ui: zashboard
+- external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+- proxies: [] # заполняет панель
 
 --- mihomo: 200
 proxies:
@@ -890,6 +1232,64 @@ proxy-groups:
     proxies: ["alice", "alice-vless"]
     url: https://www.gstatic.com/generate_204
     interval: 120
+
+--- mihomo full router: 200
+Content-Disposition: attachment; filename="alice-router.yaml"
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ secret: 'c2555bde7e4041ce' # пароль панели управления (zashboard)
++ proxies:
++   - name: "alice"
++     type: hysteria2
++     server: "vpn.example.net"
++     port: 443
++     password: "alice:alice-pass-1"
++   - name: "alice-vless"
++     type: vless
++     server: "vpn.example.net"
++     port: 8443
++     uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.com"
++     client-fingerprint: safari
++     network: tcp
++     flow: xtls-rprx-vision
++     reality-opts: {public-key: "pbk-tcp", short-id: ""}
++   - DOMAIN,vpn.example.net,DIRECT # свой сервер напрямую
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- proxies: [] # заполняет панель
+
+--- mihomo full desktop: 200
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ proxies:
++   - name: "alice"
++     type: hysteria2
++     server: "vpn.example.net"
++     port: 443
++     password: "alice:alice-pass-1"
++   - name: "alice-vless"
++     type: vless
++     server: "vpn.example.net"
++     port: 8443
++     uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.com"
++     client-fingerprint: safari
++     network: tcp
++     flow: xtls-rprx-vision
++     reality-opts: {public-key: "pbk-tcp", short-id: ""}
++   - DOMAIN,vpn.example.net,DIRECT # свой сервер напрямую
+- redir-port: 5000
+- tproxy-port: 5001
+- routing-mark: 255
+- external-controller: 0.0.0.0:9090
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- external-ui: zashboard
+- external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+- proxies: [] # заполняет панель
 
 --- mihomo proto=hysteria2: 200
 proxies:
@@ -962,12 +1362,22 @@ hysteria2://bob:bob-pass-12@vpn.example.net:443/#bob
 Content-Disposition: attachment; filename*=UTF-8''bob
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:Ym9i
-proxies:
-  - name: "bob"
-    type: hysteria2
-    server: "vpn.example.net"
-    port: 443
-    password: "bob:bob-pass-12"
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ proxies:
++   - name: "bob"
++     type: hysteria2
++     server: "vpn.example.net"
++     port: 443
++     password: "bob:bob-pass-12"
++   - DOMAIN,vpn.example.net,DIRECT # свой сервер напрямую
+- redir-port: 5000
+- tproxy-port: 5001
+- routing-mark: 255
+- external-controller: 0.0.0.0:9090
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- external-ui: zashboard
+- external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+- proxies: [] # заполняет панель
 
 --- sub format=: 200
 Content-Disposition: attachment; filename*=UTF-8''bob
@@ -978,12 +1388,22 @@ aHlzdGVyaWEyOi8vYm9iOmJvYi1wYXNzLTEyQHZwbi5leGFtcGxlLm5ldDo0NDMvI2JvYgo=
 Content-Disposition: attachment; filename*=UTF-8''bob
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:Ym9i
-proxies:
-  - name: "bob"
-    type: hysteria2
-    server: "vpn.example.net"
-    port: 443
-    password: "bob:bob-pass-12"
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ proxies:
++   - name: "bob"
++     type: hysteria2
++     server: "vpn.example.net"
++     port: 443
++     password: "bob:bob-pass-12"
++   - DOMAIN,vpn.example.net,DIRECT # свой сервер напрямую
+- redir-port: 5000
+- tproxy-port: 5001
+- routing-mark: 255
+- external-controller: 0.0.0.0:9090
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- external-ui: zashboard
+- external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+- proxies: [] # заполняет панель
 
 --- mihomo: 200
 proxies:
@@ -1006,6 +1426,38 @@ proxy-groups:
     proxies: ["bob"]
     url: https://www.gstatic.com/generate_204
     interval: 120
+
+--- mihomo full router: 200
+Content-Disposition: attachment; filename="bob-router.yaml"
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ secret: 'd7075cfe08f254a8' # пароль панели управления (zashboard)
++ proxies:
++   - name: "bob"
++     type: hysteria2
++     server: "vpn.example.net"
++     port: 443
++     password: "bob:bob-pass-12"
++   - DOMAIN,vpn.example.net,DIRECT # свой сервер напрямую
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- proxies: [] # заполняет панель
+
+--- mihomo full desktop: 200
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ proxies:
++   - name: "bob"
++     type: hysteria2
++     server: "vpn.example.net"
++     port: 443
++     password: "bob:bob-pass-12"
++   - DOMAIN,vpn.example.net,DIRECT # свой сервер напрямую
+- redir-port: 5000
+- tproxy-port: 5001
+- routing-mark: 255
+- external-controller: 0.0.0.0:9090
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- external-ui: zashboard
+- external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+- proxies: [] # заполняет панель
 
 --- mihomo proto=hysteria2: 200
 proxies:
@@ -1065,20 +1517,30 @@ vless://9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4@vpn.example.net:8443?encryption=non
 Content-Disposition: attachment; filename*=UTF-8''carol
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:Y2Fyb2w=
-proxies:
-  - name: "carol-vless"
-    type: vless
-    server: "vpn.example.net"
-    port: 8443
-    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
-    udp: true
-    packet-encoding: xudp
-    tls: true
-    servername: "www.example.com"
-    client-fingerprint: safari
-    network: tcp
-    flow: xtls-rprx-vision
-    reality-opts: {public-key: "pbk-tcp", short-id: ""}
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ proxies:
++   - name: "carol-vless"
++     type: vless
++     server: "vpn.example.net"
++     port: 8443
++     uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.com"
++     client-fingerprint: safari
++     network: tcp
++     flow: xtls-rprx-vision
++     reality-opts: {public-key: "pbk-tcp", short-id: ""}
++   - DOMAIN,vpn.example.net,DIRECT # свой сервер напрямую
+- redir-port: 5000
+- tproxy-port: 5001
+- routing-mark: 255
+- external-controller: 0.0.0.0:9090
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- external-ui: zashboard
+- external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+- proxies: [] # заполняет панель
 
 --- sub format=: 200
 Content-Disposition: attachment; filename*=UTF-8''carol
@@ -1089,20 +1551,30 @@ dmxlc3M6Ly85YzNmMWE3Ny0yZDRiLTRlOGEtYjZjNS03MWUwZDNmOWEyYjRAdnBuLmV4YW1wbGUubmV0
 Content-Disposition: attachment; filename*=UTF-8''carol
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:Y2Fyb2w=
-proxies:
-  - name: "carol-vless"
-    type: vless
-    server: "vpn.example.net"
-    port: 8443
-    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
-    udp: true
-    packet-encoding: xudp
-    tls: true
-    servername: "www.example.com"
-    client-fingerprint: safari
-    network: tcp
-    flow: xtls-rprx-vision
-    reality-opts: {public-key: "pbk-tcp", short-id: ""}
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ proxies:
++   - name: "carol-vless"
++     type: vless
++     server: "vpn.example.net"
++     port: 8443
++     uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.com"
++     client-fingerprint: safari
++     network: tcp
++     flow: xtls-rprx-vision
++     reality-opts: {public-key: "pbk-tcp", short-id: ""}
++   - DOMAIN,vpn.example.net,DIRECT # свой сервер напрямую
+- redir-port: 5000
+- tproxy-port: 5001
+- routing-mark: 255
+- external-controller: 0.0.0.0:9090
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- external-ui: zashboard
+- external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+- proxies: [] # заполняет панель
 
 --- mihomo: 200
 proxies:
@@ -1141,6 +1613,54 @@ proxy-groups:
     proxies: ["carol-vless"]
     url: https://www.gstatic.com/generate_204
     interval: 120
+
+--- mihomo full router: 200
+Content-Disposition: attachment; filename="carol-router.yaml"
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ secret: '699a99bdedbbff15' # пароль панели управления (zashboard)
++ proxies:
++   - name: "carol-vless"
++     type: vless
++     server: "vpn.example.net"
++     port: 8443
++     uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.com"
++     client-fingerprint: safari
++     network: tcp
++     flow: xtls-rprx-vision
++     reality-opts: {public-key: "pbk-tcp", short-id: ""}
++   - DOMAIN,vpn.example.net,DIRECT # свой сервер напрямую
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- proxies: [] # заполняет панель
+
+--- mihomo full desktop: 200
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
++ proxies:
++   - name: "carol-vless"
++     type: vless
++     server: "vpn.example.net"
++     port: 8443
++     uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.com"
++     client-fingerprint: safari
++     network: tcp
++     flow: xtls-rprx-vision
++     reality-opts: {public-key: "pbk-tcp", short-id: ""}
++   - DOMAIN,vpn.example.net,DIRECT # свой сервер напрямую
+- redir-port: 5000
+- tproxy-port: 5001
+- routing-mark: 255
+- external-controller: 0.0.0.0:9090
+- secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
+- external-ui: zashboard
+- external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
+- proxies: [] # заполняет панель
 
 --- mihomo proto=hysteria2: 200
 proxies:
