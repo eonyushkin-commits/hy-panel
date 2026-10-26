@@ -226,3 +226,29 @@ func get2(c *http.Client, u string) error {
 	}
 	return err
 }
+
+// TestE2EMihomoFull has mihomo check both full configs: the template, the
+// panel's proxies of every protocol and the rule it adds.
+func TestE2EMihomoFull(t *testing.T) {
+	mihomo := os.Getenv("MIHOMO_BIN")
+	if mihomo == "" {
+		t.Skip("MIHOMO_BIN not set")
+	}
+	xs, _ := parseXray(freshXray("443", "lurkpro.tech"))
+	ci := certInfo{Pin: strings.Repeat("ab", 32)}
+	e := buildEndpoint(&hyConfig{Listen: ":443"}, ci, "", "203.0.113.7", "NL")
+	e.Vless, e.AWG = &xs.Link, newAWGConfig(51820)
+	u := User{Name: "u", Password: "secret123", UUID: newUUID(), AWGKey: newWGKey(), AWGIndex: 2, SubToken: "tok"}
+	for _, router := range []bool{true, false} {
+		b, err := e.MihomoFull(mihomoBuiltin, u, router)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		f := filepath.Join(dir, "config.yaml")
+		os.WriteFile(f, b, 0o600)
+		if out, err := exec.Command(mihomo, "-t", "-d", dir, "-f", f).CombinedOutput(); err != nil || !strings.Contains(string(out), "test is successful") {
+			t.Fatalf("router=%v: %v\n%s", router, err, out)
+		}
+	}
+}

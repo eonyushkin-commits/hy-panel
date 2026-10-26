@@ -73,7 +73,13 @@ Hysteria работает поверх UDP. Если UDP начнут резат
 
 Протоколы (Hysteria 2, AmneziaWG, VLESS) включаются у каждого пользователя отдельно (галочки в его окне, по умолчанию — все). Выключенный протокол пропадает из его ссылок, подписки и mihomo; Hysteria такого пользователя не пускает и отключает, Xray его не знает. В списке у пользователя значки протоколов: зелёный — сейчас подключён, зачёркнутый — выключен.
 
-Вкладка «Mihomo» в окне ссылок: отдельный блок на каждый протокол пользователя и «Все + fallback» — его прокси и группа `fallback` в порядке Hysteria → AmneziaWG → VLESS: перестал работать протокол — mihomo сам перейдёт на следующий, пропал UDP вообще — на VLESS по TCP (проверено на mihomo 1.19.33, нужна поддержка XHTTP). Группа называется по `HYP_NAME`:
+Вкладка «Mihomo» в окне ссылок — полные конфиги и куски для своего конфига.
+
+**Полный конфиг** — «Роутер (XKeen)» и «Компьютер (Clash Verge)», кнопка «Скачать .yaml». Это готовый конфиг mihomo с правилами (группы по сервисам, rule-providers; заблокированное — через VPN, остальное напрямую), в который панель подставляет прокси пользователя (`proxies`, в порядке Hysteria → AmneziaWG → VLESS: группы берут их через `include-all`) и первым правилом — сам сервер напрямую. Вариант для роутера — с портами XKeen (redir 5000, tproxy 5001, `routing-mark`) и панелью zashboard на :9090, `secret` у каждого пользователя свой и не меняется между скачиваниями. Вариант для компьютера — без них: порты и панель управления Clash Verge задаёт сам. Проверено `mihomo -t`.
+
+Шаблон встроен в панель (`mihomo.yaml` в репозитории). Свои правила и домены — в своём шаблоне: положи его в `/etc/hy-panel/mihomo.yaml` на сервере, панель возьмёт его вместо встроенного (перезапуск не нужен). Панель меняет в нём только верхнеуровневые `proxies` (заменяет; если ключа нет — добавляет перед `proxy-groups`), `rules` (добавляет первую строку; нужен блочный список `rules:` + `  - …`) и `secret` / ключи роутера; комментарии и оформление остаются.
+
+**Куски** — отдельный блок на каждый протокол пользователя и «Все + fallback» — его прокси и группа `fallback` в порядке Hysteria → AmneziaWG → VLESS: перестал работать протокол — mihomo сам перейдёт на следующий, пропал UDP вообще — на VLESS по TCP (проверено на mihomo 1.19.33, нужна поддержка XHTTP). Группа называется по `HYP_NAME`:
 
 ```yaml
 proxy-groups:
@@ -101,7 +107,7 @@ hy-panel uninstall -y  удалить панель; пользователи и 
 
 Другой порт — `install -ui-port 8443`. Только через SSH-туннель — `install -ui-port off` и `ssh -L 8090:127.0.0.1:8090 root@<IP>` → `http://localhost:8090`.
 
-Подписки включаются отдельным портом, на нём есть только `/sub/<token>`. В подписке лежат пароль и obfs-пароль клиента, поэтому отдавать её стоит по HTTPS с настоящим сертификатом: за reverse-proxy с TLS (Caddy, nginx) на своём домене. Строки в `/etc/hy-panel.env`, затем `systemctl restart hy-panel`:
+Подписки включаются отдельным портом, на нём есть только `/sub/<token>`. Клиентам на ядре Xray/sing-box подписка отдаёт ссылки, а Clash Verge и mihomo (`?format=mihomo` или User-Agent clash/mihomo) — полный конфиг для компьютера: импорт по ссылке, обновляется сам. `proxy-providers` на роутере тоже можно направить на неё: они берут из документа только `proxies`. В подписке лежат пароль и obfs-пароль клиента, поэтому отдавать её стоит по HTTPS с настоящим сертификатом: за reverse-proxy с TLS (Caddy, nginx) на своём домене. Строки в `/etc/hy-panel.env`, затем `systemctl restart hy-panel`:
 
 ```
 HYP_SUB_LISTEN=127.0.0.1:2096
@@ -180,7 +186,7 @@ go test -race ./...
 CGO_ENABLED=0 GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o hy-panel-linux-amd64 .
 ```
 
-Файлы: `main.go` (команды, запуск), `server.go` (HTTP, API, вход, подписка), `proto.go` (протоколы: общий интерфейс ссылок и mihomo, список в порядке fallback), `sync.go` (/auth, синхронизация серверов протоколов: Hysteria, Xray, AmneziaWG; kick), `store.go` (пользователи, `users.json`), `hysteria.go` (чтение и правка конфига Hysteria, сертификаты, trafficStats), `xray.go` (чтение конфига Xray, ключи Reality, клиент gRPC API Xray), `xraysetup.go` (`hy-panel xray`: конфиг Xray), `links.go` (ссылки и mihomo Hysteria и VLESS), `agent.go` (root-помощник и его клиент), `fetch.go` (скачивание официальных релизов), `awg.go` (AmneziaWG: параметры, ключи, конфиги, mihomo), `awgserve.go` (служба AmneziaWG и `hy-panel awg`), `install.go` (install / uninstall / info / passwd), `settings.go` (`hy-panel settings`: конфиг Hysteria), `index.html` (UI, вшит в бинарник), `install.sh` (скачивание релиза).
+Файлы: `main.go` (команды, запуск), `server.go` (HTTP, API, вход, подписка), `proto.go` (протоколы: общий интерфейс ссылок и mihomo, список в порядке fallback), `sync.go` (/auth, синхронизация серверов протоколов: Hysteria, Xray, AmneziaWG; kick), `store.go` (пользователи, `users.json`), `hysteria.go` (чтение и правка конфига Hysteria, сертификаты, trafficStats), `xray.go` (чтение конфига Xray, ключи Reality, клиент gRPC API Xray), `xraysetup.go` (`hy-panel xray`: конфиг Xray), `links.go` (ссылки и mihomo Hysteria и VLESS), `mihomo.go` и `mihomo.yaml` (полный конфиг mihomo из шаблона), `agent.go` (root-помощник и его клиент), `fetch.go` (скачивание официальных релизов), `awg.go` (AmneziaWG: параметры, ключи, конфиги, mihomo), `awgserve.go` (служба AmneziaWG и `hy-panel awg`), `install.go` (install / uninstall / info / passwd), `settings.go` (`hy-panel settings`: конфиг Hysteria), `index.html` (UI, вшит в бинарник), `install.sh` (скачивание релиза).
 
 E2E с настоящими Xray и mihomo (в CI не запускается): `XRAY_BIN=… MIHOMO_BIN=… go test -tags e2e -run E2E -v`.
 

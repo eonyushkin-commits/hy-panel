@@ -409,6 +409,18 @@ func (a *App) handleMihomo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	q := r.URL.Query()
+	if full := q.Get("full"); full == "router" || full == "desktop" {
+		b, err := a.mihomoFull(u, full == "router")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if q.Has("download") {
+			w.Header().Set("Content-Disposition", `attachment; filename="`+fileName(a.ep.remark(u))+"-"+full+`.yaml"`)
+		}
+		w.Write(b)
+		return
+	}
 	switch p := q.Get("proto"); {
 	case slices.Contains(a.ep.Protocols(), p):
 		fmt.Fprint(w, "proxies:\n"+a.ep.MihomoProxy(p, u))
@@ -432,13 +444,27 @@ func (a *App) handleAWGConf(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	// Apps name the tunnel after the file: keep it short and plain.
-	w.Header().Set("Content-Disposition", `attachment; filename="`+strings.Map(func(r rune) rune {
+	w.Header().Set("Content-Disposition", `attachment; filename="`+fileName(a.ep.awgRemark(u))+`.conf"`)
+	fmt.Fprint(w, a.ep.AWGConf(u))
+}
+
+// fileName keeps a name to what every system takes in a file name.
+func fileName(s string) string {
+	return strings.Map(func(r rune) rune {
 		if r < 128 && (r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
 			return r
 		}
 		return '-'
-	}, a.ep.awgRemark(u))+`.conf"`)
-	fmt.Fprint(w, a.ep.AWGConf(u))
+	}, s)
+}
+
+// mihomoFull is u's complete mihomo config from the current template.
+func (a *App) mihomoFull(u User, router bool) ([]byte, error) {
+	tmpl, err := mihomoTemplate()
+	if err != nil {
+		return nil, err
+	}
+	return a.ep.MihomoFull(tmpl, u, router)
 }
 
 // ---- subscription (public listener, token-protected) ----
@@ -477,7 +503,14 @@ func (a *App) handleSub(w http.ResponseWriter, r *http.Request) {
 	}
 	switch format {
 	case "mihomo", "clash":
-		fmt.Fprint(w, a.ep.MihomoDoc(u))
+		// The whole config, for Clash Verge and the like; a router's
+		// proxy-providers take only its proxies.
+		b, err := a.mihomoFull(u, false)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		w.Write(b)
 	case "raw":
 		fmt.Fprint(w, strings.Join(a.ep.URIs(u), "\n")+"\n")
 	default:

@@ -17,6 +17,37 @@ import (
 
 var update = flag.Bool("update", false, "rewrite testdata/*.golden")
 
+var tmplHead, _, _ = strings.Cut(string(mihomoBuiltin), "\n")
+
+// lineDiff lists the lines b adds to a ("+ ") and drops from it ("- "),
+// each in its order: enough to see what a template became.
+func lineDiff(a, b string) string {
+	count := func(s string) map[string]int {
+		m := map[string]int{}
+		for _, l := range strings.Split(s, "\n") {
+			m[l]++
+		}
+		return m
+	}
+	ca, cb := count(a), count(b)
+	var out strings.Builder
+	for _, l := range strings.Split(b, "\n") {
+		if ca[l] > 0 {
+			ca[l]--
+		} else {
+			out.WriteString("+ " + l + "\n")
+		}
+	}
+	for _, l := range strings.Split(a, "\n") {
+		if cb[l] > 0 {
+			cb[l]--
+		} else {
+			out.WriteString("- " + l + "\n")
+		}
+	}
+	return out.String()
+}
+
 // pixels fingerprints a PNG by its size and pixels: the encoder's bytes
 // differ between Go versions, the picture does not.
 func pixels(t *testing.T, b []byte) string {
@@ -62,6 +93,10 @@ func TestLinksGolden(t *testing.T) {
 			ProtoOff: []string{protoHy2, protoAWG}},
 	}
 
+	// The built-in mihomo template, whatever this machine has in /etc.
+	defer func(p string) { mihomoTemplatePath = p }(mihomoTemplatePath)
+	mihomoTemplatePath = "testdata/no-such-template.yaml"
+
 	var out strings.Builder
 	call := func(title string, h http.HandlerFunc, path string, set func(*http.Request)) {
 		r := httptest.NewRequest("GET", path, nil)
@@ -78,6 +113,10 @@ func TestLinksGolden(t *testing.T) {
 		}
 		if w.Header().Get("Content-Type") == "image/png" {
 			fmt.Fprintf(&out, "png %s\n", pixels(t, w.Body.Bytes()))
+		} else if body := w.Body.String(); strings.HasPrefix(body, tmplHead) {
+			// A full mihomo config: what differs from the template.
+			fmt.Fprintf(&out, "mihomo template sha256 %x\n", sha256.Sum256(mihomoBuiltin))
+			out.WriteString(lineDiff(string(mihomoBuiltin), body))
 		} else {
 			out.WriteString(w.Body.String())
 		}
@@ -125,6 +164,8 @@ func TestLinksGolden(t *testing.T) {
 			call("sub clash UA", a.handleSub, "/sub/x", func(r *http.Request) { tok(r); r.Header.Set("User-Agent", "clash.meta/1.19") })
 			call("mihomo", a.handleMihomo, "/m", name)
 			call("mihomo fallback", a.handleMihomo, "/m?fallback=1", name)
+			call("mihomo full router", a.handleMihomo, "/m?full=router&download=1", name)
+			call("mihomo full desktop", a.handleMihomo, "/m?full=desktop", name)
 			for _, p := range []string{protoHy2, protoAWG, protoVless} {
 				call("mihomo proto="+p, a.handleMihomo, "/m?proto="+p, name)
 				call("qr proto="+p, a.handleQR, "/q?proto="+p, name)
