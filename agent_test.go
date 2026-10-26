@@ -23,11 +23,11 @@ func TestJobArgs(t *testing.T) {
 		want   []string
 	}{
 		"hysteria default": {"hysteria", map[string]string{"port": "443", "obfs": "salamander", "cert": "self"},
-			[]string{"settings", "-y", "-port", "443", "-obfs", "salamander", "-cert", "self"}},
+			[]string{"settings", "-port", "443", "-obfs", "salamander", "-cert", "self"}},
 		"hysteria acme": {"hysteria", map[string]string{"port": "20000-50000", "obfs": "none", "cert": "acme", "domain": "vpn.example.com", "email": "a@b.cd"},
-			[]string{"settings", "-y", "-port", "20000-50000", "-obfs", "none", "-cert", "acme", "-domain", "vpn.example.com", "-email", "a@b.cd"}},
-		"vless new":   {"vless", map[string]string{"port": "443", "target": "Lurkpro.tech"}, []string{"xray", "-y", "-port", "443", "-target", "lurkpro.tech"}},
-		"vless site":  {"vless", map[string]string{"target": "api.ilexa.online"}, []string{"xray", "-y", "-target", "api.ilexa.online"}},
+			[]string{"settings", "-port", "20000-50000", "-obfs", "none", "-cert", "acme", "-domain", "vpn.example.com", "-email", "a@b.cd"}},
+		"vless new":   {"vless", map[string]string{"port": "443", "target": "Lurkpro.tech"}, []string{"xray", "-port", "443", "-target", "lurkpro.tech"}},
+		"vless site":  {"vless", map[string]string{"target": "api.ilexa.online"}, []string{"xray", "-target", "api.ilexa.online"}},
 		"update xray": {"update-xray", nil, []string{"fetch", "xray"}},
 	}
 	for name, c := range ok {
@@ -86,7 +86,7 @@ func TestAgentJob(t *testing.T) {
 	if code := start(`{"action":"vless","params":{"target":"lurkpro.tech"}}`); code != 200 {
 		t.Fatalf("start: %d", code)
 	}
-	if j := wait(); !j.OK || !strings.Contains(j.Log, "✓ xray -y -target lurkpro.tech") {
+	if j := wait(); !j.OK || !strings.Contains(j.Log, "✓ xray -target lurkpro.tech") {
 		t.Fatalf("%+v", j)
 	}
 	start(`{"action":"update-hysteria"}`)

@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"math/rand/v2"
 	"net"
 	"os"
 	"os/user"
@@ -53,8 +52,8 @@ func (o hyOpts) obfsLabel() string {
 	return o.Obfs
 }
 
-// hyFlags are answers given on the command line (by the panel's agent):
-// a set flag skips its question.
+// hyFlags are the settings given on the command line (by the panel's
+// agent); an unset flag keeps the current value.
 type hyFlags struct {
 	port, obfs, cert, domain, email string
 }
@@ -94,85 +93,36 @@ func (f hyFlags) check() error {
 
 var emailRe = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 
-// askHyOpts asks for the Hysteria settings. With cur (the `settings`
-// command) every question starts with "keep as is"; a flag skips its question.
-func askHyOpts(p *prompter, cur *hyOpts, f hyFlags, host string) hyOpts {
-	var o hyOpts
+// hyOptsFrom applies the flags to the current settings (cur nil: a new
+// config, which starts from 443, salamander and a self-signed certificate).
+func hyOptsFrom(cur *hyOpts, f hyFlags, host string) hyOpts {
+	o := hyOpts{Port: "443", Obfs: "salamander"}
 	if cur != nil {
 		o = *cur
 	}
-	port := f.port
-	// pick returns the chosen option; -1 = "keep as is".
-	pick := func(title string, opts []string, label string) int {
-		if cur == nil {
-			return p.choose(title, opts, 0)
-		}
-		return p.choose(title, append([]string{"оставить как есть: " + label}, opts...), 0) - 1
+	switch f.port {
+	case "":
+	case hopRange:
+		o.Port = needVersion(hyVersion{2, 8, 0}, "диапазон портов", hopRange, "443")
+	default:
+		o.Port = f.port
 	}
-
-	if port != "" {
-		o.Port = port
-	} else {
-		switch pick("Порт Hysteria (UDP):", []string{
-			"443 — выглядит как обычный HTTPS/QUIC",
-			"случайный",
-			"свой",
-			"диапазон " + hopRange + " — port hopping, сложнее заблокировать (Hysteria ≥ 2.8)",
-		}, o.Port) {
-		case 0:
-			o.Port = "443"
-		case 1:
-			o.Port = strconv.Itoa(20000 + rand.IntN(40000))
-		case 2:
-			o.Port = p.port("Порт: ")
-		case 3:
-			o.Port = needVersion(hyVersion{2, 8, 0}, "диапазон портов", hopRange, "443")
-		}
-	}
-
 	switch f.obfs {
+	case "":
 	case "none":
 		o.Obfs = ""
-	case "":
-		switch pick("Обфускация:", []string{
-			"salamander — трафик не похож ни на что, рекомендую для РФ",
-			"gecko — salamander + дробление рукопожатия (экспериментальная, Hysteria ≥ 2.9.2, mihomo тоже нужен свежий)",
-			"без обфускации — выглядит как HTTP/3-сайт (маскировка под bing.com)",
-		}, o.obfsLabel()) {
-		case 0:
-			o.Obfs = "salamander"
-		case 1:
-			o.Obfs = needVersion(hyVersion{2, 9, 2}, "gecko", "gecko", "salamander")
-		case 2:
-			o.Obfs = ""
-		}
+	case "gecko":
+		o.Obfs = needVersion(hyVersion{2, 9, 2}, "gecko", "gecko", "salamander")
 	default:
 		o.Obfs = f.obfs
 	}
-
 	switch f.cert {
 	case "self":
 		o.Domain, o.Email = "", ""
-		return o
 	case "acme":
 		o.Domain, o.Email = strings.ToLower(f.domain), f.email
 		if !resolvesTo(o.Domain, host) {
 			fmt.Printf("  ✗ %s не указывает на %s: Let's Encrypt не выдаст сертификат, пока A-запись не исправлена\n", o.Domain, host)
-		}
-		return o
-	}
-
-	switch pick("Сертификат:", []string{
-		"self-signed — домен не нужен, клиенты проверяют сертификат по отпечатку",
-		"свой домен через Let's Encrypt — домен должен указывать на этот сервер, TCP 80/443 свободны",
-	}, o.certLabel()) {
-	case 0:
-		o.Domain, o.Email = "", ""
-	case 1:
-		o.Domain = strings.ToLower(p.need("Домен: "))
-		o.Email = p.line("E-mail для Let's Encrypt (Enter — без него): ", "")
-		if !resolvesTo(o.Domain, host) && !p.yes(fmt.Sprintf("  %s не указывает на %s. Всё равно продолжить?", o.Domain, host), false) {
-			log.Fatal("✗ сначала направь A-запись домена на сервер")
 		}
 	}
 	return o
@@ -282,13 +232,14 @@ func (o hyOpts) firewallRules() []string {
 	return rules
 }
 
-// runSettings changes the port, obfuscation or certificate of the current
-// Hysteria config (`hy-panel settings`).
+// runSettings sets Hysteria up, or changes its port, obfuscation or
+// certificate (`hy-panel settings`, run by the agent from the panel). A
+// config the panel did not write is replaced; the original stays in
+// .bak-hy-panel.
 func runSettings(args []string) {
 	fs := flag.NewFlagSet("settings", flag.ExitOnError)
 	var f hyFlags
 	f.register(fs)
-	yes := fs.Bool("y", false, "apply without asking")
 	fs.Parse(args)
 	needRoot("settings")
 	if err := f.check(); err != nil {
@@ -307,38 +258,28 @@ func runSettings(args []string) {
 	if err := kindErr(kind); err != nil {
 		log.Fatal("✗ ", err)
 	}
-	if kind == cfgOwnAuth {
-		log.Fatal("✗ пароли в конфиге Hysteria проверяет не панель — сначала hy-panel install")
-	}
-	p := newPrompter()
-	if *yes {
-		p.in = nil // flags and defaults only
-	} else if p.in == nil {
-		log.Fatal("✗ нужен терминал или -y: settings задаёт вопросы")
-	}
 	if !fileExists(hysteriaBin) || !unitExists(svc) {
 		noInterrupt()
 		_, err := fetchHysteria()
 		step("hysteria: официальный релиз", err)
 	}
 	var cur *hyOpts
-	if kind != cfgNone {
+	switch kind {
+	case cfgPanel:
 		c := currentOpts(cfg)
 		cur = &c
 		fmt.Printf("Сейчас: порт %s, %s, %s.\n", c.Port, c.obfsLabel(), c.certLabel())
-	} else {
-		fmt.Println("Конфиг Hysteria не настроен — настроим его.")
+	case cfgOwnAuth:
+		fmt.Printf("Конфиг Hysteria писала не панель — настраиваю заново, прежний сохранится в %s.\n", cfgPath+backupExt)
+	default:
+		fmt.Println("Конфиг Hysteria не настроен — настраиваю.")
 	}
-	o := askHyOpts(p, cur, f, env["HYP_HOST"])
+	o := hyOptsFrom(cur, f, env["HYP_HOST"])
 	if cur != nil && *cur == o {
 		fmt.Println("\nНичего не изменилось.")
 		return
 	}
 	fmt.Printf("\nБудет: порт %s, %s, %s.\n", o.Port, o.obfsLabel(), o.certLabel())
-	if cur != nil && !*yes && !p.yes("Ссылки и QR всех клиентов изменятся — им нужно будет выдать новые (подписка обновится сама). Применить?", false) {
-		fmt.Println("Отменено.")
-		return
-	}
 	noInterrupt()
 	// Links name the domain when there is one, else the server's IP.
 	if oldDomain := currentOpts(cfg).Domain; o.Domain != oldDomain {

@@ -11,16 +11,10 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
-)
-
-const (
-	xrayClientsPath = dataDir + "/xray-clients.json" // the inbound's clients before the panel, for -purge
-	xrayInstallCmd  = `bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install`
 )
 
 var minXray = hyVersion{25, 3, 6} // XHTTP, GetInboundUsers, per-user online stats
@@ -286,40 +280,6 @@ func (d *xrayDoc) inbound() *jobj {
 	return nil
 }
 
-// connectPanel readies the config for the panel: the inbound gets a tag, the
-// API and per-user statistics are switched on, and the clients move out (the
-// panel puts its users in through the API). Returns the clients taken out.
-func (d *xrayDoc) connectPanel() []any {
-	in := d.inbound()
-	if in.str("tag") == "" {
-		in.set("tag", xrayTag)
-	}
-	api := d.root.sub("api")
-	if api.str("tag") == "" {
-		api.set("tag", "api")
-	}
-	legacy := slices.ContainsFunc(d.inbounds(), func(o *jobj) bool { return o.str("tag") == api.str("tag") })
-	if api.str("listen") == "" && !legacy {
-		api.set("listen", xrayAPIAddr)
-	}
-	services, _ := api.get("services").([]any)
-	for _, s := range []string{"HandlerService", "StatsService"} {
-		if !slices.Contains(services, any(s)) {
-			services = append(services, s)
-		}
-	}
-	api.set("services", services)
-	d.root.sub("stats")
-	lv := d.root.sub("policy").sub("levels").sub("0")
-	for _, k := range []string{"statsUserUplink", "statsUserDownlink", "statsUserOnline"} {
-		lv.set(k, true)
-	}
-	settings := in.sub("settings")
-	clients, _ := settings.get("clients").([]any)
-	settings.set("clients", []any{})
-	return clients
-}
-
 // setTarget points Reality at another site (the key it is written under stays).
 func (d *xrayDoc) setTarget(domain string) {
 	r := d.inbound().sub("streamSettings").sub("realitySettings")
@@ -335,16 +295,14 @@ func (d *xrayDoc) setTarget(domain string) {
 
 // ---- hy-panel xray ----
 
-// runXray sets up VLESS + Reality in Xray next to Hysteria, connects the
-// panel to an existing setup, or changes the site Reality impersonates.
-// Users stay the panel's: each of them gets both protocols.
+// runXray sets up VLESS + Reality in Xray, or points Reality at another
+// site (`hy-panel xray`, run by the agent from the panel). Users stay the
+// panel's: it puts them in through Xray's API. A config the panel did not
+// write is replaced; the original stays in .bak-hy-panel.
 func runXray(args []string) {
 	fs := flag.NewFlagSet("xray", flag.ExitOnError)
-	cfgFlag := fs.String("config", "", "Xray config (default "+defaultXrayCfg+")")
-	svcFlag := fs.String("service", "", "Xray systemd service (default "+defaultXraySvc+")")
 	target := fs.String("target", "", "site Reality impersonates (SNI), e.g. www.example.com")
-	port := fs.String("port", "", "TCP port for VLESS (default: ask, 443)")
-	yes := fs.Bool("y", false, "no questions: flags and defaults only")
+	port := fs.String("port", "443", "TCP port for VLESS, for a new setup")
 	fs.Parse(args)
 	needRoot("xray")
 	env := readEnv()
@@ -354,22 +312,12 @@ func runXray(args []string) {
 	if err := checkEnv(env); err != nil {
 		log.Fatal("✗ ", err)
 	}
-	cur := env["HYP_XRAY_CONFIG"]
-	if *cfgFlag != "" {
-		abs, err := filepath.Abs(*cfgFlag) // the panel's settings need an absolute path
-		if err != nil {
-			log.Fatal("✗ ", err)
-		}
-		env["HYP_XRAY_CONFIG"] = abs
+	site := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(*target), "https://"), "/"))
+	if !validHostname(strings.TrimSuffix(site, ".")) || !strings.Contains(site, ".") {
+		log.Fatalf("✗ -target %q: нужен домен сайта для маскировки", *target)
 	}
-	managed := cur != "" && cur == env["HYP_XRAY_CONFIG"] // the panel runs this config already
-	if *svcFlag != "" {
-		env["HYP_XRAY_SERVICE"] = *svcFlag
-	}
+	managed := env["HYP_XRAY_CONFIG"] != "" // the panel runs a config it wrote
 	cfgPath, svc := xrayPaths(env)
-	if *target != "" && !validHostname(strings.TrimSuffix(*target, ".")) {
-		log.Fatalf("✗ -target %q: нужен домен", *target)
-	}
 	if !fileExists(xrayBin) || !unitExists(svc) {
 		_, err := fetchXray()
 		step("xray: официальный релиз", err)
@@ -379,71 +327,50 @@ func runXray(args []string) {
 	}
 	orig, readErr := os.ReadFile(cfgPath)
 	d, kind := classifyXray(orig, readErr)
-	p := newPrompter()
-	if *yes {
-		p.in = nil
-	}
 	switch kind {
 	case xrayUnreadable:
 		log.Fatalf("✗ %v", readErr)
 	case xrayBroken:
 		log.Fatalf("✗ %s не читается как JSON — поправь его вручную", cfgPath)
-	case xrayOther:
-		if !p.yes(fmt.Sprintf("В %s нет VLESS + Reality, но есть другие inbounds. Переписать конфиг Xray? Старый сохранится в %s", cfgPath, cfgPath+backupExt), false) {
-			log.Fatal("✗ отменено: конфиг Xray не тронут")
-		}
 	}
+	if err := checkTarget(net.JoinHostPort(site, "443"), site); err != nil {
+		log.Fatalf("✗ %s: %v — возьми другой сайт", site, err)
+	}
+	fmt.Printf("✓ %s: TLS 1.3, HTTP/2%s\n", site, subnetNote(site, env["HYP_HOST"]))
 
 	var out []byte
-	var clients []any
-	connect, retarget := false, false
-	switch {
-	case kind == xrayVless && managed:
-		if out = changeTarget(p, orig, d, *target, env["HYP_HOST"]); out == nil {
+	retarget := kind == xrayVless && managed
+	if retarget {
+		var c xrayConfig
+		json.Unmarshal(stripComments(orig), &c)
+		cur, err := vlessLink(c.vlessInbound())
+		if err != nil {
+			log.Fatalf("✗ VLESS в конфиге Xray: %v", err)
+		}
+		if cur.SNI == site {
+			fmt.Println("Ничего не изменилось.")
 			return
 		}
-		retarget = true
-	case kind == xrayVless && keepXrayConfig(p, orig):
-		connect, clients = true, d.connectPanel()
-		var err error
+		d.setTarget(site)
 		out, err = d.bytes()
-		step("render "+cfgPath, err)
-	default:
-		if kind == xrayVless {
-			fmt.Println("Настраиваю VLESS + Reality заново: новые ключи, прежние ссылки VLESS перестанут работать.")
+		step("render xray config", err)
+	} else {
+		if kind != xrayNone {
+			fmt.Printf("Конфиг Xray писала не панель — настраиваю заново, прежний сохранится в %s.\n", cfgPath+backupExt)
 		}
-		vp := askXrayPort(p, *port, svc)
-		domain := askTarget(p, *target, env["HYP_HOST"])
-		out = freshXray(vp, domain)
+		out = freshXray(xrayPort(*port, svc), site)
 	}
 	xs, err := parseXray(out)
 	step("check new xray config", err)
 
 	noInterrupt()
-	if connect {
-		// Saved before the config loses them: -purge puts them back.
-		step("clients → "+xrayClientsPath, saveXrayClients(clients))
-	}
 	writeXrayConfig(cfgPath, orig, out)
 	ufwAllow(xs.Link.Port + "/tcp")
 	step("enable "+svc, systemctl("enable", svc))
 	env["HYP_XRAY_CONFIG"] = cfgPath
-	var importErr error
-	if connect {
-		// The running panel would overwrite users.json with its copy: it is
-		// stopped for the import and started again below, whatever happens.
-		step("stop hy-panel", systemctl("stop", "hy-panel"))
-		importErr = importXray(clients)
-	}
-	envErr := writeEnv(env)
-	xrayErr := systemctl("restart", svc)
-	panelErr := systemctl("restart", "hy-panel") // the panel puts its users into Xray
-	if connect {
-		step("import xray clients", importErr)
-	}
-	step("settings → "+envPath, envErr)
-	step("restart "+svc, xrayErr)
-	step("restart hy-panel", panelErr)
+	step("settings → "+envPath, writeEnv(env))
+	step("restart "+svc, systemctl("restart", svc))
+	step("restart hy-panel", systemctl("restart", "hy-panel")) // the panel puts its users into Xray
 	waitXray(xs, svc)
 
 	if retarget {
@@ -451,125 +378,20 @@ func runXray(args []string) {
 		return
 	}
 	fmt.Printf("\nГотово. VLESS + Reality: порт %s/tcp, %s, сайт для маскировки %s.\n", xs.Link.Port, xs.Link.Network, xs.Link.SNI)
-	fmt.Println("У каждого пользователя теперь две ссылки — Hysteria и VLESS (кнопка QR в панели); подписка и mihomo отдают обе.")
+	fmt.Println("Ссылки VLESS пользователей — в панели (кнопка QR); подписка и mihomo отдают их вместе с остальными.")
 }
 
-// keepXrayConfig asks whether to connect the panel to a VLESS + Reality
-// inbound it does not manage yet, or to set it up anew. Without a terminal it
-// connects: nothing that works gets rewritten by a script.
-func keepXrayConfig(p *prompter, b []byte) bool {
-	var c xrayConfig
-	json.Unmarshal(stripComments(b), &c)
-	in := c.vlessInbound()
-	v, err := vlessLink(in)
-	if err != nil {
-		fmt.Printf("\nVLESS + Reality в конфиге Xray панели не подходит: %v.\n", err)
-		if !p.yes("Настроить его заново? Старый конфиг сохранится в "+backupExt, false) {
-			log.Fatal("✗ отменено: конфиг Xray не тронут")
-		}
-		return false
-	}
-	var names []string
-	for _, cl := range in.Settings.Clients {
-		names = append(names, cl.Email)
-	}
-	fmt.Printf("\nНайден VLESS + Reality: порт %s/tcp, %s, сайт для маскировки %s; клиенты станут пользователями панели: %s.\n",
-		v.Port, v.Network, v.SNI, strings.Join(names, ", "))
-	if p.in == nil {
-		return true
-	}
-	return p.choose("Что сделать с ним?", []string{
-		"подключить к нему панель — ключи и сайт прежние, ссылки клиентов работают дальше",
-		"настроить заново (новые ключи) — прежние ссылки VLESS перестанут работать",
-	}, 0) == 0
-}
-
-// changeTarget offers to point Reality at another site, as when the old one
-// went away. Returns the new config, nil if nothing is to change.
-func changeTarget(p *prompter, orig []byte, d *xrayDoc, flagTarget, host string) []byte {
-	var c xrayConfig
-	json.Unmarshal(stripComments(orig), &c)
-	cur, err := vlessLink(c.vlessInbound())
-	if err != nil {
-		log.Fatalf("✗ VLESS в конфиге Xray: %v", err)
-	}
-	fmt.Printf("Сейчас: VLESS + Reality, порт %s/tcp, %s, сайт для маскировки %s.\n", cur.Port, cur.Network, cur.SNI)
-	if flagTarget == "" {
-		if p.in == nil {
-			log.Fatal("✗ нужен терминал или -target: hy-panel xray задаёт вопросы")
-		}
-		if p.choose("Что сделать?", []string{
-			"оставить как есть",
-			"сменить сайт для маскировки — если прежний перестал отвечать",
-		}, 0) == 0 {
-			fmt.Println("Ничего не изменилось.")
-			return nil
-		}
-	}
-	domain := askTarget(p, flagTarget, host)
-	if domain == cur.SNI {
-		fmt.Println("Ничего не изменилось.")
-		return nil
-	}
-	if p.in != nil && !p.yes("В ссылках VLESS изменится sni — подписка обновится сама, остальным клиентам нужно выдать новые ссылки. Применить?", false) {
-		fmt.Println("Отменено.")
-		return nil
-	}
-	d.setTarget(domain)
-	out, err := d.bytes()
-	step("render xray config", err)
-	return out
-}
-
-func askXrayPort(p *prompter, flagPort, svc string) string {
-	port := flagPort
-	if port == "" {
-		port = "443"
-		if p.choose("Порт VLESS (TCP):", []string{
-			"443 — как у обычного HTTPS-сайта (Hysteria на UDP 443 не мешает)",
-			"свой",
-		}, 0) == 1 {
-			port = p.port("Порт: ")
-		}
-	}
+// xrayPort checks the port for a new setup: free, or held by Xray itself.
+func xrayPort(port, svc string) string {
 	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
 		log.Fatalf("✗ -port %q: нужен порт 1–65535", port)
 	}
-	// An old Xray setup may hold the port itself; anything else is a conflict.
 	if l, err := net.Listen("tcp", ":"+port); err == nil {
 		l.Close()
 	} else if systemctl("is-active", "--quiet", svc) != nil {
 		log.Fatalf("✗ порт %s/tcp занят: посмотри, кем — ss -tlnp | grep ':%s '", port, port)
 	}
 	return port
-}
-
-// askTarget asks for the site Reality impersonates and checks it the way a
-// browser connects. Without a terminal a failed check stops the command.
-func askTarget(p *prompter, flagTarget, host string) string {
-	fmt.Println("\nСайт для маскировки: чужой сайт с TLS 1.3 и HTTP/2, лучше из той же подсети /24, что и сервер (найти: RealiTLScanner). Проверки ТСПУ увидят его вместо панели.")
-	for {
-		t := flagTarget
-		if t == "" {
-			t = p.need("Домен сайта: ")
-		}
-		t = strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(t), "https://"), "/"))
-		if h, _, err := net.SplitHostPort(t); err == nil {
-			t = h
-		}
-		err := checkTarget(net.JoinHostPort(t, "443"), t)
-		if err == nil {
-			fmt.Printf("✓ %s: TLS 1.3, HTTP/2%s\n", t, subnetNote(t, host))
-			return t
-		}
-		fmt.Printf("  ✗ %s: %v\n", t, err)
-		if flagTarget != "" || p.in == nil {
-			log.Fatal("✗ возьми другой сайт")
-		}
-		if p.yes("  Всё равно взять его?", false) {
-			return t
-		}
-	}
 }
 
 // subnetNote says whether the site lives next to the server: a site from
@@ -647,118 +469,6 @@ func waitXray(xs *xraySetup, svc string) {
 		log.Fatalf("✗ Xray не отвечает: %v\n  смотри: journalctl -u %s -n 30 --no-pager", err, svc)
 	}
 	fmt.Printf("  ✗ в Xray %d из %d пользователей — смотри journalctl -u hy-panel -n 30 --no-pager\n", len(users), want)
-}
-
-// ---- clients from before the panel ----
-
-func saveXrayClients(clients []any) error {
-	if fileExists(xrayClientsPath) {
-		return nil // the first connect saved the originals
-	}
-	var b bytes.Buffer
-	if err := encodeJSON(&b, clients, "  "); err != nil {
-		return err
-	}
-	return writeAtomic(xrayClientsPath, b.Bytes(), 0o600)
-}
-
-// importXray brings the inbound's clients into the panel; with none in the
-// config (a re-run after an interrupted connect), the saved ones.
-func importXray(clients []any) error {
-	store, err := OpenStore(dataPath)
-	if err != nil {
-		return err
-	}
-	b, _ := json.Marshal(clients)
-	if len(clients) == 0 {
-		if b, err = os.ReadFile(xrayClientsPath); err != nil {
-			return err
-		}
-	}
-	var cs []xrayUser
-	if err := json.Unmarshal(b, &cs); err != nil {
-		return err
-	}
-	importXrayClients(store, cs)
-	return nil
-}
-
-// importXrayClients makes the inbound's former clients panel users with
-// their UUIDs, so their links work on: a panel user of the same name takes
-// the client's UUID, the others are created.
-func importXrayClients(s *Store, clients []xrayUser) {
-	for _, c := range clients {
-		id, err := xrayUUID(c.ID)
-		if err != nil {
-			fmt.Printf("  ✗ клиент Xray %q: %v\n", c.Email, err)
-			continue
-		}
-		name := xrayName(c.Email, id)
-		if u, ok := s.Get(name); ok {
-			if u.UUID == id {
-				continue // imported before
-			}
-			if _, err := s.Update(name, func(u *User) error { u.UUID = id; return nil }); err != nil {
-				fmt.Printf("  ✗ клиент Xray %q: %v\n", c.Email, err)
-			} else {
-				fmt.Printf("✓ клиент Xray %q — это пользователь %q: его ссылка VLESS работает дальше\n", c.Email, name)
-			}
-			continue
-		}
-		if _, err := s.Create(User{Name: name, UUID: id, Enabled: true, Note: "imported (xray)"}, false); err != nil {
-			fmt.Printf("  ✗ клиент Xray %q: %v\n", c.Email, err)
-		} else {
-			fmt.Printf("✓ клиент Xray %q перенесён как пользователь %q — его ссылка VLESS работает дальше\n", c.Email, name)
-		}
-	}
-}
-
-// xrayName is the panel name for a client: its e-mail (the part before @),
-// else one made from the UUID.
-func xrayName(email, id string) string {
-	n, _, _ := strings.Cut(strings.ToLower(email), "@")
-	if nameRe.MatchString(n) {
-		return n
-	}
-	return "xray-" + id[:8]
-}
-
-// restoreXrayClients puts the clients saved by connectPanel back into the
-// inbound (`uninstall -purge`). Returns false if none were saved.
-func restoreXrayClients(cfgPath, savedPath string) (bool, error) {
-	saved, err := os.ReadFile(savedPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	var clients []any
-	dec := json.NewDecoder(bytes.NewReader(saved))
-	dec.UseNumber()
-	v, err := decodeJSON(dec)
-	if err != nil {
-		return false, err
-	}
-	clients, _ = v.([]any)
-	b, err := os.ReadFile(cfgPath)
-	if err != nil {
-		return false, err
-	}
-	d, err := parseXrayDoc(b)
-	if err != nil {
-		return false, err
-	}
-	in := d.inbound()
-	if in == nil {
-		return false, errors.New("нет inbound VLESS + Reality")
-	}
-	in.sub("settings").set("clients", clients)
-	out, err := d.bytes()
-	if err != nil {
-		return false, err
-	}
-	return true, writeKeepingOwner(cfgPath, out)
 }
 
 // xrayPaths returns the Xray config path and service name.

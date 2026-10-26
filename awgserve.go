@@ -330,11 +330,11 @@ func awgNetDown() {
 
 // ---- hy-panel awg ----
 
-// runAWG sets up the AmneziaWG server, or changes its port (`hy-panel awg`).
+// runAWG sets up the AmneziaWG server, or changes its port (`hy-panel awg`,
+// run by the agent from the panel).
 func runAWG(args []string) {
 	fs := flag.NewFlagSet("awg", flag.ExitOnError)
 	port := fs.Int("port", 0, "UDP port (default: a random one, 51000-59999)")
-	yes := fs.Bool("y", false, "no questions")
 	fs.Parse(args)
 	needRoot("awg")
 	env := readEnv()
@@ -344,19 +344,12 @@ func runAWG(args []string) {
 	if *port != 0 && (*port < 1 || *port > 65535) {
 		log.Fatalf("✗ -port %d: нужен 1–65535", *port)
 	}
-	p := newPrompter()
-	if *yes {
-		p.in = nil
-	}
 	c, err := readAWG(awgCfgPath)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		pt := *port
 		if pt == 0 {
 			pt = 51000 + rand.IntN(9000) // clear of Hysteria's hopping range 20000-50000
-			if p.choose("Порт AmneziaWG (UDP):", []string{fmt.Sprintf("случайный: %d", pt), "свой"}, 0) == 1 {
-				pt, _ = strconv.Atoi(p.port("Порт: "))
-			}
 		}
 		awgPortFree(pt)
 		c = newAWGConfig(pt)
@@ -364,10 +357,7 @@ func runAWG(args []string) {
 	case err != nil:
 		log.Fatalf("✗ %s: %v", awgCfgPath, err)
 	case *port != 0 && *port != c.Port:
-		if !*yes && !p.yes(fmt.Sprintf("Сменить порт %d → %d? Клиентам нужны будут новые конфиги (QR в панели).", c.Port, *port), false) {
-			fmt.Println("Отменено.")
-			return
-		}
+		fmt.Printf("Порт %d → %d: клиентам нужны новые конфиги (QR в панели).\n", c.Port, *port)
 		awgPortFree(*port)
 		c.Port = *port
 	default:
