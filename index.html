@@ -275,9 +275,9 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
   <form method="dialog" id="vlForm" class="dlg">
     <div class="dlg-h"><h2>VLESS + Reality</h2><button type="button" class="icon ghost" onclick="$('#vlDlg').close()" aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
     <div class="grid">
-      <label id="vlPortWrap" class="full"><span>Порт (TCP)</span><input name="port" type="number" min="1" max="65535" value="443"></label>
+      <label class="full"><span>Порт (TCP)</span><input name="port" type="number" min="1" max="65535" value="443"></label>
       <label class="full"><span>Сайт для маскировки — чужой сайт с TLS 1.3 и HTTP/2, лучше из той же подсети /24, что и сервер</span>
-        <div style="display:flex;gap:8px"><input name="target" placeholder="www.example.com" autocapitalize="off" required><button type="button" onclick="checkSite()">Проверить</button><button type="button" id="findBtn" onclick="findSites()" title="Найти соседей сервера по /24 с TLS 1.3, HTTP/2 и ответом 200">Найти</button></div>
+        <div style="display:flex;gap:8px"><input name="target" placeholder="www.example.com" autocapitalize="off"><button type="button" onclick="checkSite()">Проверить</button><button type="button" id="findBtn" onclick="findSites()" title="Найти соседей сервера по /24 с TLS 1.3, HTTP/2 и ответом 200">Найти</button></div>
         <div class="check" id="vlCheck"></div></label>
       <div class="full" id="vlFind" hidden><div class="mute small" id="findState"></div><div class="sites" id="sites"></div></div>
     </div>
@@ -473,12 +473,12 @@ $('#hyDlg').onclose = () => {
 
 function openVl() {
   const f = $('#vlForm'), c = SYS.settings.vless;
-  $('#vlPortWrap').hidden = !!c; f.port.value = c ? c.port : 443;
-  f.target.value = ''; f.target.placeholder = c ? c.sni : 'www.example.com';
+  f.port.value = c ? c.port : 443;
+  f.target.value = ''; f.target.placeholder = c ? c.sni : 'www.example.com'; f.target.required = !c;
   $('#vlCheck').textContent = ''; $('#vlFind').hidden = true; $('#findBtn').disabled = false;
-  $('#vlBtn').textContent = c ? 'Сменить сайт' : 'Установить';
+  $('#vlBtn').textContent = c ? 'Сохранить' : 'Установить';
   $('#vlHint').textContent = c
-    ? `Сейчас сайт — ${c.sni}. Смени, если он перестал отвечать: в ссылках VLESS изменится sni, подписка обновится сама.`
+    ? `Сейчас порт ${c.port}, сайт — ${c.sni} (пустое поле — оставить его). Сайт меняют, если он перестал отвечать; порт — если провайдер режет TLS на этом порту. Ссылки VLESS изменятся, подписка обновится сама; кто добавил ссылку вручную — выдай новую.`
     : 'Панель скачает официальный релиз Xray (с проверкой SHA-256), сделает ключи Reality и запустит службу. Конфиг Xray, написанный не панелью, заменится (прежний сохранится в .bak-hy-panel).';
   $('#vlDlg').returnValue = ''; $('#vlDlg').showModal();
 }
@@ -523,9 +523,9 @@ async function checkSite() {
 $('#vlDlg').onclose = () => {
   if ($('#vlDlg').returnValue !== 'ok') return;
   const f = $('#vlForm'), c = SYS.settings.vless;
-  const params = {target: f.target.value.trim().toLowerCase()};
-  if (!c) params.port = String(f.port.value);
-  startJob('vless', params, c ? 'Смена сайта для маскировки' : 'Установка VLESS + Reality');
+  const params = {target: f.target.value.trim().toLowerCase() || c.sni, port: String(f.port.value)};
+  if (c && params.target === c.sni && params.port === String(c.port)) return;
+  startJob('vless', params, c ? 'Настройка VLESS + Reality' : 'Установка VLESS + Reality');
 };
 
 function openAwg() {

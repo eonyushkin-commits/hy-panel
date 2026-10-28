@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -296,13 +297,14 @@ func (d *xrayDoc) setTarget(domain string) {
 // ---- hy-panel xray ----
 
 // runXray sets up VLESS + Reality in Xray, or points Reality at another
-// site (`hy-panel xray`, run by the agent from the panel). Users stay the
+// site, or moves VLESS to another port (`hy-panel xray`, run by the agent
+// from the panel). Users stay the
 // panel's: it puts them in through Xray's API. A config the panel did not
 // write is replaced; the original stays in .bak-hy-panel.
 func runXray(args []string) {
 	fs := flag.NewFlagSet("xray", flag.ExitOnError)
 	target := fs.String("target", "", "site Reality impersonates (SNI), e.g. www.example.com")
-	port := fs.String("port", "443", "TCP port for VLESS, for a new setup")
+	port := fs.String("port", "", "TCP port for VLESS (default: 443 for a new setup, the current one after)")
 	fs.Parse(args)
 	needRoot("xray")
 	env := readEnv()
@@ -333,32 +335,47 @@ func runXray(args []string) {
 	case xrayBroken:
 		log.Fatalf("✗ %s не читается как JSON — поправь его вручную", cfgPath)
 	}
-	if err := checkTarget(net.JoinHostPort(site, "443"), site); err != nil {
-		log.Fatalf("✗ %s: %v — возьми другой сайт", site, err)
-	}
-	fmt.Printf("✓ %s: TLS 1.3, HTTP/2%s\n", site, subnetNote(site, env["HYP_HOST"]))
-
-	var out []byte
+	// A config the panel wrote keeps its keys and users: only the site
+	// and the port change.
 	retarget := kind == xrayVless && managed
+	var cur Vless
 	if retarget {
 		var c xrayConfig
 		json.Unmarshal(stripComments(orig), &c)
-		cur, err := vlessLink(c.vlessInbound())
-		if err != nil {
+		var err error
+		if cur, err = vlessLink(c.vlessInbound()); err != nil {
 			log.Fatalf("✗ VLESS в конфиге Xray: %v", err)
 		}
-		if cur.SNI == site {
-			fmt.Println("Ничего не изменилось.")
-			return
+	}
+	newSite := !retarget || cur.SNI != site
+	newPort := retarget && *port != "" && *port != cur.Port
+	if retarget && !newSite && !newPort {
+		fmt.Println("Ничего не изменилось.")
+		return
+	}
+	if newSite {
+		if err := checkTarget(net.JoinHostPort(site, "443"), site); err != nil {
+			log.Fatalf("✗ %s: %v — возьми другой сайт", site, err)
 		}
-		d.setTarget(site)
+		fmt.Printf("✓ %s: TLS 1.3, HTTP/2%s\n", site, subnetNote(site, env["HYP_HOST"]))
+	}
+
+	var out []byte
+	if retarget {
+		if newSite {
+			d.setTarget(site)
+		}
+		if newPort {
+			d.inbound().set("port", json.Number(xrayNewPort(*port)))
+		}
+		var err error
 		out, err = d.bytes()
 		step("render xray config", err)
 	} else {
 		if kind != xrayNone {
 			fmt.Printf("Конфиг Xray писала не панель — настраиваю заново, прежний сохранится в %s.\n", cfgPath+backupExt)
 		}
-		out = freshXray(xrayPort(*port, svc), site)
+		out = freshXray(xrayPort(cmp.Or(*port, "443"), svc), site)
 	}
 	xs, err := parseXray(out)
 	step("check new xray config", err)
@@ -374,7 +391,14 @@ func runXray(args []string) {
 	waitXray(xs, svc)
 
 	if retarget {
-		fmt.Printf("\nГотово. Сайт для маскировки теперь %s: подписка обновится сама, остальным клиентам — новые ссылки VLESS (кнопка QR в панели).\n", xs.Link.SNI)
+		var what []string
+		if newSite {
+			what = append(what, "сайт для маскировки "+xs.Link.SNI)
+		}
+		if newPort {
+			what = append(what, "порт "+xs.Link.Port+"/tcp")
+		}
+		fmt.Printf("\nГотово. Теперь %s: подписка обновится сама, остальным клиентам — новые ссылки VLESS (кнопка QR в панели).\n", strings.Join(what, ", "))
 		return
 	}
 	fmt.Printf("\nГотово. VLESS + Reality: порт %s/tcp, %s, сайт для маскировки %s.\n", xs.Link.Port, xs.Link.Network, xs.Link.SNI)
@@ -383,15 +407,31 @@ func runXray(args []string) {
 
 // xrayPort checks the port for a new setup: free, or held by Xray itself.
 func xrayPort(port, svc string) string {
-	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
-		log.Fatalf("✗ -port %q: нужен порт 1–65535", port)
-	}
+	validPort(port)
 	if l, err := net.Listen("tcp", ":"+port); err == nil {
 		l.Close()
 	} else if systemctl("is-active", "--quiet", svc) != nil {
 		log.Fatalf("✗ порт %s/tcp занят: посмотри, кем — ss -tlnp | grep ':%s '", port, port)
 	}
 	return port
+}
+
+// xrayNewPort checks a port VLESS moves to: Xray runs on the old one, so the
+// new one must be free.
+func xrayNewPort(port string) string {
+	validPort(port)
+	l, err := net.Listen("tcp", ":"+port)
+	if err != nil {
+		log.Fatalf("✗ порт %s/tcp занят: посмотри, кем — ss -tlnp | grep ':%s '", port, port)
+	}
+	l.Close()
+	return port
+}
+
+func validPort(port string) {
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		log.Fatalf("✗ -port %q: нужен порт 1–65535", port)
+	}
 }
 
 // subnetNote says whether the site lives next to the server: a site from
