@@ -276,7 +276,13 @@ func runSettings(args []string) {
 	}
 	o := hyOptsFrom(cur, f, env["HYP_HOST"])
 	if cur != nil && *cur == o {
-		fmt.Println("\nНичего не изменилось.")
+		_, changed := rewriteHyConfig(cfgPath, b, false, nil)
+		if changed {
+			step("apply Hysteria ACL", systemctl("restart", svc))
+			step("restart hy-panel", systemctl("restart", "hy-panel"))
+		} else {
+			fmt.Println("\nНичего не изменилось.")
+		}
 		return
 	}
 	fmt.Printf("\nБудет: порт %s, %s, %s.\n", o.Port, o.obfsLabel(), o.certLabel())

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -47,8 +48,7 @@ func (a *App) handleAuth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": ok, "id": id})
 }
 
-// authorize uses memory only (users and the last /online snapshot), so a
-// connect never waits for the disk or for Hysteria.
+// Recheck an old full snapshot before refusing a reconnect.
 func (a *App) authorize(auth string) (bool, string, string) {
 	u, ok := a.store.Resolve(auth)
 	if !ok {
@@ -63,7 +63,15 @@ func (a *App) authorize(auth string) (bool, string, string) {
 	if u.MaxDevices > 0 {
 		a.mu.RLock()
 		n := a.onlineOf(protoHy2)[u.Name]
+		last := a.lastSync
 		a.mu.RUnlock()
+		if n >= u.MaxDevices && a.hy != nil && time.Since(last) > 30*time.Second {
+			on, err := a.hy.c.Online()
+			if err != nil {
+				return false, u.Name, "device count unavailable"
+			}
+			n = on[u.Name]
+		}
 		if n >= u.MaxDevices {
 			return false, u.Name, fmt.Sprintf("device limit %d", u.MaxDevices)
 		}
@@ -74,11 +82,21 @@ func (a *App) authorize(auth string) (bool, string, string) {
 // ---- sync & enforcement ----
 
 func (a *App) syncLoop(every time.Duration) {
+	for _, backend := range a.backends {
+		if x, ok := backend.(*xrayBackend); ok {
+			go func() {
+				for {
+					x.pollOnline(a.store.List())
+					time.Sleep(every)
+				}
+			}()
+		}
+	}
 	t := time.NewTicker(every)
 	defer t.Stop()
 	flushed := time.Now()
 	for {
-		a.syncOnce(time.Now())
+		a.syncAccess(time.Now())
 		if time.Since(flushed) >= flushInterval {
 			if err := a.store.Flush(); err != nil {
 				log.Printf("save: %v", err)
@@ -133,7 +151,7 @@ func (a *App) onlineOf(p string) map[string]int {
 	return nil
 }
 
-func (a *App) syncOnce(now time.Time) {
+func (a *App) syncAccess(now time.Time) {
 	// Counters are cleared on read: account them even if a server fails below.
 	type result struct {
 		online map[string]int
@@ -149,11 +167,6 @@ func (a *App) syncOnce(now time.Time) {
 		res[i] = result{on, err}
 	}
 	a.store.Tick(now, traffic, online)
-	// After Tick: a quota used up just now closes VLESS and AmneziaWG at once.
-	users = a.store.List()
-	for i, b := range a.backends {
-		res[i].err = errors.Join(res[i].err, b.push(now, users))
-	}
 	// Hysteria's sessions drive the device limit and the kicks; without
 	// Hysteria nobody is online there.
 	hyOn := map[string]int{}
@@ -173,7 +186,6 @@ func (a *App) syncOnce(now time.Time) {
 				hyOn = res[i].online
 			}
 		}
-		l.err, l.fails = failing(l.fails, res[i].err)
 	}
 	if hyOn != nil {
 		a.lastSync = now
@@ -181,6 +193,16 @@ func (a *App) syncOnce(now time.Time) {
 	a.mu.Unlock()
 	if hyOn != nil {
 		a.enforce(now, hyOn)
+	}
+	// Publish sessions before updating a potentially large user list.
+	// Tick has already applied quotas, so exhausted users are removed here.
+	users = a.store.List()
+	for i, b := range a.backends {
+		err := errors.Join(res[i].err, b.push(now, users))
+		a.mu.Lock()
+		l := a.live[b.proto()]
+		l.err, l.fails = failing(l.fails, err)
+		a.mu.Unlock()
 	}
 }
 
@@ -221,29 +243,45 @@ func (b *hyBackend) push(time.Time, []User) error { return nil }
 
 // xrayBackend is Xray's gRPC API for the VLESS inbound the panel keeps.
 type xrayBackend struct {
-	api  *xrayAPI
-	tag  string // the inbound
-	flow string // given to every user: xtls-rprx-vision on TCP, none with XHTTP
+	onlineMu      sync.Mutex
+	pendingOnline map[string]int
+	onlineErr     error
+	api           *xrayAPI
+	tag           string // the inbound
+	flow          string // given to every user: xtls-rprx-vision on TCP, none with XHTTP
 }
 
 func (b *xrayBackend) proto() string   { return protoVless }
 func (b *xrayBackend) errText() string { return "Нет связи с API Xray: " }
 
-// stats reads and clears Xray's per-user counters and counts the users'
-// online client IPs (Xray counts addresses, not sessions).
-func (b *xrayBackend) stats(_ time.Time, users []User) (map[string]trafficEntry, map[string]int, error) {
-	tr, errT := b.api.TrafficAndClear()
+// stats reads and clears Xray's per-user counters and consumes the latest
+// online snapshot collected by the independent worker.
+func (b *xrayBackend) stats(time.Time, []User) (map[string]trafficEntry, map[string]int, error) {
+	tr, err := b.api.TrafficAndClear()
+	b.onlineMu.Lock()
+	defer b.onlineMu.Unlock()
+	on := b.pendingOnline
+	b.pendingOnline = nil
+	return tr, on, errors.Join(err, b.onlineErr)
+}
+
+// Only the online worker makes per-user requests.
+func (b *xrayBackend) pollOnline(users []User) {
+	var pollErr error
 	on := map[string]int{}
 	for _, u := range users {
 		n, err := b.api.Online(u.Name)
 		if err != nil {
-			return tr, nil, errors.Join(errT, err)
+			on, pollErr = nil, err
+			break
 		}
 		if n > 0 {
 			on[u.Name] = n
 		}
 	}
-	return tr, on, errT
+	b.onlineMu.Lock()
+	b.pendingOnline, b.onlineErr = on, pollErr
+	b.onlineMu.Unlock()
 }
 
 // push makes the inbound's users exactly the panel's active users. Xray

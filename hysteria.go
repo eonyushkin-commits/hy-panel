@@ -332,7 +332,49 @@ func (d *yamlDoc) connectPanel() (bool, error) {
 		}
 		changed = true
 	}
-	return changed, nil
+	secured, err := d.protectLoopback()
+	return changed || secured, err
+}
+
+// Prepend before any user allow rule. Hysteria resolves domains for IP-based ACLs.
+var loopbackRules = []string{"reject(127.0.0.0/8)", "reject(0.0.0.0/32)", "reject(::1/128)", "reject(::/128)"}
+
+func (d *yamlDoc) protectLoopback() (bool, error) {
+	acl := d.get("acl")
+	if acl == nil {
+		return true, d.set("acl", map[string]any{"inline": loopbackRules})
+	}
+	if acl.Kind != yaml.MappingNode {
+		return false, errors.New("acl: нужен YAML mapping")
+	}
+	if scalar(mapGet(acl, "file")) != "" {
+		path := scalar(mapGet(acl, "file"))
+		if !filepath.IsAbs(path) {
+			path = filepath.Join("/var/lib/hysteria", path)
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return false, err
+		}
+		prefix := strings.Join(loopbackRules, "\n") + "\n"
+		if strings.HasPrefix(string(b), prefix) {
+			return false, nil
+		}
+		if err := backupOnce(path, b); err != nil {
+			return false, err
+		}
+		return true, writeKeepingOwner(path, append([]byte(prefix), b...))
+	}
+	var rules []string
+	if inline := mapGet(acl, "inline"); inline != nil {
+		if err := inline.Decode(&rules); err != nil {
+			return false, err
+		}
+	}
+	if len(rules) >= len(loopbackRules) && slices.Equal(rules[:len(loopbackRules)], loopbackRules) {
+		return false, nil
+	}
+	return true, mapSet(acl, "inline", slices.Concat(loopbackRules, rules))
 }
 
 func scalar(n *yaml.Node) string {

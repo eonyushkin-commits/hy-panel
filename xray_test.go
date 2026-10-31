@@ -68,6 +68,47 @@ type fakeXray struct {
 	oldErr  bool // GetStatsOnline answers like Xray before NotFound
 }
 
+type pausedOnlineTransport struct {
+	http.RoundTripper
+	started chan struct{}
+	release chan struct{}
+}
+
+func (p pausedOnlineTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if strings.HasSuffix(r.URL.Path, "/GetStatsOnline") {
+		close(p.started)
+		<-p.release
+	}
+	return p.RoundTripper.RoundTrip(r)
+}
+
+func TestSlowOnlineDoesNotDelayAccess(t *testing.T) {
+	f, stats := newFakeHy(t)
+	a := testApp(t, stats)
+	u := mustCreate(t, a.store, User{Name: "phone", MaxDevices: 1})
+	f.connect(u.Name)
+	a.syncAccess(time.Now())
+	f.mu.Lock()
+	delete(f.conns, u.Name)
+	f.mu.Unlock()
+	fx, api := newFakeXray(t)
+	gate := pausedOnlineTransport{api.hc.Transport, make(chan struct{}), make(chan struct{})}
+	api.hc.Transport = gate
+	x := &xrayBackend{api: api, tag: "in"}
+	a.addBackend(x)
+	done := make(chan struct{})
+	go func() { x.pollOnline(a.store.List()); close(done) }()
+	defer func() { close(gate.release); <-done }()
+	<-gate.started
+	a.syncAccess(time.Now())
+	if fx.snapshot()[u.Name] != u.UUID {
+		t.Fatal("VLESS user not restored during online poll")
+	}
+	if ok, _, why := a.authorize(u.Password); !ok {
+		t.Fatal(why)
+	}
+}
+
 func newFakeXray(t *testing.T) (*fakeXray, *xrayAPI) {
 	f := &fakeXray{users: map[string]string{}, flows: map[string]string{}, traffic: map[string]trafficEntry{}, online: map[string]int{}}
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(f.serve))
