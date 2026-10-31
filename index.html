@@ -474,7 +474,7 @@ $('#hyDlg').onclose = () => {
 function openVl() {
   const f = $('#vlForm'), c = SYS.settings.vless;
   f.port.value = c ? c.port : 443;
-  f.target.value = ''; f.target.placeholder = c ? c.sni : 'www.example.com'; f.target.required = !c;
+  f.target.value = c ? c.sni : ''; f.target.placeholder = c ? '' : 'www.example.com'; f.target.required = !c;
   $('#vlCheck').textContent = ''; $('#vlFind').hidden = true; $('#findBtn').disabled = false;
   $('#vlBtn').textContent = c ? 'Сохранить' : 'Установить';
   $('#vlHint').textContent = c
