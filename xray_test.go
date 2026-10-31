@@ -74,6 +74,40 @@ type pausedOnlineTransport struct {
 	release chan struct{}
 }
 
+type pausedAddTransport struct {
+	http.RoundTripper
+	started, release chan struct{}
+}
+
+func (p pausedAddTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if strings.HasSuffix(r.URL.Path, "/AlterInbound") {
+		close(p.started)
+		<-p.release
+	}
+	return p.RoundTripper.RoundTrip(r)
+}
+
+func TestSlowAddDoesNotDelayNextHySnapshot(t *testing.T) {
+	f, sc := newFakeHy(t)
+	a := testApp(t, sc)
+	u := mustCreate(t, a.store, User{Name: "phone", MaxDevices: 1})
+	_, api := newFakeXray(t)
+	gate := pausedAddTransport{api.hc.Transport, make(chan struct{}), make(chan struct{})}
+	api.hc.Transport = gate
+	x := &xrayBackend{api: api, tag: "in", refresh: make(chan struct{}, 1)}
+	a.addBackend(x)
+	done := make(chan struct{})
+	go func() { x.syncUsers(a.store); close(done) }()
+	defer func() { close(x.refresh); close(gate.release); <-done }()
+	a.syncAccess(time.Now())
+	<-gate.started
+	f.connect(u.Name)
+	a.syncAccess(time.Now())
+	if ok, _, why := a.authorize(u.Password); ok || why != "device limit 1" {
+		t.Fatal(ok, why)
+	}
+}
+
 func (p pausedOnlineTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	if strings.HasSuffix(r.URL.Path, "/GetStatsOnline") {
 		close(p.started)

@@ -28,6 +28,7 @@ import (
 var assets embed.FS
 
 type App struct {
+	reservations map[string][]time.Time // Hysteria admissions awaiting a fresh online snapshot, under mu
 	store    *Store
 	hy       *hyBackend // nil: Hysteria not set up
 	backends []backend  // the protocols' servers the panel syncs, Hysteria's first
