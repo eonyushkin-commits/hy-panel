@@ -65,16 +65,30 @@ func (a *App) authorize(auth string) (bool, string, string) {
 		n := a.onlineOf(protoHy2)[u.Name]
 		last := a.lastSync
 		a.mu.RUnlock()
-		if n >= u.MaxDevices && a.hy != nil && time.Since(last) > 30*time.Second {
+		if a.hy != nil && time.Since(last) > 30*time.Second {
+			last = time.Now()
 			on, err := a.hy.c.Online()
 			if err != nil {
 				return false, u.Name, "device count unavailable"
 			}
 			n = on[u.Name]
 		}
-		if n >= u.MaxDevices {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		if a.lastSync.After(last) {
+			n, last = a.onlineOf(protoHy2)[u.Name], a.lastSync
+		}
+		pending := a.reservations[u.Name]
+		for len(pending) > 0 && !pending[0].After(last) {
+			pending = pending[1:]
+		}
+		if n+len(pending) >= u.MaxDevices {
 			return false, u.Name, fmt.Sprintf("device limit %d", u.MaxDevices)
 		}
+		if a.reservations == nil {
+			a.reservations = make(map[string][]time.Time)
+		}
+		a.reservations[u.Name] = append(pending, time.Now().Add(10*time.Second))
 	}
 	return true, u.Name, ""
 }
@@ -84,6 +98,8 @@ func (a *App) authorize(auth string) (bool, string, string) {
 func (a *App) syncLoop(every time.Duration) {
 	for _, backend := range a.backends {
 		if x, ok := backend.(*xrayBackend); ok {
+			x.refresh = make(chan struct{}, 1)
+			go x.syncUsers(a.store)
 			go func() {
 				for {
 					x.pollOnline(a.store.List())
@@ -189,6 +205,11 @@ func (a *App) syncAccess(now time.Time) {
 	}
 	if hyOn != nil {
 		a.lastSync = now
+		for name, deadlines := range a.reservations {
+			if !deadlines[len(deadlines)-1].After(now) {
+				delete(a.reservations, name)
+			}
+		}
 	}
 	a.mu.Unlock()
 	if hyOn != nil {
@@ -198,7 +219,19 @@ func (a *App) syncAccess(now time.Time) {
 	// Tick has already applied quotas, so exhausted users are removed here.
 	users = a.store.List()
 	for i, b := range a.backends {
-		err := errors.Join(res[i].err, b.push(now, users))
+		var pushErr error
+		if x, ok := b.(*xrayBackend); ok && x.refresh != nil {
+			select {
+			case x.refresh <- struct{}{}:
+			default:
+			}
+			x.onlineMu.Lock()
+			pushErr = x.pushErr
+			x.onlineMu.Unlock()
+		} else {
+			pushErr = b.push(now, users)
+		}
+		err := errors.Join(res[i].err, pushErr)
 		a.mu.Lock()
 		l := a.live[b.proto()]
 		l.err, l.fails = failing(l.fails, err)
@@ -243,6 +276,8 @@ func (b *hyBackend) push(time.Time, []User) error { return nil }
 
 // xrayBackend is Xray's gRPC API for the VLESS inbound the panel keeps.
 type xrayBackend struct {
+	refresh       chan struct{}
+	pushErr       error
 	onlineMu      sync.Mutex
 	pendingOnline map[string]int
 	onlineErr     error
@@ -282,6 +317,15 @@ func (b *xrayBackend) pollOnline(users []User) {
 	b.onlineMu.Lock()
 	b.pendingOnline, b.onlineErr = on, pollErr
 	b.onlineMu.Unlock()
+}
+
+func (b *xrayBackend) syncUsers(store *Store) {
+	for range b.refresh {
+		err := b.push(time.Now(), store.List())
+		b.onlineMu.Lock()
+		b.pushErr = err
+		b.onlineMu.Unlock()
+	}
 }
 
 // push makes the inbound's users exactly the panel's active users. Xray

@@ -27,6 +27,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -384,14 +385,52 @@ func scalar(n *yaml.Node) string {
 	return n.Value
 }
 
-// writeKeepingOwner rewrites a file in place so owner and mode stay (Hysteria
-// may run as its own user); a missing file is created 0640.
+// Replace the target atomically while retaining its owner and permissions.
 func writeKeepingOwner(path string, b []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o640)
+	info, err := os.Lstat(path)
+	if err == nil && info.Mode()&os.ModeSymlink != 0 {
+		path, err = filepath.EvalSymlinks(path)
+		if err != nil {
+			return err
+		}
+		info, err = os.Stat(path)
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if info != nil && !info.Mode().IsRegular() {
+		return fmt.Errorf("%s: expected regular file", path)
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".hy-config-*")
 	if err != nil {
 		return err
 	}
-	return writeSync(f, b)
+	defer os.Remove(f.Name())
+	mode := os.FileMode(0640)
+	if info != nil {
+		mode = info.Mode().Perm()
+		st := info.Sys().(*syscall.Stat_t)
+		if err := f.Chown(int(st.Uid), int(st.Gid)); err != nil {
+			f.Close()
+			return err
+		}
+	}
+	if err := f.Chmod(mode); err != nil {
+		f.Close()
+		return err
+	}
+	if err := writeSync(f, b); err != nil {
+		return err
+	}
+	if err := os.Rename(f.Name(), path); err != nil {
+		return err
+	}
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }
 
 // chownHysteria makes a file root-owned and readable by Hysteria's group.

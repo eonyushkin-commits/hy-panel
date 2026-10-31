@@ -726,6 +726,63 @@ func TestDeviceLimitUsesSnapshot(t *testing.T) {
 	}
 }
 
+func TestConcurrentDeviceAdmissions(t *testing.T) {
+	_, sc := newFakeHy(t)
+	a := testApp(t, sc)
+	u := mustCreate(t, a.store, User{Name: "u", MaxDevices: 1})
+	a.syncAccess(time.Now())
+	results := make(chan bool, 2)
+	for range 2 {
+		go func() {
+			ok, _, _ := a.authorize(u.Password)
+			results <- ok
+		}()
+	}
+	if <-results == <-results {
+		t.Fatal("expected exactly one admission")
+	}
+	// No session appeared. A snapshot past the reservation window frees it.
+	a.syncAccess(time.Now().Add(time.Minute))
+	if ok, _, why := a.authorize(u.Password); !ok {
+		t.Fatal(why)
+	}
+}
+
+func TestConfigReplacementKeepsOldInode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(path, []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(path, path+".old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeKeepingOwner(path, []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	old, err := os.ReadFile(path+".old")
+	if err != nil || string(old) != "old" {
+		t.Fatal(string(old), err)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatal(info, err)
+	}
+	if os.Geteuid() != 0 {
+		dir := filepath.Dir(path)
+		if err := os.Chmod(dir, 0500); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Chmod(dir, 0700)
+		if err := writeKeepingOwner(path, []byte("incomplete")); err == nil {
+			t.Fatal("replacement in a read-only directory succeeded")
+		}
+		current, err := os.ReadFile(path)
+		if err != nil || string(current) != "new" {
+			t.Fatal(string(current), err)
+		}
+	}
+}
+
 func TestApplyOptsEditsInPlace(t *testing.T) {
 	dir := t.TempDir()
 	conf := "listen: 203.0.113.5:443\nacme:\n  domains: [a.example]\n  type: dns\n  dns: {name: cloudflare}\n"
