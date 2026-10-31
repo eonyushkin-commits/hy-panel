@@ -635,6 +635,83 @@ func TestCountersFlushedLater(t *testing.T) {
 	}
 }
 
+// Drive both production loops deterministically.
+func (a *App) syncOnce(now time.Time) {
+	for _, b := range a.backends {
+		if x, ok := b.(*xrayBackend); ok {
+			x.pollOnline(a.store.List())
+		}
+	}
+	a.syncAccess(now)
+}
+
+func TestReconnectAfterStaleFullSnapshot(t *testing.T) {
+	f, stats := newFakeHy(t)
+	a := testApp(t, stats)
+	u := mustCreate(t, a.store, User{Name: "phone", MaxDevices: 1})
+	f.connect(u.Name)
+	a.syncAccess(time.Now().Add(-time.Minute))
+	f.mu.Lock()
+	delete(f.conns, u.Name)
+	f.failOn = true
+	f.mu.Unlock()
+	if ok, _, why := a.authorize(u.Password); ok || why != "device count unavailable" {
+		t.Fatal(ok, why)
+	}
+	f.mu.Lock()
+	f.failOn = false
+	f.mu.Unlock()
+	if ok, _, why := a.authorize(u.Password); !ok {
+		t.Fatal(why)
+	}
+}
+
+func TestLoopbackACLPrecedesUserRules(t *testing.T) {
+	for _, original := range []string{"", "acl:\n  inline: ['direct(all)']\n"} {
+		d, err := parseDoc([]byte(original))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if changed, err := d.protectLoopback(); err != nil || !changed {
+			t.Fatal(changed, err)
+		}
+		var rules []string
+		if err := mapGet(d.get("acl"), "inline").Decode(&rules); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Join(rules[:len(loopbackRules)], "\n") != strings.Join(loopbackRules, "\n") {
+			t.Fatal(rules)
+		}
+		if original != "" && rules[len(loopbackRules)] != "direct(all)" {
+			t.Fatal(rules)
+		}
+		if changed, err := d.protectLoopback(); err != nil || changed {
+			t.Fatal(changed, err)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "acl.txt")
+	original := "# custom rules\ndirect(all)\n"
+	if err := os.WriteFile(path, []byte(original), 0600); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := parseDoc(nil)
+	d.set("acl", map[string]string{"file": path})
+	if changed, err := d.protectLoopback(); err != nil || !changed {
+		t.Fatal(changed, err)
+	}
+	b, _ := os.ReadFile(path)
+	if string(b) != strings.Join(loopbackRules, "\n")+"\n"+original {
+		t.Fatal(string(b))
+	}
+	backup, _ := os.ReadFile(path + backupExt)
+	if string(backup) != original {
+		t.Fatal("ACL backup lost")
+	}
+	if changed, err := d.protectLoopback(); err != nil || changed {
+		t.Fatal(changed, err)
+	}
+}
+
 func TestDeviceLimitUsesSnapshot(t *testing.T) {
 	f, sc := newFakeHy(t)
 	a := testApp(t, sc)

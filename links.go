@@ -173,11 +173,7 @@ func (vlessProto) InSubscription() bool                { return true }
 func (vlessProto) ProxyName(e Endpoint, u User) string { return e.vlessRemark(u) }
 func (vlessProto) Mihomo(e Endpoint, u User) string    { return e.MihomoVless(u) }
 
-// realityFP is the browser whose TLS handshake VLESS clients imitate
-// (Reality only works with uTLS fingerprints). Not chrome: its post-quantum
-// key share makes the ClientHello ~1.7 KB, two TCP segments, and some
-// networks drop the second one; Reality then sees half a ClientHello and
-// hands the client to the real site (a timeout). Safari's fits in one.
+// The Safari preset and ClientHello size depend on the client core version.
 const realityFP = "safari"
 
 // VlessURI builds the vless:// share link the way v2rayN and the Xray apps

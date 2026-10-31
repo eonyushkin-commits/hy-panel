@@ -98,7 +98,15 @@ func runInstall(args []string) {
 	step("enable hy-panel-agent", systemctl("enable", "hy-panel-agent"))
 	step("restart hy-panel-agent", systemctl("restart", "hy-panel-agent"))
 	step("enable hy-panel", systemctl("enable", "hy-panel"))
-	step("restart hy-panel", systemctl("restart", "hy-panel")) // picks up the new binary
+	cfgPath, svc := hyPaths(env)
+	b, readErr := os.ReadFile(cfgPath)
+	if _, kind := classify(b, readErr); kind == cfgPanel {
+		_, changed := rewriteHyConfig(cfgPath, b, false, nil)
+		if changed {
+			step("apply Hysteria ACL", systemctl("try-restart", svc))
+		}
+	}
+	step("restart hy-panel", systemctl("restart", "hy-panel")) // picks up the new binary and config
 	fmt.Println("\nГотово.")
 	printInfo(env)
 }
