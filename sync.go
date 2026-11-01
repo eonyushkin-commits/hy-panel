@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	revokeWindow  = 2 * time.Minute
-	flushInterval = time.Minute // traffic counters reach the disk at least this often
+	revokeWindow   = 2 * time.Minute
+	flushInterval  = time.Minute // traffic counters reach the disk at least this often
+	onlineFreshFor = 30 * time.Second
 )
 
 // revocation: sessions of a user whose password changed at `at` are dropped
@@ -139,9 +140,9 @@ func (a *App) requestSync() {
 // connect. Hysteria asks the panel itself (/auth) and needs no telling.
 type backend interface {
 	proto() string
-	// stats reads and clears the server's counters. A nil online map means
-	// the server could not say; the traffic counts anyway.
-	stats(now time.Time, users []User) (map[string]trafficEntry, map[string]int, error)
+	// stats reads and clears the server's counters. A snapshot with nil users
+	// means no new online data; the traffic counts anyway.
+	stats(now time.Time, users []User) (map[string]trafficEntry, onlineSnapshot, error)
 	// push makes the server's users the panel's active users of this
 	// protocol: new and unblocked ones in, blocked, deleted and re-keyed
 	// ones out, everyone back after the server restarts.
@@ -152,9 +153,15 @@ type backend interface {
 
 // live is what the syncs learned about one protocol's server.
 type live struct {
-	online map[string]int // per user: Hysteria sessions, Xray client IPs, AmneziaWG 1
-	err    string         // shown once it repeats
-	fails  int            // syncs failed in a row
+	online   map[string]int // per user: Hysteria sessions, Xray client IPs, AmneziaWG 1
+	onlineAt time.Time      // time of the last successful online snapshot
+	err      string         // shown once it repeats
+	fails    int            // syncs failed in a row
+}
+
+type onlineSnapshot struct {
+	users map[string]int // nil means no new snapshot; an empty map means nobody online
+	at    time.Time
 }
 
 func (a *App) addBackend(b backend) { a.backends = append(a.backends, b) }
@@ -170,7 +177,7 @@ func (a *App) onlineOf(p string) map[string]int {
 func (a *App) syncAccess(now time.Time) {
 	// Counters are cleared on read: account them even if a server fails below.
 	type result struct {
-		online map[string]int
+		online onlineSnapshot
 		err    error
 	}
 	res := make([]result, len(a.backends))
@@ -179,7 +186,7 @@ func (a *App) syncAccess(now time.Time) {
 	users := a.store.List()
 	for i, b := range a.backends {
 		tr, on, err := b.stats(now, users)
-		traffic, online = addTraffic(traffic, tr), joinOnline(online, on)
+		traffic, online = addTraffic(traffic, tr), joinOnline(online, on.users)
 		res[i] = result{on, err}
 	}
 	a.store.Tick(now, traffic, online)
@@ -196,10 +203,10 @@ func (a *App) syncAccess(now time.Time) {
 			l = &live{}
 			a.live[b.proto()] = l
 		}
-		if res[i].online != nil {
-			l.online = res[i].online
+		if res[i].online.users != nil {
+			l.online, l.onlineAt = res[i].online.users, res[i].online.at
 			if b.proto() == protoHy2 {
-				hyOn = res[i].online
+				hyOn = res[i].online.users
 			}
 		}
 	}
@@ -259,13 +266,13 @@ type hyBackend struct{ c *statsClient }
 func (b *hyBackend) proto() string   { return protoHy2 }
 func (b *hyBackend) errText() string { return "Нет связи с trafficStats Hysteria: " }
 
-func (b *hyBackend) stats(time.Time, []User) (map[string]trafficEntry, map[string]int, error) {
+func (b *hyBackend) stats(now time.Time, _ []User) (map[string]trafficEntry, onlineSnapshot, error) {
 	tr, errT := b.c.TrafficAndClear()
 	on, errO := b.c.Online()
 	if errO != nil {
 		on = nil
 	}
-	return tr, on, errors.Join(errT, errO)
+	return tr, onlineSnapshot{on, now}, errors.Join(errT, errO)
 }
 
 // push: Hysteria asks the panel at every connect (/auth), and enforce
@@ -279,7 +286,7 @@ type xrayBackend struct {
 	refresh       chan struct{}
 	pushErr       error
 	onlineMu      sync.Mutex
-	pendingOnline map[string]int
+	pendingOnline onlineSnapshot
 	onlineErr     error
 	api           *xrayAPI
 	tag           string // the inbound
@@ -291,17 +298,19 @@ func (b *xrayBackend) errText() string { return "Нет связи с API Xray: 
 
 // stats reads and clears Xray's per-user counters and consumes the latest
 // online snapshot collected by the independent worker.
-func (b *xrayBackend) stats(time.Time, []User) (map[string]trafficEntry, map[string]int, error) {
+func (b *xrayBackend) stats(time.Time, []User) (map[string]trafficEntry, onlineSnapshot, error) {
 	tr, err := b.api.TrafficAndClear()
 	b.onlineMu.Lock()
 	defer b.onlineMu.Unlock()
 	on := b.pendingOnline
-	b.pendingOnline = nil
+	b.pendingOnline = onlineSnapshot{}
 	return tr, on, errors.Join(err, b.onlineErr)
 }
 
 // Only the online worker makes per-user requests.
 func (b *xrayBackend) pollOnline(users []User) {
+	// A long poll must not make its oldest results appear fresh.
+	started := time.Now()
 	var pollErr error
 	on := map[string]int{}
 	for _, u := range users {
@@ -315,7 +324,7 @@ func (b *xrayBackend) pollOnline(users []User) {
 		}
 	}
 	b.onlineMu.Lock()
-	b.pendingOnline, b.onlineErr = on, pollErr
+	b.pendingOnline, b.onlineErr = onlineSnapshot{on, started}, pollErr
 	b.onlineMu.Unlock()
 }
 
@@ -405,11 +414,11 @@ func (b *awgBackend) pub(priv string) string {
 // last sync (a peer that was re-added or a restarted service starts from
 // zero) and counts a user online after a handshake in the last 3 minutes:
 // WireGuard re-handshakes every 2 while traffic flows.
-func (b *awgBackend) stats(now time.Time, users []User) (map[string]trafficEntry, map[string]int, error) {
+func (b *awgBackend) stats(now time.Time, users []User) (map[string]trafficEntry, onlineSnapshot, error) {
 	peers, err := b.c.Peers()
 	b.peered = err == nil
 	if err != nil {
-		return nil, nil, err
+		return nil, onlineSnapshot{}, err
 	}
 	byKey := make(map[string]awgPeer, len(peers))
 	for _, p := range peers {
@@ -434,7 +443,7 @@ func (b *awgBackend) stats(now time.Time, users []User) (map[string]trafficEntry
 		}
 	}
 	b.seen = byKey
-	return tr, on, nil
+	return tr, onlineSnapshot{on, now}, nil
 }
 
 // push makes the service's peers exactly the active users with AmneziaWG
