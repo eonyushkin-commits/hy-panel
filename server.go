@@ -29,20 +29,20 @@ var assets embed.FS
 
 type App struct {
 	reservations map[string][]time.Time // Hysteria admissions awaiting a fresh online snapshot, under mu
-	store    *Store
-	hy       *hyBackend // nil: Hysteria not set up
-	backends []backend  // the protocols' servers the panel syncs, Hysteria's first
-	hyOpts   *hyOpts    // Hysteria's port, obfs, certificate; nil: not set up
-	agent    *agentClient
-	siteScan scanState // the search for a Reality site
-	ep       Endpoint
-	password string
-	subBase  string   // public base URL of the subscription listener, "" = disabled
-	cfgErr   string   // Hysteria or Xray config unreadable: no links are handed out
-	warns    []string // shown in the panel banner (set once before serving)
-	key      []byte
-	loginMu  sync.Mutex // serializes logins: ~1 guess/s total, not per connection
-	poke     chan struct{}
+	store        *Store
+	hy           *hyBackend // nil: Hysteria not set up
+	backends     []backend  // the protocols' servers the panel syncs, Hysteria's first
+	hyOpts       *hyOpts    // Hysteria's port, obfs, certificate; nil: not set up
+	agent        *agentClient
+	siteScan     scanState // the search for a Reality site
+	ep           Endpoint
+	password     string
+	subBase      string   // public base URL of the subscription listener, "" = disabled
+	cfgErr       string   // Hysteria or Xray config unreadable: no links are handed out
+	warns        []string // shown in the panel banner (set once before serving)
+	key          []byte
+	loginMu      sync.Mutex // serializes logins: ~1 guess/s total, not per connection
+	poke         chan struct{}
 
 	mu        sync.RWMutex
 	live      map[string]*live // per protocol: who is online, sync errors
@@ -161,11 +161,26 @@ type link struct {
 	URI   string `json:"uri"`
 }
 
+type onlineStatus struct {
+	LastSuccess int64 `json:"lastSuccess"` // 0 until the first successful online poll
+	Stale       bool  `json:"stale"`
+}
+
 func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
 	a.mu.RLock()
 	online := map[string]map[string]int{}
+	freshness := map[string]onlineStatus{}
+	for _, b := range a.backends {
+		freshness[b.proto()] = onlineStatus{Stale: true}
+	}
 	for p, l := range a.live {
 		online[p] = l.online
+		status := onlineStatus{Stale: l.onlineAt.IsZero() || now.Sub(l.onlineAt) >= onlineFreshFor}
+		if !l.onlineAt.IsZero() {
+			status.LastSuccess = l.onlineAt.Unix()
+		}
+		freshness[p] = status
 	}
 	last := a.lastSync
 	var listen []string
@@ -188,7 +203,6 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 	}
 	problems = append(problems, listen...)
 	a.mu.RUnlock()
-	now := time.Now()
 	users := a.store.List()
 	views := make([]userView, len(users))
 	for i, u := range users {
@@ -214,9 +228,12 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 		"users": views,
 		"server": map[string]any{"host": a.ep.Host, "port": a.ep.Port, "obfs": a.ep.ObfsType, "sni": a.ep.SNI, "pinned": a.ep.Pin != "",
 			"vless": vless, "protocols": protos},
-		"problems": strings.Join(problems, "; "),
-		"lastSync": last.Unix(),
-		"subBase":  a.subBase,
+		"problems":       strings.Join(problems, "; "),
+		"lastSync":       last.Unix(),
+		"onlineStatus":   freshness,
+		"serverTime":     now.Unix(),
+		"onlineFreshFor": int64(onlineFreshFor / time.Second),
+		"subBase":        a.subBase,
 	})
 }
 

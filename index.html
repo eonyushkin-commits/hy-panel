@@ -83,6 +83,7 @@ input:hover,textarea:hover,select:hover{border-color:var(--mute)}
 .ptag{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:550;padding:1px 8px;border-radius:99px;background:var(--surface-2);color:var(--fg)}
 .ptag::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--line)}
 .ptag.live{background:var(--ok-soft);color:var(--ok)}.ptag.live::before{background:var(--ok)}
+.ptag.stale{background:var(--warn-soft);color:var(--warn)}.ptag.stale::before{background:var(--warn)}
 .ptag.off{color:var(--mute);text-decoration:line-through;background:none;border:1px dashed var(--line)}.ptag.off::before{display:none}
 .protos{display:flex;gap:8px 16px;flex-wrap:wrap}
 .pill.bad{background:var(--bad-soft);color:var(--bad)}.pill.warn{background:var(--warn-soft);color:var(--warn)}.pill.ok{background:var(--ok-soft);color:var(--ok)}
@@ -308,7 +309,7 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
 
 <script>
 const $ = s => document.querySelector(s);
-let S = null, editing = null, shareUser = null, filter = 'all';
+let S = null, stateReceivedAt = 0, editing = null, shareUser = null, filter = 'all';
 
 const GB = 1024 ** 3;
 function fmt(b) {
@@ -376,13 +377,19 @@ $('#login form').onsubmit = async e => {
 async function logout() { await api('POST', 'api/logout'); showLogin(); }
 
 async function load() {
-  try { S = await api('GET', 'api/state'); } catch { return; }
+  try { S = await api('GET', 'api/state'); stateReceivedAt = Date.now(); }
+  catch { if (S) refreshOnlineView(); return; }
   $('#login').hidden = true; $('#app').hidden = false;
   $('#host').textContent = 'Сервер ' + S.server.host; // protocol details are on their cards
   $('#hyerr').hidden = !S.problems;
   $('#hyerr').innerHTML = icon('alert') + '<span>' + esc(S.problems) + '</span>';
+  refreshOnlineView();
+}
+
+function refreshOnlineView() {
   stats();
   render();
+  if (SYS) renderProtocols();
 }
 
 // ---- protocols: installed and configured by the agent ----
@@ -397,6 +404,7 @@ const PROTOS = [
   {id: 'awg', title: 'AmneziaWG 3.1', what: 'UDP, WireGuard с маскировкой. Приложения AmneziaWG и Amnezia VPN.', dlg: openAwg},
 ];
 function renderProtocols() {
+  if (!SYS) return;
   const st = SYS.status || {}, set = SYS.settings || {};
   $('#pgrid').innerHTML = PROTOS.map(p => {
     const s = st[p.id] || {}, c = set[p.id];
@@ -423,7 +431,8 @@ function renderProtocols() {
       if (s.update) btns += `<button class="pri" data-p="${p.id}" data-do="update" title="Скачать официальный релиз ${esc(s.latest)}">Обновить до ${esc(s.latest)}</button>`;
       else if (!s.latest) btns += `<button class="ghost" data-p="${p.id}" data-do="check" title="Спросить GitHub о последнем релизе">Проверить обновления</button>`;
     }
-    return `<div class="card pcard"><div class="ph"><b>${p.title}</b>${pill}</div><div class="mute small">${info}</div>${ver ? `<div class="mute small">${ver}</div>` : ''}<div class="pa">${btns}</div></div>`;
+    const online = c && S ? onlineInfo(p.id) : '';
+    return `<div class="card pcard"><div class="ph"><b>${p.title}</b>${pill}</div><div class="mute small">${info}</div>${ver ? `<div class="mute small">${ver}</div>` : ''}${online}<div class="pa">${btns}</div></div>`;
   }).join('') + (SYS.agentError ? `<div class="err" style="grid-column:1/-1;margin:0">${icon('alert')}<span>${esc(SYS.agentError)}</span></div>` : '');
 }
 $('#pgrid').onclick = e => {
@@ -582,8 +591,18 @@ async function startJob(action, params, title) {
 // Online per protocol: Hysteria counts sessions, Xray client IPs,
 // AmneziaWG a recent handshake. Shown apart, per protocol.
 const short = {hysteria2: 'Hy2', vless: 'VLESS', awg: 'AWG'};
-const liveOn = (u, p) => u.online[p] || 0;
-const isOn = u => Object.values(u.online).some(n => n > 0);
+function onlineStale(p) {
+  const s = S.onlineStatus?.[p];
+  const now = S.serverTime + (Date.now() - stateReceivedAt) / 1000;
+  return !s || s.stale || !s.lastSuccess || now - s.lastSuccess >= S.onlineFreshFor;
+}
+function onlineInfo(p) {
+  const s = S.onlineStatus?.[p], last = s?.lastSuccess;
+  const when = last ? new Date(last * 1000).toLocaleString('ru-RU') : 'ещё не было';
+  return `<div class="small ${onlineStale(p) ? 'check bad' : 'mute'}">Онлайн: ${last ? onlineStale(p) ? 'данные устарели' : 'данные актуальны' : 'ожидаем данные'}<br>Последний успешный опрос: ${esc(when)}</div>`;
+}
+const liveOn = (u, p) => onlineStale(p) ? 0 : u.online[p] || 0;
+const isOn = u => Object.keys(u.online).some(p => liveOn(u, p) > 0);
 const protos = () => S.server.protocols || [];
 const userProtos = u => u.links.map(l => l.proto);
 function stats() {
@@ -591,8 +610,10 @@ function stats() {
   const up = us.reduce((s, u) => s + u.up, 0), down = us.reduce((s, u) => s + u.down, 0);
   $('#stUsers').textContent = us.length;
   $('#stUsersSub').textContent = `активны ${us.filter(u => !u.status).length}`;
-  $('#stOnline').textContent = on.length;
-  $('#stOnlineSub').textContent = protos().map(p => `${short[p.id] || p.title} ${on.reduce((s, u) => s + liveOn(u, p.id), 0)}`).join(' · ');
+  const stale = protos().some(p => onlineStale(p.id));
+  $('#stOnline').textContent = stale ? on.length ? '≥ ' + on.length : '—' : on.length;
+  $('#stOnlineSub').textContent = protos().map(p => `${short[p.id] || p.title} ${onlineStale(p.id) ? '?' : on.reduce((s, u) => s + liveOn(u, p.id), 0)}`).join(' · ');
+  if (stale) $('#stOnlineSub').textContent += ' · есть устаревшие данные';
   $('#stTraffic').textContent = fmt(up + down);
   $('#stTrafficSub').textContent = `↓ ${fmt(down)} ↑ ${fmt(up)}`;
 }
@@ -618,10 +639,10 @@ function render() {
     const pct = u.quotaBytes ? Math.min(100, used / u.quotaBytes * 100) : 0;
     const h = hue(u.name);
     const tags = protos().map(p => {
-      const n = liveOn(u, p.id), on = userProtos(u).includes(p.id);
+      const n = u.online[p.id] || 0, on = userProtos(u).includes(p.id), stale = onlineStale(p.id);
       const cnt = n && (n > 1 || (p.id === 'hysteria2' && u.maxDevices)) ? ' ' + n + (p.id === 'hysteria2' && u.maxDevices ? '/' + u.maxDevices : '') : '';
-      const tip = !on ? 'выключен у пользователя' : n ? 'онлайн' : 'не подключён';
-      return `<span class="ptag${!on ? ' off' : n ? ' live' : ''}" title="${esc(p.title)}: ${tip}">${esc(short[p.id] || p.title)}${cnt}</span>`;
+      const tip = !on ? 'выключен у пользователя' : stale ? 'данные устарели; последнее известное число подключений: ' + n : n ? 'онлайн' : 'не подключён';
+      return `<span class="ptag${!on ? ' off' : stale ? ' stale' : n ? ' live' : ''}" title="${esc(p.title)}: ${tip}">${esc(short[p.id] || p.title)}${cnt}${on && stale ? ' · ?' : ''}</span>`;
     }).join('');
     return `<div class="user${u.enabled ? '' : ' off'}" data-n="${esc(u.name)}">
       <div class="av${isOn(u) ? ' on' : ''}" style="--h:${h}">${esc(u.name[0])}</div>
