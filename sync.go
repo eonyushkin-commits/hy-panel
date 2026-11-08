@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"sort"
-	"sync"
 	"time"
 )
 
@@ -58,9 +57,6 @@ func (a *App) authorize(auth string) (bool, string, string) {
 	if why := u.Blocked(time.Now()); why != "" {
 		return false, u.Name, why
 	}
-	if !u.Uses(protoHy2) {
-		return false, u.Name, "hysteria off for user"
-	}
 	if u.MaxDevices > 0 {
 		a.mu.RLock()
 		n := a.onlineOf(protoHy2)[u.Name]
@@ -97,18 +93,6 @@ func (a *App) authorize(auth string) (bool, string, string) {
 // ---- sync & enforcement ----
 
 func (a *App) syncLoop(every time.Duration) {
-	for _, backend := range a.backends {
-		if x, ok := backend.(*xrayBackend); ok {
-			x.refresh = make(chan struct{}, 1)
-			go x.syncUsers(a.store)
-			go func() {
-				for {
-					x.pollOnline(a.store.List())
-					time.Sleep(every)
-				}
-			}()
-		}
-	}
 	t := time.NewTicker(every)
 	defer t.Stop()
 	flushed := time.Now()
@@ -135,25 +119,19 @@ func (a *App) requestSync() {
 	}
 }
 
-// A backend is a protocol's server as the panel drives it: it reports the
-// traffic since the last sync and who is online, and is told who may
-// connect. Hysteria asks the panel itself (/auth) and needs no telling.
+// A backend reads Hysteria traffic and online sessions.
 type backend interface {
 	proto() string
 	// stats reads and clears the server's counters. A snapshot with nil users
 	// means no new online data; the traffic counts anyway.
 	stats(now time.Time, users []User) (map[string]trafficEntry, onlineSnapshot, error)
-	// push makes the server's users the panel's active users of this
-	// protocol: new and unblocked ones in, blocked, deleted and re-keyed
-	// ones out, everyone back after the server restarts.
-	push(now time.Time, users []User) error
 	// errText leads its sync errors in the panel's banner.
 	errText() string
 }
 
 // live is what the syncs learned about one protocol's server.
 type live struct {
-	online   map[string]int // per user: Hysteria sessions, Xray client IPs, AmneziaWG 1
+	online   map[string]int // Hysteria sessions per user
 	onlineAt time.Time      // time of the last successful online snapshot
 	err      string         // shown once it repeats
 	fails    int            // syncs failed in a row
@@ -222,32 +200,16 @@ func (a *App) syncAccess(now time.Time) {
 	if hyOn != nil {
 		a.enforce(now, hyOn)
 	}
-	// Publish sessions before updating a potentially large user list.
-	// Tick has already applied quotas, so exhausted users are removed here.
-	users = a.store.List()
 	for i, b := range a.backends {
-		var pushErr error
-		if x, ok := b.(*xrayBackend); ok && x.refresh != nil {
-			select {
-			case x.refresh <- struct{}{}:
-			default:
-			}
-			x.onlineMu.Lock()
-			pushErr = x.pushErr
-			x.onlineMu.Unlock()
-		} else {
-			pushErr = b.push(now, users)
-		}
-		err := errors.Join(res[i].err, pushErr)
 		a.mu.Lock()
 		l := a.live[b.proto()]
-		l.err, l.fails = failing(l.fails, err)
+		l.err, l.fails = failing(l.fails, res[i].err)
 		a.mu.Unlock()
 	}
 }
 
 // failing shows an error once it repeats: one miss right after a restart
-// (the panel came up before Hysteria or Xray) is not worth a banner.
+// (the panel came up before Hysteria) is not worth a banner.
 func failing(n int, err error) (string, int) {
 	if err == nil {
 		return "", 0
@@ -273,193 +235,6 @@ func (b *hyBackend) stats(now time.Time, _ []User) (map[string]trafficEntry, onl
 		on = nil
 	}
 	return tr, onlineSnapshot{on, now}, errors.Join(errT, errO)
-}
-
-// push: Hysteria asks the panel at every connect (/auth), and enforce
-// closes sessions that must go.
-func (b *hyBackend) push(time.Time, []User) error { return nil }
-
-// ---- Xray (VLESS + Reality) ----
-
-// xrayBackend is Xray's gRPC API for the VLESS inbound the panel keeps.
-type xrayBackend struct {
-	refresh       chan struct{}
-	pushErr       error
-	onlineMu      sync.Mutex
-	pendingOnline onlineSnapshot
-	onlineErr     error
-	api           *xrayAPI
-	tag           string // the inbound
-	flow          string // given to every user: xtls-rprx-vision on TCP, none with XHTTP
-}
-
-func (b *xrayBackend) proto() string   { return protoVless }
-func (b *xrayBackend) errText() string { return "Нет связи с API Xray: " }
-
-// stats reads and clears Xray's per-user counters and consumes the latest
-// online snapshot collected by the independent worker.
-func (b *xrayBackend) stats(time.Time, []User) (map[string]trafficEntry, onlineSnapshot, error) {
-	tr, err := b.api.TrafficAndClear()
-	b.onlineMu.Lock()
-	defer b.onlineMu.Unlock()
-	on := b.pendingOnline
-	b.pendingOnline = onlineSnapshot{}
-	return tr, on, errors.Join(err, b.onlineErr)
-}
-
-// Only the online worker makes per-user requests.
-func (b *xrayBackend) pollOnline(users []User) {
-	// A long poll must not make its oldest results appear fresh.
-	started := time.Now()
-	var pollErr error
-	on := map[string]int{}
-	for _, u := range users {
-		n, err := b.api.Online(u.Name)
-		if err != nil {
-			on, pollErr = nil, err
-			break
-		}
-		if n > 0 {
-			on[u.Name] = n
-		}
-	}
-	b.onlineMu.Lock()
-	b.pendingOnline, b.onlineErr = onlineSnapshot{on, started}, pollErr
-	b.onlineMu.Unlock()
-}
-
-func (b *xrayBackend) syncUsers(store *Store) {
-	for range b.refresh {
-		err := b.push(time.Now(), store.List())
-		b.onlineMu.Lock()
-		b.pushErr = err
-		b.onlineMu.Unlock()
-	}
-}
-
-// push makes the inbound's users exactly the panel's active users. Xray
-// has no auth callback like Hysteria's: whoever is in its list gets in. So
-// blocked, deleted and re-keyed users are taken out (new connections are
-// refused, open ones end when they close), and after an Xray restart (its
-// config lists nobody) everyone is put back.
-func (b *xrayBackend) push(now time.Time, users []User) error {
-	have, err := b.api.Users(b.tag)
-	if err != nil {
-		return err
-	}
-	var add []User
-	for _, u := range users {
-		if u.Blocked(now) != "" || !u.Uses(protoVless) {
-			continue // stays in have: taken out below
-		}
-		if have[u.Name] == u.UUID {
-			delete(have, u.Name)
-			continue
-		}
-		add = append(add, u)
-	}
-	var errs []error
-	var gone, added []string
-	// Removals first: a re-keyed user's e-mail must be free to be added again.
-	for name := range have {
-		if err := b.api.RemoveUser(b.tag, name); err != nil {
-			errs = append(errs, err)
-		} else {
-			gone = append(gone, name)
-		}
-	}
-	for _, u := range add {
-		if err := b.api.AddUser(b.tag, u.Name, u.UUID, b.flow); err != nil {
-			errs = append(errs, err)
-		} else {
-			added = append(added, u.Name)
-		}
-	}
-	if len(gone)+len(added) > 0 {
-		sort.Strings(gone)
-		sort.Strings(added)
-		log.Printf("xray users: -%v +%v", gone, added)
-	}
-	return errors.Join(errs...)
-}
-
-// ---- AmneziaWG ----
-
-// awgBackend is the AmneziaWG service's control socket.
-type awgBackend struct {
-	c      *awgClient
-	seen   map[string]awgPeer // last counters per public key
-	pubs   map[string]string  // private → public key, cached
-	peered bool               // the last stats call got the peers
-}
-
-func newAWGBackend(c *awgClient) *awgBackend { return &awgBackend{c: c} }
-
-func (b *awgBackend) proto() string   { return protoAWG }
-func (b *awgBackend) errText() string { return "Нет связи с AmneziaWG: " }
-
-func (b *awgBackend) pub(priv string) string {
-	if b.pubs == nil {
-		b.pubs = map[string]string{}
-	}
-	pub, ok := b.pubs[priv]
-	if !ok {
-		pub, _ = wgPublic(priv)
-		b.pubs[priv] = pub
-	}
-	return pub
-}
-
-// stats turns the service's cumulative counters into deltas since the
-// last sync (a peer that was re-added or a restarted service starts from
-// zero) and counts a user online after a handshake in the last 3 minutes:
-// WireGuard re-handshakes every 2 while traffic flows.
-func (b *awgBackend) stats(now time.Time, users []User) (map[string]trafficEntry, onlineSnapshot, error) {
-	peers, err := b.c.Peers()
-	b.peered = err == nil
-	if err != nil {
-		return nil, onlineSnapshot{}, err
-	}
-	byKey := make(map[string]awgPeer, len(peers))
-	for _, p := range peers {
-		byKey[p.Key] = p
-	}
-	tr, on := map[string]trafficEntry{}, map[string]int{}
-	for _, u := range users {
-		p, ok := byKey[b.pub(u.AWGKey)]
-		if !ok {
-			continue
-		}
-		last := b.seen[p.Key]
-		d := trafficEntry{Tx: p.Rx - last.Rx, Rx: p.Tx - last.Tx} // Tx: from the client
-		if d.Tx < 0 || d.Rx < 0 {
-			d = trafficEntry{Tx: p.Rx, Rx: p.Tx}
-		}
-		if d.Tx > 0 || d.Rx > 0 {
-			tr[u.Name] = d
-		}
-		if p.LastHandshake > 0 && now.Unix()-p.LastHandshake < 180 {
-			on[u.Name] = 1
-		}
-	}
-	b.seen = byKey
-	return tr, onlineSnapshot{on, now}, nil
-}
-
-// push makes the service's peers exactly the active users with AmneziaWG
-// on. A removed peer is cut off at once: its session dies with it. Not
-// while the service does not answer: the stats error says so already.
-func (b *awgBackend) push(now time.Time, users []User) error {
-	if !b.peered {
-		return nil
-	}
-	want := []awgPeer{}
-	for _, u := range users {
-		if u.Blocked(now) == "" && u.Uses(protoAWG) && u.AWGKey != "" {
-			want = append(want, awgPeer{Key: b.pub(u.AWGKey), IP: awgIP(u.AWGIndex)})
-		}
-	}
-	return b.c.SetPeers(want)
 }
 
 func addTraffic(a, b map[string]trafficEntry) map[string]trafficEntry {
@@ -491,38 +266,10 @@ func joinOnline(a, b map[string]int) map[string]int {
 	return m
 }
 
-// watchTarget checks hourly that the site Reality impersonates still answers
-// like a browser expects. When it is gone, probes of the server get errors
-// instead of that site, and the server stands out. Two failures in a row
-// (a minute apart) raise the banner.
-func (a *App) watchTarget(target, sni string) {
-	fails := 0
-	for {
-		err := checkTarget(target, sni)
-		if err == nil {
-			fails = 0
-		} else {
-			fails++
-			log.Printf("reality target %s: %v", target, err)
-		}
-		a.mu.Lock()
-		a.targetErr = ""
-		if fails >= 2 {
-			a.targetErr = fmt.Sprintf("Сайт для маскировки VLESS (%s) не отвечает по TLS 1.3 + HTTP/2: %v. Смени его в панели: VLESS + Reality → «Настройки»", sni, err)
-		}
-		a.mu.Unlock()
-		if fails == 1 {
-			time.Sleep(time.Minute)
-		} else {
-			time.Sleep(time.Hour)
-		}
-	}
-}
-
 // mustDrop reports whether online sessions of name must be closed.
 func (a *App) mustDrop(name string, now time.Time) bool {
 	u, ok := a.store.Get(name)
-	if !ok || u.Blocked(now) != "" || !u.Uses(protoHy2) {
+	if !ok || u.Blocked(now) != "" {
 		return true
 	}
 	a.mu.RLock()

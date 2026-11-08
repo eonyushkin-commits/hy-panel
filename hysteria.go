@@ -669,7 +669,7 @@ func (c *statsClient) Kick(ids []string) error {
 
 const hysteriaBin = "/usr/local/bin/hysteria"
 
-// hyVersion is major.minor.patch of the installed Hysteria (or Xray); zero if unknown.
+// hyVersion is major.minor.patch of the installed Hysteria; zero if unknown.
 type hyVersion [3]int
 
 var versionRe = regexp.MustCompile(`v(\d+)\.(\d+)\.(\d+)`)

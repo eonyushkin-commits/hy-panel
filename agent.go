@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,7 +20,7 @@ import (
 // The agent is the panel's root helper. The panel runs as an unprivileged
 // user and cannot touch the system; the agent does a fixed set of things
 // for it: install a protocol's server and change its settings. Each action
-// is this binary's own command (settings, xray, fetch) run with checked
+// is this binary's own command (settings, fetch) run with checked
 // flags, one at a time; its output is the job log the panel shows. A
 // stolen panel password gets these actions, not a root shell.
 
@@ -87,29 +86,7 @@ func jobArgs(action string, p map[string]string) ([]string, error) {
 			}
 		}
 		return args, nil
-	case "vless":
-		args := []string{"xray"}
-		if port := p["port"]; port != "" {
-			if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
-				return nil, fmt.Errorf("порт %q: нужен 1–65535", port)
-			}
-			args = append(args, "-port", port)
-		}
-		t := strings.ToLower(strings.TrimSpace(p["target"]))
-		if !validHostname(t) || !strings.Contains(t, ".") {
-			return nil, fmt.Errorf("сайт для маскировки %q: нужен домен", t)
-		}
-		return append(args, "-target", t), nil
-	case "awg":
-		args := []string{"awg"}
-		if port := p["port"]; port != "" {
-			if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
-				return nil, fmt.Errorf("порт %q: нужен 1–65535", port)
-			}
-			args = append(args, "-port", port)
-		}
-		return args, nil
-	case "update-hysteria", "update-xray":
+	case "update-hysteria":
 		return []string{"fetch", strings.TrimPrefix(action, "update-")}, nil
 	}
 	return nil, fmt.Errorf("неизвестное действие %q", action)
@@ -221,7 +198,6 @@ type protoStatus struct {
 func systemStatus(rel *releases) map[string]protoStatus {
 	env := readEnvNoFatal()
 	_, hySvc := hyPaths(env)
-	_, xSvc := xrayPaths(env)
 	st := func(proto, bin, svc string, version func() hyVersion) protoStatus {
 		s := protoStatus{Installed: fileExists(bin) && unitExists(svc)}
 		if s.Installed {
@@ -236,12 +212,8 @@ func systemStatus(rel *releases) map[string]protoStatus {
 		}
 		return s
 	}
-	awg := protoStatus{Installed: fileExists(awgCfgPath) && fileExists(awgUnitPath), Version: "встроен"}
-	awg.Active = awg.Installed && systemctl("is-active", "--quiet", "hy-panel-awg") == nil
 	return map[string]protoStatus{
-		protoHy2:   st(protoHy2, hysteriaBin, hySvc, hysteriaVersion),
-		protoVless: st(protoVless, xrayBin, xSvc, xrayVersion),
-		protoAWG:   awg,
+		protoHy2: st(protoHy2, hysteriaBin, hySvc, hysteriaVersion),
 	}
 }
 
@@ -267,40 +239,28 @@ func (r *releases) get(proto string) (hyVersion, string) {
 	return hyVersion{}, "ещё не проверено"
 }
 
-// check asks GitHub now, for both servers at once; false if it did not
-// answer for one of them. A failed check keeps the version learned before:
-// a hiccup is not a reason to forget it.
+// check refreshes the latest Hysteria release, retaining a known version on failure.
 func (r *releases) check() bool {
-	ok := true
-	var wg sync.WaitGroup
-	for proto, base := range map[string]string{protoHy2: hysteriaURL, protoVless: xrayURL} {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			v, err := latestRelease(base)
-			r.mu.Lock()
-			defer r.mu.Unlock()
-			if err != nil {
-				log.Printf("latest release: %v", err)
-				ok = false
-				if r.latest[proto].v == (hyVersion{}) {
-					r.latest[proto] = release{err: err.Error()}
-				}
-				return
-			}
-			r.latest[proto] = release{v: v}
-		}()
+	v, err := latestRelease(hysteriaURL)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err != nil {
+		log.Printf("latest release: %v", err)
+		if r.latest[protoHy2].v == (hyVersion{}) {
+			r.latest[protoHy2] = release{err: err.Error()}
+		}
+		return false
 	}
-	wg.Wait()
-	return ok
+	r.latest[protoHy2] = release{v: v}
+	return true
 }
 
-// watch checks a few times a day; while neither server is installed there
+// watch checks a few times a day; while Hysteria is not installed there
 // is nothing to compare with, so it does not ask.
 func (r *releases) watch() {
 	for {
 		next := 6 * time.Hour
-		if (fileExists(hysteriaBin) || fileExists(xrayBin)) && !r.check() {
+		if fileExists(hysteriaBin) && !r.check() {
 			next = 30 * time.Minute
 		}
 		time.Sleep(next)
@@ -320,7 +280,7 @@ var releaseClient = &http.Client{Timeout: 20 * time.Second,
 
 // latestRelease reads the version off where releases/latest leads, the
 // page the downloads come from (base is its download/ URL): GitHub sends it
-// to .../releases/tag/app/v2.6.1 (Hysteria) or .../tag/v25.9.11 (Xray),
+// to .../releases/tag/app/v2.6.1,
 // through a moved repository's redirect first if there is one. No API, so
 // no API rate limit.
 func latestRelease(base string) (hyVersion, error) {

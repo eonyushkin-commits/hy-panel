@@ -16,11 +16,9 @@ type Endpoint struct {
 	SNI      string
 	ObfsType string
 	ObfsPass string
-	Pin      string     // hex sha256 of a self-signed cert
-	ECH      string     // base64 ECHConfigList, "" if ECH is off
-	Name     string     // profile/remark prefix
-	Vless    *Vless     // Xray's VLESS + Reality, nil if off
-	AWG      *awgConfig // AmneziaWG server, nil if off
+	Pin      string // hex sha256 of a self-signed cert
+	ECH      string // base64 ECHConfigList, "" if ECH is off
+	Name     string // profile/remark prefix
 }
 
 // endpointFor builds the link parameters from the Hysteria config and the
@@ -122,13 +120,9 @@ func (e Endpoint) URI(u User) string {
 // hy2Proto is Hysteria 2: on when the server has its config (a port).
 type hy2Proto struct{}
 
-func (hy2Proto) ID() string                          { return protoHy2 }
-func (hy2Proto) Title() string                       { return "Hysteria 2" }
-func (hy2Proto) On(e Endpoint) bool                  { return e.Port != "" }
-func (hy2Proto) Link(e Endpoint, u User) string      { return e.URI(u) }
-func (hy2Proto) InSubscription() bool                { return true }
-func (hy2Proto) ProxyName(e Endpoint, u User) string { return e.remark(u) }
-func (hy2Proto) Mihomo(e Endpoint, u User) string    { return e.Mihomo(u) }
+func (hy2Proto) ID() string                     { return protoHy2 }
+func (hy2Proto) Title() string                  { return "Hysteria 2" }
+func (hy2Proto) Link(e Endpoint, u User) string { return e.URI(u) }
 
 // Mihomo returns a proxy list item for mihomo (Clash Meta).
 func (e Endpoint) Mihomo(u User) string {
@@ -159,93 +153,6 @@ func (e Endpoint) Mihomo(u User) string {
 	if e.ECH != "" {
 		fmt.Fprintf(&b, "    ech-opts: {enable: true, config: %q}\n", e.ECH)
 	}
-	return b.String()
-}
-
-// vlessProto is VLESS + Reality (Xray): on once hy-panel xray set it up.
-type vlessProto struct{}
-
-func (vlessProto) ID() string                          { return protoVless }
-func (vlessProto) Title() string                       { return "VLESS" }
-func (vlessProto) On(e Endpoint) bool                  { return e.Vless != nil }
-func (vlessProto) Link(e Endpoint, u User) string      { return e.VlessURI(u) }
-func (vlessProto) InSubscription() bool                { return true }
-func (vlessProto) ProxyName(e Endpoint, u User) string { return e.vlessRemark(u) }
-func (vlessProto) Mihomo(e Endpoint, u User) string    { return e.MihomoVless(u) }
-
-// The Safari preset and ClientHello size depend on the client core version.
-const realityFP = "safari"
-
-// VlessURI builds the vless:// share link the way v2rayN and the Xray apps
-// (Happ, v2RayTun, Streisand) read it; "" if VLESS is off.
-func (e Endpoint) VlessURI(u User) string {
-	v := e.Vless
-	if v == nil {
-		return ""
-	}
-	q := url.Values{}
-	q.Set("encryption", "none")
-	q.Set("security", "reality")
-	q.Set("sni", v.SNI)
-	q.Set("fp", realityFP)
-	q.Set("pbk", v.PublicKey)
-	if v.ShortID != "" {
-		q.Set("sid", v.ShortID)
-	}
-	q.Set("type", v.Network)
-	if v.Network == "xhttp" {
-		q.Set("path", v.Path)
-		q.Set("mode", v.Mode)
-		if v.Host != "" {
-			q.Set("host", v.Host)
-		}
-	}
-	if v.Flow != "" {
-		q.Set("flow", v.Flow)
-	}
-	l := url.URL{
-		Scheme:   "vless",
-		User:     url.User(u.UUID),
-		Host:     net.JoinHostPort(e.Host, v.Port),
-		RawQuery: q.Encode(),
-		Fragment: e.vlessRemark(u),
-	}
-	return l.String()
-}
-
-func (e Endpoint) vlessRemark(u User) string { return e.remark(u) + "-vless" }
-
-// MihomoVless returns the VLESS proxy list item for mihomo, "" if VLESS is off.
-func (e Endpoint) MihomoVless(u User) string {
-	v := e.Vless
-	if v == nil {
-		return ""
-	}
-	var b strings.Builder
-	w := func(k, v string) { fmt.Fprintf(&b, "    %s: %s\n", k, v) }
-	q := func(k, v string) { w(k, fmt.Sprintf("%q", v)) } // quoted: a hex short-id could read as a number
-	fmt.Fprintf(&b, "  - name: %q\n", e.vlessRemark(u))
-	w("type", "vless")
-	q("server", e.Host)
-	w("port", v.Port)
-	q("uuid", u.UUID)
-	w("udp", "true")
-	w("packet-encoding", "xudp")
-	w("tls", "true")
-	q("servername", v.SNI)
-	w("client-fingerprint", realityFP)
-	w("network", v.Network)
-	if v.Flow != "" {
-		w("flow", v.Flow)
-	}
-	if v.Network == "xhttp" {
-		host := ""
-		if v.Host != "" {
-			host = fmt.Sprintf(", host: %q", v.Host)
-		}
-		fmt.Fprintf(&b, "    xhttp-opts: {path: %q, mode: %q%s}\n", v.Path, v.Mode, host)
-	}
-	fmt.Fprintf(&b, "    reality-opts: {public-key: %q, short-id: %q}\n", v.PublicKey, v.ShortID)
 	return b.String()
 }
 

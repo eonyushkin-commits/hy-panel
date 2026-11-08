@@ -10,9 +10,8 @@ import (
 )
 
 func fullFixture() (Endpoint, User) {
-	xs, _ := parseXray(freshXray("443", "lurkpro.tech"))
-	e := Endpoint{Host: "203.0.113.7", Port: "443", Name: "NL", Vless: &xs.Link, AWG: newAWGConfig(51820)}
-	u := User{Name: "u", Password: "secret123", UUID: newUUID(), AWGKey: newWGKey(), AWGIndex: 2, SubToken: "tok-u"}
+	e := Endpoint{Host: "203.0.113.7", Port: "443", Name: "NL"}
+	u := User{Name: "u", Password: "secret123", SubToken: "tok-u"}
 	return e, u
 }
 
@@ -37,7 +36,7 @@ func TestMihomoFull(t *testing.T) {
 		}
 	}
 	read(true)
-	if len(cfg.Proxies) != 3 || cfg.Proxies[0].Name != "NL-u" || cfg.Proxies[1].Name != "NL-u-awg" || cfg.Proxies[2].Name != "NL-u-vless" {
+	if len(cfg.Proxies) != 1 || cfg.Proxies[0].Name != "NL-u" {
 		t.Fatalf("proxies not in fallback order: %+v", cfg.Proxies)
 	}
 	if cfg.Rules[0] != "IP-CIDR,203.0.113.7/32,DIRECT,no-resolve" || cfg.Rules[len(cfg.Rules)-1] != "MATCH,DIRECT" {
@@ -57,7 +56,7 @@ func TestMihomoFull(t *testing.T) {
 		t.Fatal("two users, one secret")
 	}
 	read(false)
-	if cfg.Secret != nil || cfg.Tproxy != nil || len(cfg.Proxies) != 3 {
+	if cfg.Secret != nil || cfg.Tproxy != nil || len(cfg.Proxies) != 1 {
 		t.Fatalf("desktop kept router keys: secret=%v tproxy=%v", cfg.Secret, cfg.Tproxy)
 	}
 
@@ -70,11 +69,7 @@ func TestMihomoFull(t *testing.T) {
 			t.Errorf("%s: %v", host, err)
 		}
 	}
-	u3 := u
-	u3.ProtoOff = []string{protoHy2, protoAWG}
-	if b, err := e.MihomoFull(mihomoBuiltin, u3, false); err != nil || strings.Count(string(b), "\n  - name: \"NL-u") != 1 {
-		t.Fatalf("one protocol: %v", err)
-	}
+
 }
 
 func TestMihomoTemplates(t *testing.T) {

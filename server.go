@@ -31,22 +31,20 @@ type App struct {
 	reservations map[string][]time.Time // Hysteria admissions awaiting a fresh online snapshot, under mu
 	store        *Store
 	hy           *hyBackend // nil: Hysteria not set up
-	backends     []backend  // the protocols' servers the panel syncs, Hysteria's first
+	backends     []backend  // Hysteria's statistics source
 	hyOpts       *hyOpts    // Hysteria's port, obfs, certificate; nil: not set up
 	agent        *agentClient
-	siteScan     scanState // the search for a Reality site
 	ep           Endpoint
 	password     string
 	subBase      string   // public base URL of the subscription listener, "" = disabled
-	cfgErr       string   // Hysteria or Xray config unreadable: no links are handed out
+	cfgErr       string   // Hysteria config unreadable: no links are handed out
 	warns        []string // shown in the panel banner (set once before serving)
 	key          []byte
 	loginMu      sync.Mutex // serializes logins: ~1 guess/s total, not per connection
 	poke         chan struct{}
 
 	mu        sync.RWMutex
-	live      map[string]*live // per protocol: who is online, sync errors
-	targetErr string
+	live      map[string]*live      // per protocol: who is online, sync errors
 	lastSync  time.Time             // Hysteria's sessions were last read
 	revoked   map[string]revocation // password changed: drop old sessions
 	listenErr map[string]string     // public listener → why it does not run
@@ -55,7 +53,7 @@ type App struct {
 }
 
 // newApp makes the panel; stats is Hysteria's trafficStats, nil if it is
-// not set up. Xray's and AmneziaWG's backends are added after.
+// not set up.
 func newApp(store *Store, stats *statsClient, ep Endpoint, password string, key []byte) *App {
 	a := &App{store: store, ep: ep, password: password, key: key,
 		poke: make(chan struct{}, 1), live: map[string]*live{}, revoked: map[string]revocation{},
@@ -150,7 +148,7 @@ func (a *App) guard(h http.HandlerFunc) http.HandlerFunc {
 
 type userView struct {
 	User
-	Online  map[string]int `json:"online"` // per protocol: Hysteria sessions, VLESS client IPs, AmneziaWG 1
+	Online  map[string]int `json:"online"` // Hysteria sessions
 	Status  string         `json:"status"` // "", disabled, expired, quota
 	Links   []link         `json:"links"`  // the user's protocols, in fallback order
 	SubPath string         `json:"subPath"`
@@ -198,9 +196,6 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 			problems = append(problems, b.errText()+l.err)
 		}
 	}
-	if a.targetErr != "" {
-		problems = append(problems, a.targetErr)
-	}
 	problems = append(problems, listen...)
 	a.mu.RUnlock()
 	users := a.store.List()
@@ -220,14 +215,10 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 	for _, p := range a.ep.running() {
 		protos = append(protos, map[string]string{"id": p.ID(), "title": p.Title()})
 	}
-	var vless any
-	if v := a.ep.Vless; v != nil {
-		vless = map[string]any{"port": v.Port, "sni": v.SNI, "network": v.Network}
-	}
 	writeJSON(w, map[string]any{
 		"users": views,
 		"server": map[string]any{"host": a.ep.Host, "port": a.ep.Port, "obfs": a.ep.ObfsType, "sni": a.ep.SNI, "pinned": a.ep.Pin != "",
-			"vless": vless, "protocols": protos},
+			"protocols": protos},
 		"problems":       strings.Join(problems, "; "),
 		"lastSync":       last.Unix(),
 		"onlineStatus":   freshness,
@@ -238,17 +229,16 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 }
 
 type userPatch struct {
-	Name         string    `json:"name"`
-	Password     *string   `json:"password"` // "" = generate
-	Enabled      *bool     `json:"enabled"`
-	QuotaBytes   *int64    `json:"quotaBytes"`
-	ResetMonthly *bool     `json:"resetMonthly"`
-	ExpiresAt    *int64    `json:"expiresAt"`
-	MaxDevices   *int      `json:"maxDevices"`
-	Note         *string   `json:"note"`
-	ProtoOff     *[]string `json:"protoOff"` // protocols the user may not use
-	ResetTraffic bool      `json:"resetTraffic"`
-	NewKey       bool      `json:"newKey"` // new password, VLESS key and subscription link
+	Name         string  `json:"name"`
+	Password     *string `json:"password"` // "" = generate
+	Enabled      *bool   `json:"enabled"`
+	QuotaBytes   *int64  `json:"quotaBytes"`
+	ResetMonthly *bool   `json:"resetMonthly"`
+	ExpiresAt    *int64  `json:"expiresAt"`
+	MaxDevices   *int    `json:"maxDevices"`
+	Note         *string `json:"note"`
+	ResetTraffic bool    `json:"resetTraffic"`
+	NewKey       bool    `json:"newKey"` // new password and subscription link
 }
 
 // check rejects a hand-set password too short for Hysteria, which also
@@ -256,13 +246,6 @@ type userPatch struct {
 func (p userPatch) check() error {
 	if p.Password != nil && *p.Password != "" && len(*p.Password) < 8 {
 		return errors.New("пароль: не короче 8 символов (пусто — сгенерировать)")
-	}
-	if p.ProtoOff != nil {
-		for _, id := range *p.ProtoOff {
-			if !knownProto(id) {
-				return errors.New("неизвестный протокол: " + id)
-			}
-		}
 	}
 	return nil
 }
@@ -289,14 +272,6 @@ func (p userPatch) apply(u *User, now time.Time) {
 	if p.Note != nil {
 		u.Note = strings.TrimSpace(*p.Note)
 	}
-	if p.ProtoOff != nil {
-		off := slices.Clone(*p.ProtoOff)
-		slices.Sort(off)
-		u.ProtoOff = slices.Compact(off)
-		if len(u.ProtoOff) == 0 {
-			u.ProtoOff = nil
-		}
-	}
 	if p.ResetTraffic {
 		u.Up, u.Down = 0, 0
 	}
@@ -309,8 +284,6 @@ func (p userPatch) apply(u *User, now time.Time) {
 	if p.NewKey {
 		u.Password = randStr(20)
 		u.SubToken = randStr(24)
-		u.UUID = newUUID()
-		u.AWGKey = newWGKey()
 	}
 }
 
@@ -341,7 +314,7 @@ func (a *App) handleCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	a.requestSync() // into Xray now, not in up to 10 s
+	a.requestSync()
 	writeJSON(w, u)
 }
 
@@ -372,7 +345,7 @@ func (a *App) handlePatch(w http.ResponseWriter, r *http.Request) {
 		a.revoked[name] = revocation{at: now, until: now.Add(revokeWindow)}
 		a.mu.Unlock()
 	}
-	a.requestSync() // blocks, re-keys and Xray's user list take effect now
+	a.requestSync()
 	writeJSON(w, u)
 }
 
@@ -402,7 +375,7 @@ func (a *App) handleQR(w http.ResponseWriter, r *http.Request) {
 		text = a.subBase + "/sub/" + u.SubToken
 	}
 	level, size := qrcode.Medium, 320
-	if len(text) > 400 { // an AmneziaWG config: bigger and with less redundancy, so phones read it
+	if len(text) > 400 { // long link: use a larger QR code
 		level, size = qrcode.Low, 480
 	}
 	png, err := qrcode.Encode(text, level, size)
@@ -449,23 +422,6 @@ func (a *App) handleMihomo(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleAWGConf downloads u's AmneziaWG config as a file the apps import.
-func (a *App) handleAWGConf(w http.ResponseWriter, r *http.Request) {
-	if a.noLinks(w) {
-		return
-	}
-	u, ok := a.store.Get(r.PathValue("name"))
-	if !ok || !slices.Contains(a.ep.UserProtocols(u), protoAWG) {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	// Apps name the tunnel after the file: keep it short and plain.
-	w.Header().Set("Content-Disposition", `attachment; filename="`+fileName(a.ep.awgRemark(u))+`.conf"`)
-	fmt.Fprint(w, a.ep.AWGConf(u))
-}
-
 // fileName keeps a name to what every system takes in a file name.
 func fileName(s string) string {
 	return strings.Map(func(r rune) rune {
@@ -487,7 +443,7 @@ func (a *App) mihomoFull(u User, router bool) ([]byte, error) {
 
 // ---- subscription (public listener, token-protected) ----
 
-// noLinks answers 503 while the Hysteria or Xray config is unreadable, so
+// noLinks answers 503 while the Hysteria config is unreadable, so
 // clients keep their working profile instead of fetching a broken one.
 func (a *App) noLinks(w http.ResponseWriter) bool {
 	if a.cfgErr != "" {
@@ -552,12 +508,6 @@ func (a *App) handleSystem(w http.ResponseWriter, r *http.Request) {
 	if o := a.hyOpts; o != nil {
 		settings[protoHy2] = map[string]any{"port": o.Port, "obfs": o.Obfs, "domain": o.Domain, "email": o.Email}
 	}
-	if v := a.ep.Vless; v != nil {
-		settings[protoVless] = map[string]any{"port": v.Port, "sni": v.SNI, "network": v.Network}
-	}
-	if c := a.ep.AWG; c != nil {
-		settings[protoAWG] = map[string]any{"port": c.Port, "net": awgNet.String()}
-	}
 	writeJSON(w, map[string]any{"status": st, "settings": settings, "agentError": agentErr, "host": a.ep.Host})
 }
 
@@ -604,42 +554,6 @@ func (a *App) proxyAgent(w http.ResponseWriter, method, path string, body io.Rea
 	w.Write(b)
 }
 
-// handleCheckTarget checks a site for Reality before it is chosen.
-func (a *App) handleCheckTarget(w http.ResponseWriter, r *http.Request) {
-	d := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("domain")))
-	if !validHostname(d) || !strings.Contains(d, ".") {
-		http.Error(w, "нужен домен", http.StatusBadRequest)
-		return
-	}
-	res := map[string]any{"ok": true, "note": strings.TrimLeft(subnetNote(d, a.ep.Host), ",; ")}
-	if err := checkTarget(net.JoinHostPort(d, "443"), d); err != nil {
-		res["ok"], res["error"] = false, err.Error()
-	}
-	writeJSON(w, res)
-}
-
-// handleSiteScanStart starts the search for a Reality site in the server's
-// /24 (one at a time); handleSiteScan reports its progress and finds.
-func (a *App) handleSiteScanStart(w http.ResponseWriter, r *http.Request) {
-	ip, err := serverIPv4(a.ep.Host)
-	if err != nil {
-		http.Error(w, "адрес сервера: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	st := &a.siteScan
-	st.mu.Lock()
-	if !st.Running {
-		st.Running, st.Done, st.Found = true, 0, nil
-		go newSiteScanner().run(st, ip)
-	}
-	st.mu.Unlock()
-	writeJSON(w, st.snapshot())
-}
-
-func (a *App) handleSiteScan(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, a.siteScan.snapshot())
-}
-
 // underPath serves h only below a secret path, like 3x-ui's web base path:
 // everything else is a plain 404, so scanners do not find the panel.
 func underPath(p string, h http.Handler) http.Handler {
@@ -677,14 +591,10 @@ func (a *App) routes(withAuth bool) http.Handler {
 	mux.HandleFunc("DELETE /api/users/{name}", a.guard(a.handleDelete))
 	mux.HandleFunc("GET /api/users/{name}/qr.png", a.guard(a.handleQR))
 	mux.HandleFunc("GET /api/users/{name}/mihomo", a.guard(a.handleMihomo))
-	mux.HandleFunc("GET /api/users/{name}/awg.conf", a.guard(a.handleAWGConf))
 	mux.HandleFunc("GET /api/system", a.guard(a.handleSystem))
 	mux.HandleFunc("POST /api/system/jobs", a.guard(a.handleJobStart))
 	mux.HandleFunc("GET /api/system/job", a.guard(a.handleJob))
 	mux.HandleFunc("POST /api/system/releases", a.guard(a.handleReleases))
-	mux.HandleFunc("GET /api/system/check-target", a.guard(a.handleCheckTarget))
-	mux.HandleFunc("POST /api/system/site-scan", a.guard(a.handleSiteScanStart))
-	mux.HandleFunc("GET /api/system/site-scan", a.guard(a.handleSiteScan))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Content-Type", "text/html; charset=utf-8")

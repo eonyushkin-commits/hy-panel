@@ -635,15 +635,8 @@ func TestCountersFlushedLater(t *testing.T) {
 	}
 }
 
-// Drive both production loops deterministically.
-func (a *App) syncOnce(now time.Time) {
-	for _, b := range a.backends {
-		if x, ok := b.(*xrayBackend); ok {
-			x.pollOnline(a.store.List())
-		}
-	}
-	a.syncAccess(now)
-}
+// Drive the production sync loop deterministically.
+func (a *App) syncOnce(now time.Time) { a.syncAccess(now) }
 
 func TestReconnectAfterStaleFullSnapshot(t *testing.T) {
 	f, stats := newFakeHy(t)
@@ -759,7 +752,7 @@ func TestConfigReplacementKeepsOldInode(t *testing.T) {
 	if err := writeKeepingOwner(path, []byte("new")); err != nil {
 		t.Fatal(err)
 	}
-	old, err := os.ReadFile(path+".old")
+	old, err := os.ReadFile(path + ".old")
 	if err != nil || string(old) != "old" {
 		t.Fatal(string(old), err)
 	}

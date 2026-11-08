@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
-	"log"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -17,24 +16,20 @@ import (
 )
 
 type User struct {
-	Name         string   `json:"name"`
-	Password     string   `json:"password"`
-	SubToken     string   `json:"subToken"`
-	UUID         string   `json:"uuid"`               // VLESS key (Xray)
-	ProtoOff     []string `json:"protoOff,omitempty"` // protocols the user may not use; empty = all
-	AWGKey       string   `json:"awgKey"`             // AmneziaWG private key (the client's)
-	AWGIndex     int      `json:"awgIndex"`           // AmneziaWG address: awgIP(index)
-	Enabled      bool     `json:"enabled"`
-	QuotaBytes   int64    `json:"quotaBytes"`   // 0 = unlimited, counts up+down
-	ResetMonthly bool     `json:"resetMonthly"` // zero traffic on the 1st of each month (server time)
-	LastReset    int      `json:"lastReset"`    // yyyymm of the last monthly reset
-	ExpiresAt    int64    `json:"expiresAt"`    // unix seconds, 0 = never
-	MaxDevices   int      `json:"maxDevices"`   // 0 = unlimited
-	Up           int64    `json:"up"`           // client → server
-	Down         int64    `json:"down"`         // server → client
-	CreatedAt    int64    `json:"createdAt"`
-	LastSeen     int64    `json:"lastSeen"`
-	Note         string   `json:"note"`
+	Name         string `json:"name"`
+	Password     string `json:"password"`
+	SubToken     string `json:"subToken"`
+	Enabled      bool   `json:"enabled"`
+	QuotaBytes   int64  `json:"quotaBytes"`   // 0 = unlimited, counts up+down
+	ResetMonthly bool   `json:"resetMonthly"` // zero traffic on the 1st of each month (server time)
+	LastReset    int    `json:"lastReset"`    // yyyymm of the last monthly reset
+	ExpiresAt    int64  `json:"expiresAt"`    // unix seconds, 0 = never
+	MaxDevices   int    `json:"maxDevices"`   // 0 = unlimited
+	Up           int64  `json:"up"`           // client → server
+	Down         int64  `json:"down"`         // server → client
+	CreatedAt    int64  `json:"createdAt"`
+	LastSeen     int64  `json:"lastSeen"`
+	Note         string `json:"note"`
 }
 
 // Blocked returns why the user may not connect right now, "" if allowed.
@@ -49,9 +44,6 @@ func (u *User) Blocked(now time.Time) string {
 	}
 	return ""
 }
-
-// Uses reports whether the user may connect over proto.
-func (u *User) Uses(proto string) bool { return !slices.Contains(u.ProtoOff, proto) }
 
 func yyyymm(t time.Time) int { return t.Year()*100 + int(t.Month()) }
 
@@ -81,29 +73,22 @@ func OpenStore(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	var list []*User
+	var list []struct {
+		User
+		ProtoOff []string `json:"protoOff"` // legacy per-protocol switch
+	}
 	if err := json.Unmarshal(b, &list); err != nil {
 		return nil, err
 	}
-	missing := false
-	for _, u := range list {
-		s.users[u.Name] = u
-	}
-	for _, u := range list {
-		if u.UUID == "" {
-			u.UUID, missing = newUUID(), true
-		}
-		if u.AWGKey == "" {
-			u.AWGKey, u.AWGIndex, missing = newWGKey(), s.freeIndex(), true
-		}
-	}
-	if missing {
-		// Users from before VLESS: saved now, so their keys do not change on
-		// the next start. A full disk must not keep /auth down: Flush retries.
-		if err := s.writeLocked(); err != nil {
-			log.Printf("WARN: save new VLESS keys: %v", err)
+	// Read the old multi-protocol database without changing Hysteria credentials.
+	// A user whose Hysteria access was off remains disabled until enabled by the admin.
+	for i := range list {
+		u := &list[i].User
+		if slices.Contains(list[i].ProtoOff, protoHy2) {
+			u.Enabled = false
 			s.dirty = true
 		}
+		s.users[u.Name] = u
 	}
 	return s, nil
 }
@@ -214,29 +199,6 @@ func (s *Store) Resolve(auth string) (User, bool) {
 	return User{}, false
 }
 
-// freeIndex is the lowest AmneziaWG address index no user has (mu held).
-func (s *Store) freeIndex() int {
-	used := map[int]bool{}
-	for _, u := range s.users {
-		used[u.AWGIndex] = true
-	}
-	i := 2
-	for used[i] && i < awgMaxIndex {
-		i++
-	}
-	return i
-}
-
-// checkUUID must be called with mu held: two users with one UUID would be one user for Xray.
-func (s *Store) checkUUID(id, self string) error {
-	for _, o := range s.users {
-		if o.Name != self && o.UUID == id {
-			return errors.New("uuid already used by " + o.Name)
-		}
-	}
-	return nil
-}
-
 // checkPassword must be called with mu held.
 func (s *Store) checkPassword(pw, self string) error {
 	if len(pw) < 8 || len(pw) > 128 || strings.ContainsAny(pw, ": \t\r\n") {
@@ -250,7 +212,7 @@ func (s *Store) checkPassword(pw, self string) error {
 	return nil
 }
 
-// Create adds a user; an empty password or UUID is generated.
+// Create adds a user; an empty password is generated.
 func (s *Store) Create(u User) (User, error) {
 	u.Name = strings.ToLower(u.Name)
 	if !nameRe.MatchString(u.Name) {
@@ -258,9 +220,6 @@ func (s *Store) Create(u User) (User, error) {
 	}
 	if u.Password == "" {
 		u.Password = randStr(20)
-	}
-	if u.UUID == "" {
-		u.UUID = newUUID()
 	}
 	now := time.Now()
 	u.SubToken = randStr(24)
@@ -272,12 +231,6 @@ func (s *Store) Create(u User) (User, error) {
 		}
 		if err := s.checkPassword(u.Password, u.Name); err != nil {
 			return nil, err
-		}
-		if err := s.checkUUID(u.UUID, u.Name); err != nil {
-			return nil, err
-		}
-		if u.AWGKey == "" {
-			u.AWGKey, u.AWGIndex = newWGKey(), s.freeIndex()
 		}
 		nu := u // the stored copy is the store's; u is returned
 		s.users[u.Name] = &nu
@@ -302,12 +255,6 @@ func (s *Store) Update(name string, fn func(*User) error) (User, error) {
 		}
 		if u.Password != old.Password {
 			if err := s.checkPassword(u.Password, name); err != nil {
-				undo()
-				return nil, err
-			}
-		}
-		if u.UUID != old.UUID {
-			if err := s.checkUUID(u.UUID, name); err != nil {
 				undo()
 				return nil, err
 			}

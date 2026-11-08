@@ -17,20 +17,18 @@ import (
 
 var version = "dev" // set by -ldflags "-X main.version=v0.2.0"
 
-const usage = `hy-panel — VPN-панель: Hysteria 2, AmneziaWG 3.1, VLESS + Reality (Xray)
+const usage = `hy-panel — VPN-панель: Hysteria 2
 
   hy-panel install     поставить панель или обновить программу (настройки и пользователи остаются);
-                       протоколы ставятся и настраиваются в самой панели
+                       Hysteria устанавливается и настраивается в самой панели
   hy-panel info        адрес и пароль панели
   hy-panel passwd      новый пароль панели
   hy-panel uninstall -y          удалить панель; пользователи и настройки сохранятся
                        (-purge — удалить и их)
 
-Их запускает агент панели (из окон «Протоколы»), можно и вручную, только с флагами:
+Их запускает агент панели (из настроек Hysteria), можно и вручную, только с флагами:
   hy-panel settings -port … -obfs … -cert …   Hysteria: установить, сменить порт, обфускацию, сертификат
-  hy-panel xray -target сайт [-port 443]       VLESS + Reality: установить или сменить сайт для маскировки
-  hy-panel awg [-port …]                       AmneziaWG: установить или сменить порт
-  hy-panel fetch hysteria|xray                 поставить или обновить сервер из официального релиза
+  hy-panel fetch hysteria                 поставить или обновить сервер из официального релиза
 `
 
 func main() {
@@ -51,12 +49,6 @@ func main() {
 		runFetch(os.Args[2:])
 	case "agent":
 		runAgent()
-	case "awg":
-		runAWG(os.Args[2:])
-	case "awg-serve":
-		runAWGServe()
-	case "xray":
-		runXray(os.Args[2:])
 	case "info":
 		printInfo(readEnv())
 	case "passwd":
@@ -109,16 +101,6 @@ func serve() {
 	if !hyOn {
 		ep.Port = "" // no Hysteria links
 	}
-	// VLESS is on once hy-panel xray has set it up.
-	var xs *xraySetup
-	if xp := env["HYP_XRAY_CONFIG"]; xp != "" {
-		if xs, err = readXray(xp); err != nil {
-			log.Printf("WARN: xray %s: %v", xp, err)
-			cfgErr = strings.TrimPrefix(cfgErr+"; конфиг Xray: "+err.Error(), "; ")
-		} else {
-			ep.Vless = &xs.Link
-		}
-	}
 	// The session key survives restarts: the panel restarts after every
 	// protocol change made in it, and must not log the admin out.
 	key, err := sessionKey(dataDir + "/session.key")
@@ -138,28 +120,6 @@ func serve() {
 	app.agent = newAgentClient(agentSock)
 	log.Printf("hy-panel %s; links: %s:%s sni=%q obfs=%q pinned=%v ech=%v", version,
 		app.ep.Host, app.ep.Port, app.ep.SNI, app.ep.ObfsType, app.ep.Pin != "", app.ep.ECH != "")
-	if xs != nil {
-		app.addBackend(&xrayBackend{api: newXrayAPI(xs.API), tag: xs.Tag, flow: xs.Link.Flow})
-		if xs.Warn != "" {
-			log.Printf("WARN: xray: %s", xs.Warn)
-			app.warns = append(app.warns, xs.Warn)
-		}
-		log.Printf("vless: :%s/tcp %s sni=%q, inbound %q, api %s", xs.Link.Port, xs.Link.Network, xs.Link.SNI, xs.Tag, xs.API)
-		if xs.Link.Target != "" {
-			go app.watchTarget(xs.Link.Target, xs.Link.SNI)
-		}
-	}
-	if fileExists(awgCfgPath) {
-		if c, err := readAWG(awgCfgPath); err != nil {
-			log.Printf("WARN: %s: %v", awgCfgPath, err)
-			app.cfgErr = strings.TrimPrefix(app.cfgErr+"; конфиг AmneziaWG: "+err.Error(), "; ")
-		} else {
-			app.ep.AWG = c
-			app.addBackend(newAWGBackend(newAWGClient(awgSock)))
-			log.Printf("awg: udp :%d", c.Port)
-		}
-	}
-
 	if port := env["HYP_UI_PORT"]; port != "" && port != "off" {
 		addr := ":" + port
 		go app.keepServing("порт панели "+port, func() error {

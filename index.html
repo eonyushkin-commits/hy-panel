@@ -99,14 +99,11 @@ input:hover,textarea:hover,select:hover{border-color:var(--mute)}
 .empty{padding:48px 16px;text-align:center}
 
 /* protocols */
-.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-bottom:16px}
+.pgrid{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;margin-bottom:16px}
 .pcard{padding:14px 16px;display:flex;flex-direction:column;gap:6px}
 .pcard .ph{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .pcard .pa{display:flex;gap:8px;margin-top:4px;flex-wrap:wrap}
 .joblog{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface-2);border-radius:var(--r-sm);padding:10px 12px;max-height:50vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
-.sites{display:grid;gap:4px;margin-top:6px;max-height:220px;overflow:auto}
-.sites button{justify-content:space-between;text-align:left;font-size:13px;padding:6px 10px}
-.sites button small{color:var(--mute)}
 .check{font-size:12.5px;margin-top:6px}.check.ok{color:var(--ok)}.check.bad{color:var(--bad)}
 .empty button{margin-top:12px}
 
@@ -173,7 +170,7 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
   <div id="login" class="card" hidden>
     <div class="logo"><svg class="i"><use href="#i-globe"/></svg></div>
     <h1>hy-panel</h1>
-    <div class="mute small">VPN-панель: Hysteria 2, AmneziaWG, VLESS</div>
+    <div class="mute small">VPN-панель Hysteria 2</div>
     <form>
       <input type="password" name="password" placeholder="Пароль" autocomplete="current-password" autofocus>
       <button class="pri">Войти</button>
@@ -220,10 +217,9 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
     <div class="grid">
       <label class="full" id="nameWrap"><span>Имя (a-z 0-9 _ . -)</span><input name="name" required pattern="[A-Za-z0-9_.\-]{1,32}" autocapitalize="off" autocomplete="off"></label>
       <label><span>Лимит трафика, ГБ</span><input name="quota" type="number" min="0" step="any" placeholder="без лимита"></label>
-      <label><span>Устройств одновременно <button type="button" class="tip" onclick="this.focus()" aria-label="Подсказка" data-tip="Телефону лучше разрешить не меньше двух устройств. Когда телефон переключается между Wi-Fi и мобильной сетью, прежнее подключение сохраняется ещё около тридцати секунд и тоже учитывается в лимите. Лимит действует на Hysteria: VLESS он не ограничивает."><svg class="i"><use href="#i-info"/></svg></button></span><input name="devices" type="number" min="0" placeholder="без лимита"></label>
+      <label><span>Устройств одновременно <button type="button" class="tip" onclick="this.focus()" aria-label="Подсказка" data-tip="Телефону лучше разрешить не меньше двух устройств. Когда телефон переключается между Wi-Fi и мобильной сетью, прежнее подключение сохраняется ещё около тридцати секунд и тоже учитывается в лимите."><svg class="i"><use href="#i-info"/></svg></button></span><input name="devices" type="number" min="0" placeholder="без лимита"></label>
       <label><span>Действует до</span><input name="expires" type="date"></label>
       <label><span>Пароль</span><input name="password" autocomplete="off" pattern="[^:\s]{8,128}" title="8–128 символов, без двоеточия и пробелов"></label>
-      <div class="full" id="protoWrap"><label><span>Протоколы</span></label><div class="protos" id="protoBoxes"></div></div>
       <label class="full chk"><input type="checkbox" name="monthly" class="sw"> Сбрасывать трафик 1-го числа</label>
       <label class="full"><span>Заметка</span><input name="note" maxlength="200"></label>
     </div>
@@ -269,30 +265,6 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
     </div>
     <div class="mute small hint" id="hyHint"></div>
     <div class="row"><button type="button" onclick="$('#hyDlg').close()">Отмена</button><button class="pri" value="ok" id="hyBtn">Установить</button></div>
-  </form>
-</dialog>
-
-<dialog id="vlDlg">
-  <form method="dialog" id="vlForm" class="dlg">
-    <div class="dlg-h"><h2>VLESS + Reality</h2><button type="button" class="icon ghost" onclick="$('#vlDlg').close()" aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
-    <div class="grid">
-      <label class="full"><span>Порт (TCP)</span><input name="port" type="number" min="1" max="65535" value="443"></label>
-      <label class="full"><span>Сайт для маскировки — чужой сайт с TLS 1.3 и HTTP/2, лучше из той же подсети /24, что и сервер</span>
-        <div style="display:flex;gap:8px"><input name="target" placeholder="www.example.com" autocapitalize="off"><button type="button" onclick="checkSite()">Проверить</button><button type="button" id="findBtn" onclick="findSites()" title="Найти соседей сервера по /24 с TLS 1.3, HTTP/2 и ответом 200">Найти</button></div>
-        <div class="check" id="vlCheck"></div></label>
-      <div class="full" id="vlFind" hidden><div class="mute small" id="findState"></div><div class="sites" id="sites"></div></div>
-    </div>
-    <div class="mute small hint" id="vlHint"></div>
-    <div class="row"><button type="button" onclick="$('#vlDlg').close()">Отмена</button><button class="pri" value="ok" id="vlBtn">Установить</button></div>
-  </form>
-</dialog>
-
-<dialog id="awgDlg">
-  <form method="dialog" id="awgForm" class="dlg">
-    <div class="dlg-h"><h2>AmneziaWG 3.1</h2><button type="button" class="icon ghost" onclick="$('#awgDlg').close()" aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
-    <div class="grid"><label class="full"><span>Порт (UDP)</span><input name="port" type="number" min="1" max="65535"></label></div>
-    <div class="mute small hint" id="awgHint"></div>
-    <div class="row"><button type="button" onclick="$('#awgDlg').close()">Отмена</button><button class="pri" value="ok" id="awgBtn">Установить</button></div>
   </form>
 </dialog>
 
@@ -399,9 +371,7 @@ async function loadSystem() {
   renderProtocols();
 }
 const PROTOS = [
-  {id: 'hysteria2', title: 'Hysteria 2', what: 'UDP, быстрый. Основной протокол.', dlg: openHy},
-  {id: 'vless', title: 'VLESS + Reality', what: 'TCP, снаружи — обычный HTTPS-сайт. Запасной канал, если режут UDP.', dlg: openVl},
-  {id: 'awg', title: 'AmneziaWG 3.1', what: 'UDP, WireGuard с маскировкой. Приложения AmneziaWG и Amnezia VPN.', dlg: openAwg},
+  {id: 'hysteria2', title: 'Hysteria 2', what: 'Быстрый VPN по UDP.', dlg: openHy},
 ];
 function renderProtocols() {
   if (!SYS) return;
@@ -411,10 +381,7 @@ function renderProtocols() {
     let pill = '<span class="pill">не установлен</span>', info = esc(p.what), btns = '';
     if (c) {
       pill = s.active ? '<span class="pill ok">работает</span>' : '<span class="pill bad">остановлен</span>';
-      info = p.id === 'hysteria2'
-        ? `UDP ${esc(c.port)} · ${esc(c.obfs || 'без обфускации')} · ${c.domain ? esc(c.domain) + ' (Let\'s Encrypt)' : 'self-signed'}`
-        : p.id === 'vless' ? `TCP ${esc(c.port)} · ${esc(c.network)} · сайт ${esc(c.sni)}`
-        : `UDP ${esc(c.port)} · сеть ${esc(c.net)}`;
+      info = `UDP ${esc(c.port)} · ${esc(c.obfs || 'без обфускации')} · ${c.domain ? esc(c.domain) + " (Let's Encrypt)" : 'self-signed'}`;
       btns = `<button data-p="${p.id}" data-do="cfg">Настройки</button>`;
     } else if (s.installed) {
       pill = '<span class="pill warn">не настроен</span>';
@@ -425,7 +392,7 @@ function renderProtocols() {
     // An update is offered only when a newer release is out; if the agent
     // could not learn the latest one, it says why and can ask again.
     let ver = '';
-    if (s.installed && p.id !== 'awg') {
+    if (s.installed) {
       ver = 'Версия ' + esc(s.version) + (s.update ? ` · <b>вышла ${esc(s.latest)}</b>` : s.latest ? ' · последняя'
         : ` · <span title="${esc(s.latestErr || '')}">последнюю узнать не удалось</span>`);
       if (s.update) btns += `<button class="pri" data-p="${p.id}" data-do="update" title="Скачать официальный релиз ${esc(s.latest)}">Обновить до ${esc(s.latest)}</button>`;
@@ -441,7 +408,7 @@ $('#pgrid').onclick = e => {
   if (b.dataset.do === 'cfg') p.dlg();
   else if (b.dataset.do === 'check') checkReleases(p, b);
   else if (confirm(`Скачать последний релиз ${p.title} и перезапустить его? Подключения прервутся на секунду.`))
-    startJob('update-' + (p.id === 'vless' ? 'xray' : 'hysteria'), {}, 'Обновление ' + p.title);
+    startJob('update-hysteria', {}, 'Обновление ' + p.title);
 };
 
 async function checkReleases(p, b) {
@@ -480,79 +447,6 @@ $('#hyDlg').onclose = () => {
   startJob('hysteria', params, SYS.settings.hysteria2 ? 'Настройка Hysteria 2' : 'Установка Hysteria 2');
 };
 
-function openVl() {
-  const f = $('#vlForm'), c = SYS.settings.vless;
-  f.port.value = c ? c.port : 443;
-  f.target.value = c ? c.sni : ''; f.target.placeholder = c ? '' : 'www.example.com'; f.target.required = !c;
-  $('#vlCheck').textContent = ''; $('#vlFind').hidden = true; $('#findBtn').disabled = false;
-  $('#vlBtn').textContent = c ? 'Сохранить' : 'Установить';
-  $('#vlHint').textContent = c
-    ? `Сейчас порт ${c.port}, сайт — ${c.sni} (пустое поле — оставить его). Сайт меняют, если он перестал отвечать; порт — если провайдер режет TLS на этом порту. Ссылки VLESS изменятся, подписка обновится сама; кто добавил ссылку вручную — выдай новую.`
-    : 'Панель скачает официальный релиз Xray (с проверкой SHA-256), сделает ключи Reality и запустит службу. Конфиг Xray, написанный не панелью, заменится (прежний сохранится в .bak-hy-panel).';
-  $('#vlDlg').returnValue = ''; $('#vlDlg').showModal();
-}
-// findSites does what the guide did by hand: RealiTLScanner over the
-// server's /24, then a check of every site found (same /24, valid
-// certificate, TLS 1.3 + HTTP/2, answers 200).
-async function findSites() {
-  let st;
-  try { st = await api('POST', 'api/system/site-scan'); } catch { return; }
-  $('#vlFind').hidden = false; $('#findBtn').disabled = true;
-  while (st.running) {
-    showSites(st);
-    await new Promise(r => setTimeout(r, 1000));
-    if (!$('#vlDlg').open) { $('#findBtn').disabled = false; return; }
-    try { st = await api('GET', 'api/system/site-scan'); } catch { break; }
-  }
-  showSites(st); $('#findBtn').disabled = false;
-}
-function showSites(st) {
-  const ok = st.found.filter(c => c.status === 200).length;
-  $('#findState').textContent = st.running
-    ? `Ищу в ${st.net}: ${st.done} из ${st.total} адресов, подходящих ${ok}…`
-    : st.found.length ? `${st.net}: подходящих ${ok}. Лучшие сверху — выбери сайт, он подставится и проверится.`
-    : `${st.net}: соседей с TLS 1.3 и HTTP/2 не нашлось. Возьми сайт из соседней подсети провайдера или крупный сайт.`;
-  $('#sites').innerHTML = st.found.map(c => `<button type="button" data-d="${esc(c.domain)}">${esc(c.domain)}
-    <small>${esc(c.ip)}${c.sameIP ? '' : ' · DNS на соседний IP'} · ${c.ms} мс · ${c.status === 200 ? '200' : '<span style="color:var(--warn)">' + c.status + '</span>'}</small></button>`).join('');
-}
-$('#sites').onclick = e => {
-  const b = e.target.closest('[data-d]'); if (!b) return;
-  $('#vlForm').target.value = b.dataset.d; checkSite();
-};
-async function checkSite() {
-  const d = $('#vlForm').target.value.trim().toLowerCase(), el = $('#vlCheck');
-  if (!d) return;
-  el.className = 'check'; el.textContent = 'Проверяю…';
-  try {
-    const r = await api('GET', 'api/system/check-target?domain=' + encodeURIComponent(d));
-    el.className = 'check ' + (r.ok ? 'ok' : 'bad');
-    el.textContent = r.ok ? `✓ TLS 1.3, HTTP/2. ${r.note.charAt(0).toUpperCase() + r.note.slice(1)}.` : `✗ ${r.error}`;
-  } catch { el.textContent = ''; }
-}
-$('#vlDlg').onclose = () => {
-  if ($('#vlDlg').returnValue !== 'ok') return;
-  const f = $('#vlForm'), c = SYS.settings.vless;
-  const params = {target: f.target.value.trim().toLowerCase() || c.sni, port: String(f.port.value)};
-  if (c && params.target === c.sni && params.port === String(c.port)) return;
-  startJob('vless', params, c ? 'Настройка VLESS + Reality' : 'Установка VLESS + Reality');
-};
-
-function openAwg() {
-  const f = $('#awgForm'), c = SYS.settings.awg;
-  f.port.value = c ? c.port : ''; f.port.placeholder = c ? '' : 'случайный (51000–59999)';
-  $('#awgBtn').textContent = c ? 'Сменить порт' : 'Установить';
-  $('#awgHint').textContent = c
-    ? 'Смена порта меняет конфиги всех клиентов: выдай им новые (QR в окне пользователя).'
-    : 'Сервер AmneziaWG встроен в панель (amneziawg-go, профиль 3.1: шифрование заголовков, мусорные пакеты, паддинги). Клиенты получат адреса 10.66.0.0/16 и выход в интернет через сервер.';
-  $('#awgDlg').returnValue = ''; $('#awgDlg').showModal();
-}
-$('#awgDlg').onclose = () => {
-  if ($('#awgDlg').returnValue !== 'ok') return;
-  const port = $('#awgForm').port.value, c = SYS.settings.awg;
-  if (c && String(c.port) === port) return;
-  startJob('awg', port ? {port} : {}, c ? 'Смена порта AmneziaWG' : 'Установка AmneziaWG 3.1');
-};
-
 // startJob asks the agent to run a job and follows its log. The panel
 // restarts at the end of most jobs: polling errors only mean "wait".
 async function startJob(action, params, title) {
@@ -588,9 +482,8 @@ async function startJob(action, params, title) {
   }
 }
 
-// Online per protocol: Hysteria counts sessions, Xray client IPs,
-// AmneziaWG a recent handshake. Shown apart, per protocol.
-const short = {hysteria2: 'Hy2', vless: 'VLESS', awg: 'AWG'};
+// Hysteria online sessions.
+const short = {hysteria2: 'Hy2'};
 function onlineStale(p) {
   const s = S.onlineStatus?.[p];
   const now = S.serverTime + (Date.now() - stateReceivedAt) / 1000;
@@ -706,10 +599,6 @@ function openEdit(n) {
   f.expires.value = u.expiresAt ? localDate(u.expiresAt) : '';
   f.password.value = ''; f.password.placeholder = editing ? 'не менять' : 'случайный';
   f.note.value = u.note || '';
-  const off = u.protoOff || [];
-  $('#protoWrap').hidden = protos().length < 2;
-  $('#protoBoxes').innerHTML = protos().map(p =>
-    `<label class="chk"><input type="checkbox" class="sw" data-p="${esc(p.id)}"${off.includes(p.id) ? '' : ' checked'}> ${esc(p.title)}</label>`).join('');
   $('#rekeyBtn').hidden = !editing;
   $('#edit').returnValue = ''; // returnValue survives between openings; Esc must not re-save
   $('#edit').showModal();
@@ -724,7 +613,6 @@ $('#edit').onclose = async () => {
     resetMonthly: f.monthly.checked,
     expiresAt: f.expires.value ? Math.floor(new Date(f.expires.value + 'T23:59:59').getTime() / 1000) : 0,
     note: f.note.value,
-    protoOff: [...$('#protoBoxes').querySelectorAll('input:not(:checked)')].map(i => i.dataset.p),
   };
   if (f.password.value) body.password = f.password.value;
   try {
@@ -757,8 +645,6 @@ async function openShare(n) {
 const protoName = id => (protos().find(p => p.id === id) || {title: id}).title;
 const hints = {
   hysteria2: 'Hiddify, v2RayTun, Happ, Shadowrocket, v2rayN, официальный клиент.',
-  vless: () => `Happ, v2RayTun, Streisand, v2rayN, Hiddify. TCP ${S.server.vless.port}: снаружи выглядит как сайт ${S.server.vless.sni} — запасной канал, если UDP режут.`,
-  awg: 'Приложения AmneziaWG (Android, iOS, Windows, macOS ≥ 3.1) и Amnezia VPN ≥ 5.0.1.5: отсканируй QR или импортируй файл .conf. В подписку не входит.',
 };
 async function setTab(t) {
   shareTab = t;
@@ -766,7 +652,7 @@ async function setTab(t) {
   const u = shareUser, q = 'api/users/' + u.name + '/qr.png?t=' + Date.now(), names = u.links.map(l => protoName(l.proto));
   let text = '', hint = '', qr = '';
   const l = u.links.find(l => l.proto === t);
-  if (!t) hint = 'У пользователя выключены все протоколы.';
+  if (!t) hint = 'Hysteria ещё не настроена.';
   if (l) { text = l.uri; qr = q + '&proto=' + t; hint = typeof hints[t] === 'function' ? hints[t]() : hints[t] || ''; }
   if (t === 'sub') {
     text = S.subBase + u.subPath; qr = q + '&sub=1';
@@ -776,29 +662,25 @@ async function setTab(t) {
   if (t === 'mihomo') {
     // Whole configs first, then the pieces for one's own config.
     const parts = u.links.map(l => [l.proto, short[l.proto] || protoName(l.proto)]);
-    if (parts.length > 1) parts.push(['fallback', 'Все + fallback']);
     const btn = ([v, title]) => `<button data-v="${esc(v)}" style="flex:1" class="${v === mihomoView ? 'act' : ''}">${esc(title)}</button>`;
     $('#mtabs').innerHTML = [['router', 'Роутер (XKeen)'], ['desktop', 'Компьютер (Clash Verge)']].map(btn).join('') +
       '<div style="flex-basis:100%;height:4px"></div>' + parts.map(btn).join('');
     const base = 'api/users/' + encodeURIComponent(u.name) + '/mihomo';
     const full = mihomoView === 'router' || mihomoView === 'desktop';
-    const path = base + (full ? '?full=' + mihomoView : mihomoView === 'fallback' ? '?fallback=1' : '?proto=' + mihomoView);
+    const path = base + (full ? '?full=' + mihomoView : '?proto=' + mihomoView);
     try { text = await api('GET', path); } catch { text = ''; }
     if (full) dlURL = path + '&download=1';
     hint = {
-      fallback: `Кусок для своего конфига: прокси и группа fallback в порядке ${names.join(' → ')} — пропал первый протокол, mihomo сам перейдёт на следующий. Допиши в свои proxies: и proxy-groups: (второй раз эти ключи писать нельзя), группу выбери в rules.`,
       router: 'Полный конфиг для mihomo в XKeen на роутере: прокси пользователя, группы и правила (заблокированное — через VPN, остальное напрямую). Замени им конфиг mihomo в XKeen (обычно /opt/etc/mihomo/config.yaml). Панель zashboard: http://<роутер>:9090/ui, пароль — secret в конфиге.',
       desktop: 'Полный конфиг для Clash Verge и mihomo на компьютере: в Clash Verge — «Профили» → «Новый» → Local, стереть всё и вставить целиком, или скачать файл и импортировать. Ссылка «Подписка» отдаёт Clash Verge тот же конфиг, и он обновляется сам.',
     }[mihomoView] || `Прокси ${protoName(mihomoView)}: вставь в proxies: конфига mihomo.`;
   }
   $('#shareText').value = text; $('#shareHint').textContent = hint;
   $('#qr').hidden = !qr; if (qr) $('#qr').src = qr;
-  $('#qr').style.width = $('#qr').style.height = t === 'awg' ? '300px' : ''; // a long config: a denser code
   const full = t === 'mihomo' && (mihomoView === 'router' || mihomoView === 'desktop');
-  $('#shareText').rows = t === 'mihomo' ? (mihomoView === 'fallback' || full ? 20 : 12) : t === 'awg' ? 10 : 4;
-  if (t === 'awg') dlURL = 'api/users/' + encodeURIComponent(u.name) + '/awg.conf';
-  $('#dlConf').hidden = t !== 'awg' && !full;
-  $('#dlConf').textContent = t === 'awg' ? 'Скачать .conf' : 'Скачать .yaml';
+  $('#shareText').rows = t === 'mihomo' ? (full ? 20 : 12) : 4;
+  $('#dlConf').hidden = !full;
+  $('#dlConf').textContent = 'Скачать .yaml';
 }
 $('#tabs').onclick = e => { const b = e.target.closest('button'); if (b) setTab(b.dataset.t); };
 $('#mtabs').onclick = e => { const b = e.target.closest('button'); if (b) { mihomoView = b.dataset.v; setTab('mihomo'); } };

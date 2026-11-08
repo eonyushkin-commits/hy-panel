@@ -37,7 +37,7 @@ const (
 )
 
 // runInstall: `hy-panel install` puts the panel and its agent on the
-// server, or updates the program. It asks nothing: protocols are installed
+// server, or updates the program. It asks nothing: Hysteria is installed
 // and set up in the panel, users are created there. A re-run keeps the
 // panel's settings and users.
 func runInstall(args []string) {
@@ -79,7 +79,7 @@ func runInstall(args []string) {
 	if update {
 		fmt.Println("Панель уже установлена — обновляю программу; настройки, пользователи и ссылки не меняются.")
 	} else {
-		fmt.Println("Ставлю панель. Протоколы ставятся и настраиваются в ней: раздел «Протоколы».")
+		fmt.Println("Ставлю панель. Hysteria устанавливается и настраивается в ней: карточка «Hysteria 2».")
 	}
 	noInterrupt()
 	step("binary → "+binPath, copySelf(binPath))
@@ -113,7 +113,7 @@ func runInstall(args []string) {
 
 // runUninstall removes the panel. Users and settings stay, so installing
 // again brings everything back with the same links; -purge deletes them
-// too. The protocols' servers (Hysteria, Xray) stay installed. Nothing is
+// too. Hysteria stays installed. Nothing is
 // asked: without -y it only says what it would do.
 func runUninstall(args []string) {
 	fs := flag.NewFlagSet("uninstall", flag.ExitOnError)
@@ -129,9 +129,6 @@ func runUninstall(args []string) {
 		}
 		return
 	}
-	env := readEnv()
-	_, xraySvc := xrayPaths(env)
-	vless := env["HYP_XRAY_CONFIG"] != ""
 	if err := removePanel(); err != nil {
 		log.Fatalf("✗ %v\nПанель удалена не полностью; пользователи и настройки не тронуты.", err)
 	}
@@ -139,28 +136,13 @@ func runUninstall(args []string) {
 	if !*purge {
 		fmt.Printf("Пользователи и настройки остались (%s, %s).\n", dataDir, envPath)
 		fmt.Println("Пока панели нет, Hysteria не пускает новых клиентов: проверять пароли некому.")
-		if vless {
-			fmt.Println("Xray держит пользователей VLESS до своего перезапуска, после него — никого, пока панель не вернётся.")
-		}
-		if fileExists(awgCfgPath) {
-			fmt.Println("AmneziaWG встроен в панель и остановлен вместе с ней; после установки поднимется с теми же конфигами клиентов.")
-		}
 		fmt.Println("Установить снова — всё вернётся как было:\n    " + installCmd)
 		return
 	}
-	if vless {
-		// The users are gone: so is their VLESS access, also before Xray's next restart.
-		if err := systemctl("restart", xraySvc); err != nil { // not fatal: the purge must go on
-			fmt.Printf("  ✗ %v\n", err)
-		} else {
-			fmt.Println("✓ restart " + xraySvc)
-		}
-	}
 	step("remove "+dataDir, os.RemoveAll(dataDir))
 	step("remove "+envPath, os.RemoveAll(envPath))
-	step("remove "+awgCfgPath, os.RemoveAll(awgCfgPath)) // its clients were the panel's users
-	fmt.Println("Удалено вместе с пользователями. Hysteria и Xray остались установленными, но без панели никого не пускают;")
-	fmt.Println("если они не нужны: systemctl disable --now hysteria-server xray")
+	fmt.Println("Удалено вместе с пользователями. Hysteria осталась установленной, но без панели не пускает новых клиентов;")
+	fmt.Println("если она не нужна: systemctl disable --now hysteria-server")
 }
 
 // removePanel stops the service and deletes its unit and binary. Things
@@ -170,13 +152,13 @@ func removePanel() error {
 	if fileExists(unitPath) {
 		errs = append(errs, systemctl("disable", "--now", "hy-panel"))
 	}
-	// The AmneziaWG server is this binary too: it goes with it.
-	for _, u := range []string{agentUnitPath, awgUnitPath} {
+	// Stop the panel helper.
+	for _, u := range []string{agentUnitPath} {
 		if fileExists(u) {
 			errs = append(errs, systemctl("disable", "--now", strings.TrimSuffix(filepath.Base(u), ".service")))
 		}
 	}
-	for _, f := range []string{unitPath, agentUnitPath, awgUnitPath, binPath} {
+	for _, f := range []string{unitPath, agentUnitPath, binPath} {
 		if err := os.Remove(f); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, err)
 		}
@@ -211,7 +193,7 @@ func runPasswd() {
 // ---- /etc/hy-panel.env ----
 
 var envKeys = []string{"HYP_PASSWORD", "HYP_UI_PATH", "HYP_UI_PORT", "HYP_HOST", "HYP_NAME", "HYP_HY_CONFIG", "HYP_HY_SERVICE",
-	"HYP_SUB_LISTEN", "HYP_SUB_URL", "HYP_XRAY_CONFIG", "HYP_XRAY_SERVICE"}
+	"HYP_SUB_LISTEN", "HYP_SUB_URL"}
 
 func readEnv() map[string]string {
 	env := map[string]string{}
@@ -263,9 +245,6 @@ func checkEnv(env map[string]string) error {
 		if u, err := url.Parse(s); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			bad("HYP_SUB_URL", "нужен адрес вида https://sub.example.com")
 		}
-	}
-	if s := env["HYP_XRAY_CONFIG"]; s != "" && !filepath.IsAbs(s) {
-		bad("HYP_XRAY_CONFIG", "нужен абсолютный путь к конфигу Xray")
 	}
 	if err := errors.Join(errs...); err != nil {
 		return fmt.Errorf("%s: %w", envPath, err)

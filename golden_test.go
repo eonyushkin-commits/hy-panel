@@ -67,30 +67,22 @@ func pixels(t *testing.T, b []byte) string {
 }
 
 // TestLinksGolden pins everything clients get — share links, subscriptions
-// in every format, mihomo documents, AmneziaWG configs and QR codes — for
+// in every format, mihomo documents, QR codes — for
 // two fixed servers and three users. A change in links changes clients'
 // profiles: it must be on purpose (go test -run LinksGolden -update).
 func TestLinksGolden(t *testing.T) {
-	awg := &awgConfig{Port: 51820, PrivateKey: "YAnz8UHVPqIoBqA9xbrmWkzZ6W6U6V0b3n1h1E3vC2Y=", MTU: 1280, DNS: "1.1.1.1, 1.0.0.1",
-		Jc: 5, Jmin: 40, Jmax: 70, S1: 20, S2: 30, S3: 14, S4: 16, H1: "1", H2: "2", H3: "3", H4: "4",
-		I1:                  "<r 2><b 0x01000001000000000000><b 0x0a><rc 10><b 0x03636f6d00><b 0x00010001>",
-		HeaderProtectionKey: "oMRI6+Tm1S0ET5tEaZoiAn4uqiGfs+x+CZs2UltEXGE=", ContentPaddingAddition: "0-32"}
 	servers := []struct {
 		name string
 		ep   Endpoint
 	}{
 		{"full", Endpoint{Host: "203.0.113.10", Port: "20000-50000", SNI: "vpn.example.com", ObfsType: "salamander", ObfsPass: "obfs-pass",
-			Pin: "ab12cd34", ECH: "AEX+DQBB", Name: "NL", AWG: awg,
-			Vless: &Vless{Port: "443", SNI: "www.example.org", PublicKey: "pbk-xhttp", ShortID: "1187d00c55ca4d4c", Network: "xhttp", Path: "/2b1f2de74ce6", Mode: "auto"}}},
-		{"plain", Endpoint{Host: "vpn.example.net", Port: "443",
-			Vless: &Vless{Port: "8443", SNI: "www.example.com", PublicKey: "pbk-tcp", Network: "tcp", Flow: visionFlow}}},
+			Pin: "ab12cd34", ECH: "AEX+DQBB", Name: "NL"}},
+		{"plain", Endpoint{Host: "vpn.example.net", Port: "443"}},
 	}
 	users := []User{
-		{Name: "alice", Password: "alice-pass-1", UUID: "46d502e8-e63c-4b3e-893f-519135ad1de3", AWGKey: "8Pm2s6Oz1VRrWEc0bNKIhPpz3e0YVxUJsS0Ywr0lE1s=", AWGIndex: 2, SubToken: "tok-alice"},
-		{Name: "bob", Password: "bob-pass-12", UUID: "0b5e3b1a-6a8e-4c39-9d1f-2f1c6c0f2b7e", AWGKey: "GKl3f0Wd1pW0vXq9Kpj6zv8ZfP4Vb9oQ3sXh2nL5mGc=", AWGIndex: 3, SubToken: "tok-bob",
-			ProtoOff: []string{protoVless}},
-		{Name: "carol", Password: "carol-pass-1", UUID: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4", AWGKey: "eHk1c2VjcmV0LWtleS0zMi1ieXRlcy1sb25nLWFiY2Q=", AWGIndex: 4, SubToken: "tok-carol",
-			ProtoOff: []string{protoHy2, protoAWG}},
+		{Name: "alice", Password: "alice-pass-1", SubToken: "tok-alice"},
+		{Name: "bob", Password: "bob-pass-12", SubToken: "tok-bob"},
+		{Name: "carol", Password: "carol-pass-1", SubToken: "tok-carol"},
 	}
 
 	// The built-in mihomo template, whatever this machine has in /etc.
@@ -130,7 +122,7 @@ func TestLinksGolden(t *testing.T) {
 			if _, err := a.store.Create(u); err != nil {
 				t.Fatal(err)
 			}
-			a.store.Update(u.Name, func(s *User) error { s.SubToken = u.SubToken; s.AWGKey, s.AWGIndex = u.AWGKey, u.AWGIndex; return nil })
+			a.store.Update(u.Name, func(s *User) error { s.SubToken = u.SubToken; return nil })
 		}
 
 		fmt.Fprintf(&out, "=== server %s\n", sv.name)
@@ -166,12 +158,11 @@ func TestLinksGolden(t *testing.T) {
 			call("mihomo fallback", a.handleMihomo, "/m?fallback=1", name)
 			call("mihomo full router", a.handleMihomo, "/m?full=router&download=1", name)
 			call("mihomo full desktop", a.handleMihomo, "/m?full=desktop", name)
-			for _, p := range []string{protoHy2, protoAWG, protoVless} {
+			for _, p := range []string{protoHy2} {
 				call("mihomo proto="+p, a.handleMihomo, "/m?proto="+p, name)
 				call("qr proto="+p, a.handleQR, "/q?proto="+p, name)
 			}
 			call("qr", a.handleQR, "/q", name)
-			call("awg.conf", a.handleAWGConf, "/c", name)
 		}
 	}
 
