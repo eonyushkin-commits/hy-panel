@@ -14,7 +14,7 @@ hysteria2://alice:alice-pass-1@203.0.113.10:20000/?ech=AEX%2BDQBB&insecure=1&mpo
 Content-Disposition: attachment; filename*=UTF-8''NL-alice
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:TkwtYWxpY2U=
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + proxies:
 +   - name: "NL-alice"
 +     type: hysteria2
@@ -46,7 +46,7 @@ aHlzdGVyaWEyOi8vYWxpY2U6YWxpY2UtcGFzcy0xQDIwMy4wLjExMy4xMDoyMDAwMC8/ZWNoPUFFWCUy
 Content-Disposition: attachment; filename*=UTF-8''NL-alice
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:TkwtYWxpY2U=
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + proxies:
 +   - name: "NL-alice"
 +     type: hysteria2
@@ -105,7 +105,7 @@ proxy-groups:
 
 --- mihomo full router: 200
 Content-Disposition: attachment; filename="NL-alice-router.yaml"
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + secret: 'c2555bde7e4041ce' # пароль панели управления (zashboard)
 + proxies:
 +   - name: "NL-alice"
@@ -124,7 +124,7 @@ mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df
 - proxies: [] # заполняет панель
 
 --- mihomo full desktop: 200
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + proxies:
 +   - name: "NL-alice"
 +     type: hysteria2
@@ -178,7 +178,7 @@ hysteria2://bob:bob-pass-12@203.0.113.10:20000/?ech=AEX%2BDQBB&insecure=1&mport=
 Content-Disposition: attachment; filename*=UTF-8''NL-bob
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:TkwtYm9i
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + proxies:
 +   - name: "NL-bob"
 +     type: hysteria2
@@ -210,7 +210,7 @@ aHlzdGVyaWEyOi8vYm9iOmJvYi1wYXNzLTEyQDIwMy4wLjExMy4xMDoyMDAwMC8/ZWNoPUFFWCUyQkRR
 Content-Disposition: attachment; filename*=UTF-8''NL-bob
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:TkwtYm9i
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + proxies:
 +   - name: "NL-bob"
 +     type: hysteria2
@@ -269,7 +269,7 @@ proxy-groups:
 
 --- mihomo full router: 200
 Content-Disposition: attachment; filename="NL-bob-router.yaml"
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + secret: 'd7075cfe08f254a8' # пароль панели управления (zashboard)
 + proxies:
 +   - name: "NL-bob"
@@ -288,7 +288,7 @@ mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df
 - proxies: [] # заполняет панель
 
 --- mihomo full desktop: 200
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + proxies:
 +   - name: "NL-bob"
 +     type: hysteria2
@@ -342,7 +342,7 @@ hysteria2://carol:carol-pass-1@203.0.113.10:20000/?ech=AEX%2BDQBB&insecure=1&mpo
 Content-Disposition: attachment; filename*=UTF-8''NL-carol
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:TkwtY2Fyb2w=
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + proxies:
 +   - name: "NL-carol"
 +     type: hysteria2
@@ -374,7 +374,7 @@ aHlzdGVyaWEyOi8vY2Fyb2w6Y2Fyb2wtcGFzcy0xQDIwMy4wLjExMy4xMDoyMDAwMC8/ZWNoPUFFWCUy
 Content-Disposition: attachment; filename*=UTF-8''NL-carol
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:TkwtY2Fyb2w=
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + proxies:
 +   - name: "NL-carol"
 +     type: hysteria2
@@ -433,7 +433,7 @@ proxy-groups:
 
 --- mihomo full router: 200
 Content-Disposition: attachment; filename="NL-carol-router.yaml"
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + secret: '699a99bdedbbff15' # пароль панели управления (zashboard)
 + proxies:
 +   - name: "NL-carol"
@@ -452,7 +452,7 @@ mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df
 - proxies: [] # заполняет панель
 
 --- mihomo full desktop: 200
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + proxies:
 +   - name: "NL-carol"
 +     type: hysteria2
@@ -511,7 +511,7 @@ hysteria2://alice:alice-pass-1@vpn.example.net:443/#alice
 Content-Disposition: attachment; filename*=UTF-8''alice
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:YWxpY2U=
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + proxies:
 +   - name: "alice"
 +     type: hysteria2
@@ -537,7 +537,7 @@ aHlzdGVyaWEyOi8vYWxpY2U6YWxpY2UtcGFzcy0xQHZwbi5leGFtcGxlLm5ldDo0NDMvI2FsaWNlCg==
 Content-Disposition: attachment; filename*=UTF-8''alice
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:YWxpY2U=
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + proxies:
 +   - name: "alice"
 +     type: hysteria2
@@ -578,7 +578,7 @@ proxy-groups:
 
 --- mihomo full router: 200
 Content-Disposition: attachment; filename="alice-router.yaml"
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + secret: 'c2555bde7e4041ce' # пароль панели управления (zashboard)
 + proxies:
 +   - name: "alice"
@@ -591,7 +591,7 @@ mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df
 - proxies: [] # заполняет панель
 
 --- mihomo full desktop: 200
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + proxies:
 +   - name: "alice"
 +     type: hysteria2
@@ -633,7 +633,7 @@ hysteria2://bob:bob-pass-12@vpn.example.net:443/#bob
 Content-Disposition: attachment; filename*=UTF-8''bob
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:Ym9i
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + proxies:
 +   - name: "bob"
 +     type: hysteria2
@@ -659,7 +659,7 @@ aHlzdGVyaWEyOi8vYm9iOmJvYi1wYXNzLTEyQHZwbi5leGFtcGxlLm5ldDo0NDMvI2JvYgo=
 Content-Disposition: attachment; filename*=UTF-8''bob
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:Ym9i
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + proxies:
 +   - name: "bob"
 +     type: hysteria2
@@ -700,7 +700,7 @@ proxy-groups:
 
 --- mihomo full router: 200
 Content-Disposition: attachment; filename="bob-router.yaml"
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + secret: 'd7075cfe08f254a8' # пароль панели управления (zashboard)
 + proxies:
 +   - name: "bob"
@@ -713,7 +713,7 @@ mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df
 - proxies: [] # заполняет панель
 
 --- mihomo full desktop: 200
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + proxies:
 +   - name: "bob"
 +     type: hysteria2
@@ -755,7 +755,7 @@ hysteria2://carol:carol-pass-1@vpn.example.net:443/#carol
 Content-Disposition: attachment; filename*=UTF-8''carol
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:Y2Fyb2w=
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + proxies:
 +   - name: "carol"
 +     type: hysteria2
@@ -781,7 +781,7 @@ aHlzdGVyaWEyOi8vY2Fyb2w6Y2Fyb2wtcGFzcy0xQHZwbi5leGFtcGxlLm5ldDo0NDMvI2Nhcm9sCg==
 Content-Disposition: attachment; filename*=UTF-8''carol
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:Y2Fyb2w=
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + proxies:
 +   - name: "carol"
 +     type: hysteria2
@@ -822,7 +822,7 @@ proxy-groups:
 
 --- mihomo full router: 200
 Content-Disposition: attachment; filename="carol-router.yaml"
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + secret: '699a99bdedbbff15' # пароль панели управления (zashboard)
 + proxies:
 +   - name: "carol"
@@ -835,7 +835,7 @@ mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df
 - proxies: [] # заполняет панель
 
 --- mihomo full desktop: 200
-mihomo template sha256 99c8592a4f6d9497fbd2a00670b8486f3d7f3b0162d967036102d26df7f7f4bd
+mihomo template sha256 ad394134bd985170445f805fbc8c99a5250626d4d6a133ae44d3e81868e8b306
 + proxies:
 +   - name: "carol"
 +     type: hysteria2

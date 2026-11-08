@@ -1,0 +1,3 @@
+# Embedded template bytes and golden fixtures must match on Windows and Linux.
+mihomo.yaml text eol=lf
+testdata/*.golden text eol=lf
