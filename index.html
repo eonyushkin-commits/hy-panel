@@ -77,15 +77,10 @@ input:hover,textarea:hover,select:hover{border-color:var(--mute)}
 @media (prefers-color-scheme:dark){.av{color:hsl(var(--h) 75% 72%);background:hsl(var(--h) 60% 50% / .2)}}
 .av::after{content:"";position:absolute;right:-1px;bottom:-1px;width:11px;height:11px;border-radius:50%;background:var(--line);border:2px solid var(--surface)}
 .av.on::after{background:var(--ok)}
+.av.stale::after{background:var(--warn)}
 .body{flex:1;min-width:0}
 .name{font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .pill{font-size:11px;font-weight:550;padding:1px 8px;border-radius:99px;background:var(--surface-2);color:var(--mute)}
-.ptag{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:550;padding:1px 8px;border-radius:99px;background:var(--surface-2);color:var(--fg)}
-.ptag::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--line)}
-.ptag.live{background:var(--ok-soft);color:var(--ok)}.ptag.live::before{background:var(--ok)}
-.ptag.stale{background:var(--warn-soft);color:var(--warn)}.ptag.stale::before{background:var(--warn)}
-.ptag.off{color:var(--mute);text-decoration:line-through;background:none;border:1px dashed var(--line)}.ptag.off::before{display:none}
-.protos{display:flex;gap:8px 16px;flex-wrap:wrap}
 .pill.bad{background:var(--bad-soft);color:var(--bad)}.pill.warn{background:var(--warn-soft);color:var(--warn)}.pill.ok{background:var(--ok-soft);color:var(--ok)}
 .meta{display:flex;gap:4px 14px;flex-wrap:wrap;margin-top:2px}
 .meta span{white-space:nowrap}.meta .note{white-space:normal;overflow-wrap:anywhere}
@@ -98,11 +93,17 @@ input:hover,textarea:hover,select:hover{border-color:var(--mute)}
 .sw:checked{background:var(--ok)}.sw:checked::before{transform:translateX(14px)}
 .empty{padding:48px 16px;text-align:center}
 
-/* protocols */
-.pgrid{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;margin-bottom:16px}
-.pcard{padding:14px 16px;display:flex;flex-direction:column;gap:6px}
-.pcard .ph{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.pcard .pa{display:flex;gap:8px;margin-top:4px;flex-wrap:wrap}
+/* server status and details */
+.server-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:0 0 16px;margin-bottom:16px;border-bottom:1px solid var(--line)}
+.server-state,.server-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.server-dot{width:7px;height:7px;flex:none;border-radius:50%;background:var(--mute)}
+.server-dot.ok{background:var(--ok)}.server-dot.bad{background:var(--bad)}.server-dot.warn{background:var(--warn)}
+.server-details{padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);margin-bottom:16px;display:grid;gap:8px}
+.server-details .detail{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.server-details .detail span:last-child{text-align:right;overflow-wrap:anywhere}
+.server-details .detail-actions{display:flex;gap:8px;flex-wrap:wrap}
+.server-details .check{margin:0}
+.sessions{font-weight:400;color:var(--mute);font-size:12px}
 .joblog{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface-2);border-radius:var(--r-sm);padding:10px 12px;max-height:50vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
 .check{font-size:12.5px;margin-top:6px}.check.ok{color:var(--ok)}.check.bad{color:var(--bad)}
 .empty button{margin-top:12px}
@@ -140,7 +141,7 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
 .toast.bad{background:var(--bad);color:#fff}
 
 @media (max-width:640px){
-  .stats{gap:8px}.stat{padding:12px}.stat b{font-size:18px}.stat .small:last-child{display:none}
+  .stats{gap:8px}.stat{padding:12px}.stat b{font-size:18px}
   .user{flex-wrap:wrap}.acts{width:100%;padding-left:52px}
   .top .lbl{display:none}
 }
@@ -195,11 +196,11 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
 
     <div class="stats">
       <div class="card stat"><span class="mute small">Пользователи</span><b id="stUsers">0</b><span class="mute small" id="stUsersSub"></span></div>
-      <div class="card stat"><span class="mute small">Онлайн</span><b id="stOnline">0</b><span class="mute small" id="stOnlineSub"></span></div>
-      <div class="card stat"><span class="mute small">Трафик</span><b id="stTraffic">0</b><span class="mute small" id="stTrafficSub"></span></div>
+      <div class="card stat"><span class="mute small">Онлайн</span><b id="stOnline">0</b><span class="mute small" id="stOnlineSub" hidden></span></div>
+      <div class="card stat"><span class="mute small">Трафик</span><b id="stTraffic">0</b></div>
     </div>
 
-    <div class="pgrid" id="pgrid"></div>
+    <div id="serverStatus" aria-live="polite"></div>
 
     <div class="bar-tools">
       <label class="search"><svg class="i"><use href="#i-search"/></svg><input id="q" type="search" placeholder="Поиск по имени или заметке" aria-label="Поиск"></label>
@@ -247,6 +248,7 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
 <dialog id="hyDlg">
   <form method="dialog" id="hyForm" class="dlg">
     <div class="dlg-h"><h2>Hysteria 2</h2><button type="button" class="icon ghost" onclick="$('#hyDlg').close()" aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <div class="server-details small" id="hyInfo"></div>
     <div class="grid">
       <label><span>Порт (UDP)</span><select name="portMode">
         <option value="443">443 — как обычный HTTPS/QUIC</option>
@@ -352,7 +354,7 @@ async function load() {
   try { S = await api('GET', 'api/state'); stateReceivedAt = Date.now(); }
   catch { if (S) refreshOnlineView(); return; }
   $('#login').hidden = true; $('#app').hidden = false;
-  $('#host').textContent = 'Сервер ' + S.server.host; // protocol details are on their cards
+  $('#host').textContent = 'Сервер ' + S.server.host;
   $('#hyerr').hidden = !S.problems;
   $('#hyerr').innerHTML = icon('alert') + '<span>' + esc(S.problems) + '</span>';
   refreshOnlineView();
@@ -370,59 +372,54 @@ async function loadSystem() {
   try { SYS = await api('GET', 'api/system'); } catch { return; }
   renderProtocols();
 }
-const PROTOS = [
-  {id: 'hysteria2', title: 'Hysteria 2', what: 'Быстрый VPN по UDP.', dlg: openHy},
-];
 function renderProtocols() {
   if (!SYS) return;
-  const st = SYS.status || {}, set = SYS.settings || {};
-  $('#pgrid').innerHTML = PROTOS.map(p => {
-    const s = st[p.id] || {}, c = set[p.id];
-    let pill = '<span class="pill">не установлен</span>', info = esc(p.what), btns = '';
-    if (c) {
-      pill = s.active ? '<span class="pill ok">работает</span>' : '<span class="pill bad">остановлен</span>';
-      info = `UDP ${esc(c.port)} · ${esc(c.obfs || 'без обфускации')} · ${c.domain ? esc(c.domain) + " (Let's Encrypt)" : 'self-signed'}`;
-      btns = `<button data-p="${p.id}" data-do="cfg">Настройки</button>`;
-    } else if (s.installed) {
-      pill = '<span class="pill warn">не настроен</span>';
-      btns = `<button class="pri" data-p="${p.id}" data-do="cfg">Настроить</button>`;
-    } else {
-      btns = `<button class="pri" data-p="${p.id}" data-do="cfg">Установить</button>`;
-    }
-    // An update is offered only when a newer release is out; if the agent
-    // could not learn the latest one, it says why and can ask again.
-    let ver = '';
-    if (s.installed) {
-      ver = 'Версия ' + esc(s.version) + (s.update ? ` · <b>вышла ${esc(s.latest)}</b>` : s.latest ? ' · последняя'
-        : ` · <span title="${esc(s.latestErr || '')}">последнюю узнать не удалось</span>`);
-      if (s.update) btns += `<button class="pri" data-p="${p.id}" data-do="update" title="Скачать официальный релиз ${esc(s.latest)}">Обновить до ${esc(s.latest)}</button>`;
-      else if (!s.latest) btns += `<button class="ghost" data-p="${p.id}" data-do="check" title="Спросить GitHub о последнем релизе">Проверить обновления</button>`;
-    }
-    const online = c && S ? onlineInfo(p.id) : '';
-    return `<div class="card pcard"><div class="ph"><b>${p.title}</b>${pill}</div><div class="mute small">${info}</div>${ver ? `<div class="mute small">${ver}</div>` : ''}${online}<div class="pa">${btns}</div></div>`;
-  }).join('') + (SYS.agentError ? `<div class="err" style="grid-column:1/-1;margin:0">${icon('alert')}<span>${esc(SYS.agentError)}</span></div>` : '');
+  const s = SYS.status?.hysteria2 || {}, c = SYS.settings?.hysteria2;
+  const unavailable = !!SYS.agentError;
+  const title = unavailable ? 'Состояние сервера неизвестно' : c ? s.active ? 'Сервер работает' : 'Сервер остановлен'
+    : s.installed ? 'Hysteria не настроена' : 'Hysteria не установлена';
+  const tone = unavailable ? 'warn' : c ? s.active ? 'ok' : 'bad' : '';
+  const action = c ? 'Настройки' : s.installed ? 'Настроить' : 'Установить';
+  $('#serverStatus').innerHTML = `<div class="server-bar"><div class="server-state"><span class="server-dot ${tone}" aria-hidden="true"></span><span>${title}</span>${c ? `<span class="mute small">UDP ${esc(c.port)}</span>` : ''}</div><div class="server-actions">${s.update && !unavailable ? `<button data-do="update">Обновить до ${esc(s.latest)}</button>` : ''}<button class="${c ? '' : 'pri'}" data-do="cfg">${action}</button></div></div>`
+    + (unavailable ? `<div class="err">${icon('alert')}<span>${esc(SYS.agentError)}</span></div>` : '');
+  renderHyInfo();
 }
-$('#pgrid').onclick = e => {
+function renderHyInfo() {
+  if (!SYS) return;
+  const s = SYS.status?.hysteria2 || {}, c = SYS.settings?.hysteria2;
+  let version = s.installed ? `Версия ${esc(s.version)}` : 'Не установлена';
+  if (s.installed) version += s.update ? ` · доступна ${esc(s.latest)}` : s.latest ? ' · последняя' : ' · обновления не проверены';
+  $('#hyInfo').innerHTML = `<div>${version}</div>`
+    + (s.latestErr && !s.latest ? `<div class="mute">${esc(s.latestErr)}</div>` : '')
+    + (c ? `<div class="detail"><span class="mute">Обфускация</span><span>${esc(c.obfs || 'без обфускации')}</span></div><div class="detail"><span class="mute">Сертификат</span><span>${c.domain ? esc(c.domain) + " (Let's Encrypt)" : 'Самоподписанный'}</span></div>` : '')
+    + (c && S ? onlineInfo('hysteria2') : '')
+    + (s.installed ? `<div class="detail-actions"><button type="button" data-do="check">Проверить обновления</button>${s.update ? `<button type="button" data-do="update">Обновить до ${esc(s.latest)}</button>` : ''}</div>` : '');
+}
+function systemAction(e) {
   const b = e.target.closest('[data-do]'); if (!b) return;
-  const p = PROTOS.find(x => x.id === b.dataset.p);
-  if (b.dataset.do === 'cfg') p.dlg();
-  else if (b.dataset.do === 'check') checkReleases(p, b);
-  else if (confirm(`Скачать последний релиз ${p.title} и перезапустить его? Подключения прервутся на секунду.`))
-    startJob('update-hysteria', {}, 'Обновление ' + p.title);
-};
+  if (b.dataset.do === 'cfg') openHy();
+  else if (b.dataset.do === 'check') checkReleases(b);
+  else if (confirm('Скачать последний релиз Hysteria 2 и перезапустить его? Подключения прервутся на секунду.')) {
+    if ($('#hyDlg').open) $('#hyDlg').close();
+    startJob('update-hysteria', {}, 'Обновление Hysteria 2');
+  }
+}
+$('#serverStatus').onclick = systemAction;
+$('#hyInfo').onclick = systemAction;
 
-async function checkReleases(p, b) {
+async function checkReleases(b) {
   b.disabled = true; b.textContent = 'Проверяю…';
   try { SYS = await api('POST', 'api/system/releases'); } catch { return renderProtocols(); }
   renderProtocols();
-  const s = SYS.status[p.id] || {};
-  if (s.update) toast(`${p.title}: вышла ${s.latest}`);
-  else if (s.latest) toast(`${p.title}: ${s.version} — последняя версия`);
-  else toast(`${p.title}: ${s.latestErr || 'GitHub не ответил'}`, true);
+  const s = SYS.status?.hysteria2 || {};
+  if (s.update) toast(`Hysteria 2: вышла ${s.latest}`);
+  else if (s.latest) toast(`Hysteria 2: ${s.version} — последняя версия`);
+  else toast(`Hysteria 2: ${s.latestErr || 'GitHub не ответил'}`, true);
 }
 
 function openHy() {
-  const f = $('#hyForm'), c = SYS.settings.hysteria2;
+  const f = $('#hyForm'), c = SYS.settings?.hysteria2;
+  renderHyInfo();
   const port = c ? c.port : '443';
   f.portMode.value = ['443', '20000-50000'].includes(port) ? port : 'custom';
   f.port.value = f.portMode.value === 'custom' ? port : '';
@@ -502,13 +499,17 @@ function stats() {
   const us = S.users, on = us.filter(isOn);
   const up = us.reduce((s, u) => s + u.up, 0), down = us.reduce((s, u) => s + u.down, 0);
   $('#stUsers').textContent = us.length;
-  $('#stUsersSub').textContent = `активны ${us.filter(u => !u.status).length}`;
+  const enabled = us.filter(u => u.enabled).length;
+  $('#stUsersSub').textContent = `Включены ${enabled}`;
+  $('#stUsersSub').hidden = enabled === us.length;
   const stale = protos().some(p => onlineStale(p.id));
   $('#stOnline').textContent = stale ? on.length ? '≥ ' + on.length : '—' : on.length;
-  $('#stOnlineSub').textContent = protos().map(p => `${short[p.id] || p.title} ${onlineStale(p.id) ? '?' : on.reduce((s, u) => s + liveOn(u, p.id), 0)}`).join(' · ');
-  if (stale) $('#stOnlineSub').textContent += ' · есть устаревшие данные';
+  const sessions = on.reduce((n, u) => n + liveOn(u, 'hysteria2'), 0);
+  $('#stOnline').title = stale ? 'Данные о подключениях устарели' : `Пользователей: ${on.length}. Подключений: ${sessions}.`;
+  $('#stOnlineSub').hidden = !stale;
+  $('#stOnlineSub').textContent = stale ? 'Данные устарели' : '';
   $('#stTraffic').textContent = fmt(up + down);
-  $('#stTrafficSub').textContent = `↓ ${fmt(down)} ↑ ${fmt(up)}`;
+  $('#stTraffic').title = `↓ ${fmt(down)} ↑ ${fmt(up)}`;
 }
 
 const statusTag = {disabled: ['выключен', 'bad'], expired: ['истёк', 'bad'], quota: ['лимит', 'bad']};
@@ -531,19 +532,17 @@ function render() {
     const used = u.up + u.down, st = statusTag[u.status], days = daysLeft(u);
     const pct = u.quotaBytes ? Math.min(100, used / u.quotaBytes * 100) : 0;
     const h = hue(u.name);
-    const tags = protos().map(p => {
-      const n = u.online[p.id] || 0, on = userProtos(u).includes(p.id), stale = onlineStale(p.id);
-      const cnt = n && (n > 1 || (p.id === 'hysteria2' && u.maxDevices)) ? ' ' + n + (p.id === 'hysteria2' && u.maxDevices ? '/' + u.maxDevices : '') : '';
-      const tip = !on ? 'выключен у пользователя' : stale ? 'данные устарели; последнее известное число подключений: ' + n : n ? 'онлайн' : 'не подключён';
-      return `<span class="ptag${!on ? ' off' : stale ? ' stale' : n ? ' live' : ''}" title="${esc(p.title)}: ${tip}">${esc(short[p.id] || p.title)}${cnt}${on && stale ? ' · ?' : ''}</span>`;
-    }).join('');
+    const stale = userProtos(u).includes('hysteria2') && onlineStale('hysteria2');
+    const n = liveOn(u, 'hysteria2');
+    const onlineTip = stale ? 'Данные о подключениях устарели' : n ? `Онлайн. Подключений: ${n}` : 'Не подключён';
+    const sessions = !stale && (n > 1 || u.maxDevices) ? `<span class="sessions" title="Подключения${u.maxDevices ? ': лимит ' + u.maxDevices : ''}">${n}${u.maxDevices ? '/' + u.maxDevices : ''} подкл.</span>` : '';
     return `<div class="user${u.enabled ? '' : ' off'}" data-n="${esc(u.name)}">
-      <div class="av${isOn(u) ? ' on' : ''}" style="--h:${h}">${esc(u.name[0])}</div>
+      <div class="av${stale ? ' stale' : isOn(u) ? ' on' : ''}" style="--h:${h}" title="${onlineTip}" aria-label="${esc(u.name)}: ${onlineTip}">${esc(u.name[0])}</div>
       <div class="body">
         <div class="name">${esc(u.name)}
           ${st ? `<span class="pill ${st[1]}">${st[0]}</span>` : ''}
           ${!st && days !== null && days <= 3 ? `<span class="pill warn">${days > 0 ? days + ' дн.' : 'сегодня'}</span>` : ''}
-          ${tags}
+          ${sessions}
         </div>
         <div class="meta mute small">
           <span>↓ ${fmt(u.down)} ↑ ${fmt(u.up)}${u.quotaBytes ? ' из ' + fmt(u.quotaBytes) : ''}</span>
