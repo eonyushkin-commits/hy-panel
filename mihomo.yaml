@@ -227,6 +227,19 @@ rule-providers:
     <<: *inline
     payload: # Типы правил и примеры: https://wiki.metacubex.one/ru/config/rules/
       - DOMAIN-SUFFIX,2ip.io
+      - DOMAIN-SUFFIX,transfermarkt.com
+      - DOMAIN-SUFFIX,transfermarkt.de
+      - DOMAIN-SUFFIX,transfermarkt.world
+      - DOMAIN-SUFFIX,transfermarkt.technology
+      - DOMAIN-SUFFIX,tmssl.akamaized.net
+      - DOMAIN-SUFFIX,flashscore.com
+      - DOMAIN-SUFFIX,flashscore.ninja
+      - DOMAIN-SUFFIX,flashscore.mobi
+      - DOMAIN-SUFFIX,livesport.services
+      - DOMAIN-SUFFIX,githubusercontent.com
+      - DOMAIN-SUFFIX,kino.watch
+      - DOMAIN-SUFFIX,wns.windows.com
+      - DOMAIN-SUFFIX,notify.windows.com
 
 rules: # первым панель ставит свой сервер напрямую
   - RULE-SET,adlist@domain,REJECT # Блокировка рекламы (отключите при проблемах с сервисами)
