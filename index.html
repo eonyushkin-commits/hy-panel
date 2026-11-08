@@ -68,6 +68,8 @@ input:hover,textarea:hover,select:hover{border-color:var(--mute)}
 .seg{display:inline-flex;padding:3px;gap:2px;background:var(--surface-2);border-radius:var(--r-sm)}
 .seg button{border:0;background:none;padding:5px 11px;border-radius:7px;color:var(--mute);font-size:13px}
 .seg button.act{background:var(--surface);color:var(--fg);box-shadow:var(--shadow)}
+#mtabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:12px}
+#mtabs button{min-width:0;padding:5px 6px;overflow-wrap:anywhere}
 
 /* users */
 .user{display:flex;align-items:center;gap:14px;padding:14px 16px;border-top:1px solid var(--line)}
@@ -110,6 +112,7 @@ input:hover,textarea:hover,select:hover{border-color:var(--mute)}
 
 /* dialogs */
 dialog{border:0;border-radius:18px;background:var(--surface);color:var(--fg);padding:0;width:min(460px,calc(100vw - 24px));box-shadow:var(--shadow-lg)}
+#share{width:min(640px,calc(100vw - 24px))}
 dialog[open]{animation:pop .18s ease-out}
 dialog::backdrop{background:#0b0d1299;backdrop-filter:blur(3px)}
 @keyframes pop{from{opacity:0;transform:translateY(8px) scale(.98)}}
@@ -146,6 +149,7 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
   .top .lbl{display:none}
 }
 @media (max-width:480px){.grid{grid-template-columns:1fr}}
+@media (min-width:640px){#mtabs button{white-space:nowrap}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -237,7 +241,7 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
     <div class="dlg-h"><h2 id="shareTitle"></h2><button class="icon ghost" onclick="$('#share').close()" aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
     <div class="seg" id="tabs" style="display:flex;margin-bottom:16px">
     </div>
-    <div class="seg" id="mtabs" style="display:flex;flex-wrap:wrap;margin-bottom:12px"></div>
+    <div class="seg" id="mtabs"></div>
     <img class="qr" id="qr" alt="QR-код">
     <textarea id="shareText" rows="4" readonly></textarea>
     <div class="mute small hint" id="shareHint"></div>
@@ -480,7 +484,6 @@ async function startJob(action, params, title) {
 }
 
 // Hysteria online sessions.
-const short = {hysteria2: 'Hy2'};
 function onlineStale(p) {
   const s = S.onlineStatus?.[p];
   const now = S.serverTime + (Date.now() - stateReceivedAt) / 1000;
@@ -660,10 +663,9 @@ async function setTab(t) {
   $('#mtabs').hidden = t !== 'mihomo';
   if (t === 'mihomo') {
     // Whole configs first, then the pieces for one's own config.
-    const parts = u.links.map(l => [l.proto, short[l.proto] || protoName(l.proto)]);
+    const parts = u.links.map(l => [l.proto, protoName(l.proto)]);
     const btn = ([v, title]) => `<button data-v="${esc(v)}" style="flex:1" class="${v === mihomoView ? 'act' : ''}">${esc(title)}</button>`;
-    $('#mtabs').innerHTML = [['router', 'Роутер (XKeen)'], ['desktop', 'Компьютер (Clash Verge)']].map(btn).join('') +
-      '<div style="flex-basis:100%;height:4px"></div>' + parts.map(btn).join('');
+    $('#mtabs').innerHTML = [['router', 'Роутер (XKeen)'], ['desktop', 'Компьютер (Clash Verge)'], ...parts].map(btn).join('');
     const base = 'api/users/' + encodeURIComponent(u.name) + '/mihomo';
     const full = mihomoView === 'router' || mihomoView === 'desktop';
     const path = base + (full ? '?full=' + mihomoView : '?proto=' + mihomoView);
