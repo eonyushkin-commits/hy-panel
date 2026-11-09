@@ -1,6 +1,8 @@
 # build output
 /hy-panel
 /hy-panel-linux-*
+/dist/
+/node_modules/
 # runtime data (contains passwords)
 users.json
 *.tmp

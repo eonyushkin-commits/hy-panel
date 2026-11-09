@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -27,8 +28,10 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
+
+	"github.com/eonyushkin-commits/hy-panel/internal/atomicfile"
+	"github.com/eonyushkin-commits/hy-panel/internal/model"
 
 	"gopkg.in/yaml.v3"
 )
@@ -76,14 +79,6 @@ type hyConfig struct {
 		Listen string `yaml:"listen"`
 		Secret string `yaml:"secret"`
 	} `yaml:"trafficstats"`
-}
-
-func loadHyConfig(path string) (*hyConfig, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return parseHyConfig(b)
 }
 
 func parseHyConfig(b []byte) (*hyConfig, error) {
@@ -213,25 +208,40 @@ func kindErr(k cfgKind) error {
 // writing the file only if something changed: an untouched config stays
 // byte for byte. Returns the resulting config and whether it was written.
 func rewriteHyConfig(path string, orig []byte, fresh bool, edit func(*yamlDoc) error) (*hyConfig, bool) {
-	d, err := parseDoc(orig)
-	step("read "+path, err)
-	if edit != nil {
-		step("hysteria settings", edit(d))
-	}
-	c, err := d.connectPanel()
-	step("hysteria config: auth → panel, trafficStats", err)
-	out := orig
-	if changed := edit != nil || c; changed {
-		out, err = d.bytes()
-		step("render "+path, err)
+	cfg, out, changed, err := prepareHyConfig(orig, edit)
+	step("prepare "+path, err)
+	if changed {
 		if len(orig) > 0 {
 			step("backup → "+path+backupExt, backupOnce(path, orig))
 		}
 		step("hysteria config "+path, writeHysteriaConfig(path, out, fresh))
 	}
+	return cfg, changed
+}
+
+func prepareHyConfig(orig []byte, edit func(*yamlDoc) error) (*hyConfig, []byte, bool, error) {
+	d, err := parseDoc(orig)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if edit != nil {
+		if err = edit(d); err != nil {
+			return nil, nil, false, err
+		}
+	}
+	c, err := d.connectPanel()
+	if err != nil {
+		return nil, nil, false, err
+	}
+	out := orig
+	if changed := edit != nil || c; changed {
+		out, err = d.bytes()
+		if err != nil {
+			return nil, nil, false, err
+		}
+	}
 	cfg, err := parseHyConfig(out)
-	step("read "+path, err)
-	return cfg, edit != nil || c
+	return cfg, out, edit != nil || c, err
 }
 
 // ---- editing the config as a YAML tree (comments and other keys stay) ----
@@ -387,50 +397,7 @@ func scalar(n *yaml.Node) string {
 
 // Replace the target atomically while retaining its owner and permissions.
 func writeKeepingOwner(path string, b []byte) error {
-	info, err := os.Lstat(path)
-	if err == nil && info.Mode()&os.ModeSymlink != 0 {
-		path, err = filepath.EvalSymlinks(path)
-		if err != nil {
-			return err
-		}
-		info, err = os.Stat(path)
-	}
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if info != nil && !info.Mode().IsRegular() {
-		return fmt.Errorf("%s: expected regular file", path)
-	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".hy-config-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	mode := os.FileMode(0640)
-	if info != nil {
-		mode = info.Mode().Perm()
-		st := info.Sys().(*syscall.Stat_t)
-		if err := f.Chown(int(st.Uid), int(st.Gid)); err != nil {
-			f.Close()
-			return err
-		}
-	}
-	if err := f.Chmod(mode); err != nil {
-		f.Close()
-		return err
-	}
-	if err := writeSync(f, b); err != nil {
-		return err
-	}
-	if err := os.Rename(f.Name(), path); err != nil {
-		return err
-	}
-	dir, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
+	return atomicfile.Replace(path, b, atomicfile.Options{Mode: 0640, PreserveOwner: true, FollowSymlink: true})
 }
 
 // chownHysteria makes a file root-owned and readable by Hysteria's group.
@@ -595,10 +562,7 @@ func readECH(path string) (string, error) {
 
 // ---- trafficStats API client ----
 
-type trafficEntry struct {
-	Tx int64 `json:"tx"`
-	Rx int64 `json:"rx"`
-}
+type trafficEntry = model.Traffic
 
 type statsClient struct {
 	base, secret string
@@ -618,12 +582,15 @@ func newStatsClient(listen, secret string) *statsClient {
 }
 
 func (c *statsClient) do(method, path string, body, out any) error {
+	return c.doContext(context.Background(), method, path, body, out)
+}
+func (c *statsClient) doContext(ctx context.Context, method, path string, body, out any) error {
 	var rd io.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)
 		rd = bytes.NewReader(b)
 	}
-	req, err := http.NewRequest(method, c.base+path, rd)
+	req, err := http.NewRequestWithContext(ctx, method, c.base+path, rd)
 	if err != nil {
 		return err
 	}

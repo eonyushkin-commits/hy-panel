@@ -1,5 +1,5 @@
 [Unit]
-Description=hy-panel (Hysteria 2 users)
+Description=hy-panel (Hysteria 2 and VLESS/Reality)
 Wants=network-online.target
 After=network-online.target
 Before=hysteria-server.service

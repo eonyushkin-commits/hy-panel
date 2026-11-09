@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"errors"
 	"flag"
@@ -16,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 //go:embed hy-panel.service
@@ -37,7 +39,7 @@ const (
 )
 
 // runInstall: `hy-panel install` puts the panel and its agent on the
-// server, or updates the program. It asks nothing: Hysteria is installed
+// server, or updates the program. It asks nothing: protocols are installed
 // and set up in the panel, users are created there. A re-run keeps the
 // panel's settings and users.
 func runInstall(args []string) {
@@ -79,24 +81,25 @@ func runInstall(args []string) {
 	if update {
 		fmt.Println("Панель уже установлена — обновляю программу; настройки, пользователи и ссылки не меняются.")
 	} else {
-		fmt.Println("Ставлю панель. Hysteria устанавливается и настраивается в ней: карточка «Hysteria 2».")
+		fmt.Println("Ставлю панель. Hysteria и VLESS/Reality устанавливаются и настраиваются в панели.")
 	}
 	noInterrupt()
 	step("binary → "+binPath, copySelf(binPath))
 	step("settings → "+envPath, writeEnv(env))
-	_, err := OpenStore(dataPath)
-	step("user database "+dataPath, err)
+	// The running panel owns users.json. Only the new serve process migrates it,
+	// after systemd has stopped its predecessor and completed its final flush.
+	step("data directory "+dataDir, os.MkdirAll(dataDir, 0700))
 	step("user "+panelUser, systemUser(panelUser, "", false))
 	step("systemd unit → "+unitPath, os.WriteFile(unitPath, []byte(unitFile), 0o644))
 	step("systemd unit → "+agentUnitPath, os.WriteFile(agentUnitPath, []byte(agentUnit), 0o644))
 	if port := env["HYP_UI_PORT"]; port != "off" {
-		_, _, err = panelCert(dataDir, env["HYP_HOST"])
+		_, _, err := panelCert(dataDir, env["HYP_HOST"])
 		step("panel HTTPS certificate", err)
 		ufwAllow(port + "/tcp")
 	}
 	step("systemd daemon-reload", systemctl("daemon-reload"))
 	step("enable hy-panel-agent", systemctl("enable", "hy-panel-agent"))
-	step("restart hy-panel-agent", systemctl("restart", "hy-panel-agent"))
+	step("restart hy-panel-agent", restartService("hy-panel-agent"))
 	step("enable hy-panel", systemctl("enable", "hy-panel"))
 	cfgPath, svc := hyPaths(env)
 	b, readErr := os.ReadFile(cfgPath)
@@ -106,14 +109,14 @@ func runInstall(args []string) {
 			step("apply Hysteria ACL", systemctl("try-restart", svc))
 		}
 	}
-	step("restart hy-panel", systemctl("restart", "hy-panel")) // picks up the new binary and config
+	step("restart hy-panel", restartService("hy-panel")) // picks up the new binary and config
 	fmt.Println("\nГотово.")
 	printInfo(env)
 }
 
 // runUninstall removes the panel. Users and settings stay, so installing
 // again brings everything back with the same links; -purge deletes them
-// too. Hysteria stays installed. Nothing is
+// too. The protocols' servers (Hysteria, Xray) stay installed. Nothing is
 // asked: without -y it only says what it would do.
 func runUninstall(args []string) {
 	fs := flag.NewFlagSet("uninstall", flag.ExitOnError)
@@ -129,6 +132,9 @@ func runUninstall(args []string) {
 		}
 		return
 	}
+	env := readEnv()
+	_, xraySvc := xrayPaths(env)
+	vless := env["HYP_XRAY_CONFIG"] != ""
 	if err := removePanel(); err != nil {
 		log.Fatalf("✗ %v\nПанель удалена не полностью; пользователи и настройки не тронуты.", err)
 	}
@@ -136,13 +142,25 @@ func runUninstall(args []string) {
 	if !*purge {
 		fmt.Printf("Пользователи и настройки остались (%s, %s).\n", dataDir, envPath)
 		fmt.Println("Пока панели нет, Hysteria не пускает новых клиентов: проверять пароли некому.")
+		if vless {
+			fmt.Println("Xray держит пользователей VLESS до своего перезапуска, после него — никого, пока панель не вернётся.")
+		}
 		fmt.Println("Установить снова — всё вернётся как было:\n    " + installCmd)
 		return
 	}
+	if vless {
+		// The users are gone: so is their VLESS access, also before Xray's next restart.
+		if err := restartService(xraySvc); err != nil { // not fatal: the purge must go on
+			fmt.Printf("  ✗ %v\n", err)
+		} else {
+			fmt.Println("✓ restart " + xraySvc)
+		}
+	}
 	step("remove "+dataDir, os.RemoveAll(dataDir))
+	step("remove "+agentStateDir, os.RemoveAll(agentStateDir))
 	step("remove "+envPath, os.RemoveAll(envPath))
-	fmt.Println("Удалено вместе с пользователями. Hysteria осталась установленной, но без панели не пускает новых клиентов;")
-	fmt.Println("если она не нужна: systemctl disable --now hysteria-server")
+	fmt.Println("Удалено вместе с пользователями. Hysteria и Xray остались установленными, но без панели никого не пускают;")
+	fmt.Println("если они не нужны: systemctl disable --now hysteria-server xray")
 }
 
 // removePanel stops the service and deletes its unit and binary. Things
@@ -186,14 +204,14 @@ func runPasswd() {
 	env := readEnv()
 	env["HYP_PASSWORD"] = randStr(16)
 	step("new password → "+envPath, writeEnv(env))
-	step("restart hy-panel", systemctl("restart", "hy-panel"))
+	step("restart hy-panel", restartService("hy-panel"))
 	printInfo(env)
 }
 
 // ---- /etc/hy-panel.env ----
 
 var envKeys = []string{"HYP_PASSWORD", "HYP_UI_PATH", "HYP_UI_PORT", "HYP_HOST", "HYP_NAME", "HYP_HY_CONFIG", "HYP_HY_SERVICE",
-	"HYP_SUB_LISTEN", "HYP_SUB_URL"}
+	"HYP_SUB_LISTEN", "HYP_SUB_URL", "HYP_XRAY_CONFIG", "HYP_XRAY_SERVICE"}
 
 func readEnv() map[string]string {
 	env := map[string]string{}
@@ -212,13 +230,16 @@ func readEnv() map[string]string {
 }
 
 func writeEnv(env map[string]string) error {
+	return writeAtomic(envPath, renderEnv(env), 0600)
+}
+func renderEnv(env map[string]string) []byte {
 	var b strings.Builder
 	for _, k := range envKeys {
 		if env[k] != "" {
 			fmt.Fprintf(&b, "%s=%s\n", k, env[k])
 		}
 	}
-	return writeAtomic(envPath, []byte(b.String()), 0o600)
+	return []byte(b.String())
 }
 
 // checkEnv validates the settings before anything is written or served.
@@ -245,6 +266,9 @@ func checkEnv(env map[string]string) error {
 		if u, err := url.Parse(s); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			bad("HYP_SUB_URL", "нужен адрес вида https://sub.example.com")
 		}
+	}
+	if s := env["HYP_XRAY_CONFIG"]; s != "" && !filepath.IsAbs(s) {
+		bad("HYP_XRAY_CONFIG", "нужен абсолютный путь к конфигу Xray")
 	}
 	if err := errors.Join(errs...); err != nil {
 		return fmt.Errorf("%s: %w", envPath, err)
@@ -308,11 +332,32 @@ func step(what string, err error) {
 }
 
 func systemctl(args ...string) error {
-	out, err := exec.Command("systemctl", args...).CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "systemctl", args...)
+	cmd.WaitDelay = 5 * time.Second
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("systemctl %s: %v %s", strings.Join(args, " "), err, bytes.TrimSpace(out))
 	}
 	return nil
+}
+
+// An explicit configuration change is a new start attempt. Reset systemd's
+// previous failure/burst counters so a legitimate rollback can start the unit;
+// automatic Restart= still obeys the unit's normal crash-loop protection.
+func restartService(service string) error {
+	if err := systemctl("reset-failed", service); err != nil {
+		return err
+	}
+	return systemctl("restart", service)
+}
+
+func restoreServiceState(service string, wasActive bool) error {
+	if wasActive {
+		return restartService(service)
+	}
+	return systemctl("stop", service)
 }
 
 func fileExists(path string) bool {

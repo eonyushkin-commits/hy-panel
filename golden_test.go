@@ -76,13 +76,14 @@ func TestLinksGolden(t *testing.T) {
 		ep   Endpoint
 	}{
 		{"full", Endpoint{Host: "203.0.113.10", Port: "20000-50000", SNI: "vpn.example.com", ObfsType: "salamander", ObfsPass: "obfs-pass",
-			Pin: "ab12cd34", ECH: "AEX+DQBB", Name: "NL"}},
-		{"plain", Endpoint{Host: "vpn.example.net", Port: "443"}},
+			Pin: "ab12cd34", ECH: "AEX+DQBB", Name: "NL",
+			Vless: &Vless{Port: "443", SNI: "www.example.org", PublicKey: "pbk-xhttp", ShortID: "1187d00c55ca4d4c", Network: "xhttp", Path: "/2b1f2de74ce6", Mode: "auto"}}},
+		{"plain", Endpoint{Host: "vpn.example.net", Port: "443", Vless: &Vless{Port: "8443", SNI: "www.example.com", PublicKey: "pbk-tcp", Network: "tcp", Flow: visionFlow}}},
 	}
 	users := []User{
-		{Name: "alice", Password: "alice-pass-1", SubToken: "tok-alice"},
-		{Name: "bob", Password: "bob-pass-12", SubToken: "tok-bob"},
-		{Name: "carol", Password: "carol-pass-1", SubToken: "tok-carol"},
+		{Name: "alice", Password: "alice-pass-1", SubToken: "tok-alice", UUID: "46d502e8-e63c-4b3e-893f-519135ad1de3"},
+		{Name: "bob", Password: "bob-pass-12", SubToken: "tok-bob", UUID: "0b5e3b1a-6a8e-4c39-9d1f-2f1c6c0f2b7e", ProtoOff: []string{protoVless}},
+		{Name: "carol", Password: "carol-pass-1", SubToken: "tok-carol", UUID: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4", ProtoOff: []string{protoHy2}},
 	}
 
 	// The built-in mihomo template, whatever this machine has in /etc.
@@ -158,7 +159,7 @@ func TestLinksGolden(t *testing.T) {
 			call("mihomo fallback", a.handleMihomo, "/m?fallback=1", name)
 			call("mihomo full router", a.handleMihomo, "/m?full=router&download=1", name)
 			call("mihomo full desktop", a.handleMihomo, "/m?full=desktop", name)
-			for _, p := range []string{protoHy2} {
+			for _, p := range []string{protoHy2, protoVless} {
 				call("mihomo proto="+p, a.handleMihomo, "/m?proto="+p, name)
 				call("qr proto="+p, a.handleQR, "/q?proto="+p, name)
 			}

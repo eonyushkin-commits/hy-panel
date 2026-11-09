@@ -1,0 +1,10 @@
+{
+  "name": "hy-panel-ui-tests",
+  "private": true,
+  "scripts": {
+    "test:ui": "node tests/ui/rewrite.cjs && node tests/ui/vless.cjs && node tests/ui/protocol-preservation.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

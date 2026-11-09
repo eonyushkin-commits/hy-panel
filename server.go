@@ -1,11 +1,10 @@
 package main
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
+	"context"
+	"crypto/rand"
 	"crypto/subtle"
 	"embed"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,10 +15,13 @@ import (
 	"net/url"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/eonyushkin-commits/hy-panel/internal/adminauth"
+	"github.com/eonyushkin-commits/hy-panel/internal/atomicfile"
+	"github.com/eonyushkin-commits/hy-panel/internal/storage"
 
 	qrcode "github.com/skip2/go-qrcode"
 )
@@ -31,20 +33,24 @@ type App struct {
 	reservations map[string][]time.Time // Hysteria admissions awaiting a fresh online snapshot, under mu
 	store        *Store
 	hy           *hyBackend // nil: Hysteria not set up
-	backends     []backend  // Hysteria's statistics source
+	backends     []backend  // the protocols' servers the panel syncs, Hysteria's first
 	hyOpts       *hyOpts    // Hysteria's port, obfs, certificate; nil: not set up
 	agent        *agentClient
+	siteScan     scanState // the search for a Reality site
 	ep           Endpoint
 	password     string
 	subBase      string   // public base URL of the subscription listener, "" = disabled
-	cfgErr       string   // Hysteria config unreadable: no links are handed out
+	cfgErr       string   // Hysteria or Xray config unreadable: no links are handed out
 	warns        []string // shown in the panel banner (set once before serving)
 	key          []byte
-	loginMu      sync.Mutex // serializes logins: ~1 guess/s total, not per connection
+	sessionMu    sync.RWMutex
+	sessionPath  string
+	loginLimiter adminauth.Limiter
 	poke         chan struct{}
 
 	mu        sync.RWMutex
-	live      map[string]*live      // per protocol: who is online, sync errors
+	live      map[string]*live // per protocol: who is online, sync errors
+	targetErr string
 	lastSync  time.Time             // Hysteria's sessions were last read
 	revoked   map[string]revocation // password changed: drop old sessions
 	listenErr map[string]string     // public listener → why it does not run
@@ -53,7 +59,7 @@ type App struct {
 }
 
 // newApp makes the panel; stats is Hysteria's trafficStats, nil if it is
-// not set up.
+// not set up. Xray's backend is added after.
 func newApp(store *Store, stats *statsClient, ep Endpoint, password string, key []byte) *App {
 	a := &App{store: store, ep: ep, password: password, key: key,
 		poke: make(chan struct{}, 1), live: map[string]*live{}, revoked: map[string]revocation{},
@@ -79,20 +85,100 @@ func server(addr string, h http.Handler) *http.Server {
 	}
 }
 
+var readinessClient = &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{Proxy: nil, IdleConnTimeout: time.Minute}}
+
+// A 401 from the local admin API confirms that startup completed, including
+// opening the database. Protocol statistics alone cannot prove that /auth runs.
+func checkPanelReady(ctx context.Context) error {
+	r, err := http.NewRequestWithContext(ctx, "GET", "http://"+panelAddr+"/api/state", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := readinessClient.Do(r)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		return fmt.Errorf("панель не готова: %s", resp.Status)
+	}
+	return nil
+}
+
+// Type=simple systemd units become active before the HTTP socket is ready.
+// Configuration rollback must wait for actual readiness before reporting back.
+func waitPanelReady() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var last error
+	for ctx.Err() == nil {
+		if last = checkPanelReady(ctx); last == nil {
+			return nil
+		}
+		timer := time.NewTimer(200 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+		case <-timer.C:
+		}
+	}
+	return fmt.Errorf("панель не восстановилась: %w", errors.Join(ctx.Err(), last))
+}
+
 // keepServing runs a public listener; if it fails (port taken, certificate),
 // the panel keeps running — /auth must not go down with it — and says why.
-func (a *App) keepServing(name string, run func() error) {
-	for {
+func (a *App) keepServing(ctx context.Context, name string, run func() error) {
+	for ctx.Err() == nil {
 		a.mu.Lock()
 		delete(a.listenErr, name)
 		a.mu.Unlock()
 		err := run()
+		if ctx.Err() != nil {
+			return
+		}
 		log.Printf("%s: %v (retry in 30s)", name, err)
 		a.mu.Lock()
-		a.listenErr[name] = err.Error()
+		if err != nil {
+			a.listenErr[name] = err.Error()
+		}
 		a.mu.Unlock()
-		time.Sleep(30 * time.Second)
+		t := time.NewTimer(30 * time.Second)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return
+		case <-t.C:
+		}
 	}
+}
+
+func serveHTTP(ctx context.Context, srv *http.Server, tls bool) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	finished := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		select {
+		case <-ctx.Done():
+			shutdown, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+			defer cancel()
+			if err := srv.Shutdown(shutdown); err != nil {
+				srv.Close()
+			}
+		case <-finished:
+		}
+	}()
+	var err error
+	if tls {
+		err = srv.ListenAndServeTLS("", "")
+	} else {
+		err = srv.ListenAndServe()
+	}
+	close(finished)
+	<-stopped
+	return err
 }
 
 // ---- panel session ----
@@ -100,9 +186,9 @@ func (a *App) keepServing(name string, run func() error) {
 const cookieName = "hyp_session"
 
 func (a *App) sign(exp int64) string {
-	m := hmac.New(sha256.New, a.key)
-	fmt.Fprint(m, exp)
-	return strconv.FormatInt(exp, 10) + "." + hex.EncodeToString(m.Sum(nil))
+	a.sessionMu.RLock()
+	defer a.sessionMu.RUnlock()
+	return adminauth.Sign(a.key, a.password, exp)
 }
 
 func (a *App) authed(r *http.Request) bool {
@@ -110,19 +196,45 @@ func (a *App) authed(r *http.Request) bool {
 	if err != nil {
 		return false
 	}
-	exp, err := strconv.ParseInt(strings.SplitN(c.Value, ".", 2)[0], 10, 64)
-	return err == nil && time.Now().Unix() < exp && hmac.Equal([]byte(c.Value), []byte(a.sign(exp)))
+	a.sessionMu.RLock()
+	defer a.sessionMu.RUnlock()
+	return adminauth.Verify(a.key, a.password, c.Value, time.Now())
+}
+
+// The panel has one administrator. Logout rotates the persistent signing key,
+// revoking that administrator's cookies in every browser, including copied ones.
+func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		http.Error(w, "session key unavailable", 500)
+		return
+	}
+	a.sessionMu.Lock()
+	if a.sessionPath != "" {
+		if err := writeAtomic(a.sessionPath, key, 0600); err != nil && !atomicfile.Committed(err) {
+			a.sessionMu.Unlock()
+			http.Error(w, "не удалось завершить сеансы", 500)
+			return
+		}
+	}
+	a.key = key
+	a.sessionMu.Unlock()
+	http.SetCookie(w, &http.Cookie{Name: cookieName, Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct{ Password string }
-	json.NewDecoder(r.Body).Decode(&req)
-	a.loginMu.Lock()
-	ok := ctEq(req.Password, a.password)
-	if !ok {
-		time.Sleep(time.Second)
+	if !a.loginLimiter.Allow(time.Now()) {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "слишком много попыток, повтори через секунду", http.StatusTooManyRequests)
+		return
 	}
-	a.loginMu.Unlock()
+	if err := decodeJSONBody(r, &req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	ok := ctEq(req.Password, a.password)
 	if !ok {
 		log.Printf("login failed from %s", r.RemoteAddr)
 		http.Error(w, "wrong password", http.StatusUnauthorized)
@@ -148,7 +260,7 @@ func (a *App) guard(h http.HandlerFunc) http.HandlerFunc {
 
 type userView struct {
 	User
-	Online  map[string]int `json:"online"` // Hysteria sessions
+	Online  map[string]int `json:"online"` // per protocol: Hysteria sessions, VLESS client IPs
 	Status  string         `json:"status"` // "", disabled, expired, quota
 	Links   []link         `json:"links"`  // the user's protocols, in fallback order
 	SubPath string         `json:"subPath"`
@@ -196,8 +308,14 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 			problems = append(problems, b.errText()+l.err)
 		}
 	}
+	if a.targetErr != "" {
+		problems = append(problems, a.targetErr)
+	}
 	problems = append(problems, listen...)
 	a.mu.RUnlock()
+	if err := a.store.Problem(); err != nil {
+		problems = append(problems, "Не удалось сохранить пользователей: "+err.Error())
+	}
 	users := a.store.List()
 	views := make([]userView, len(users))
 	for i, u := range users {
@@ -215,10 +333,14 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 	for _, p := range a.ep.running() {
 		protos = append(protos, map[string]string{"id": p.ID(), "title": p.Title()})
 	}
+	var vless any
+	if v := a.ep.Vless; v != nil {
+		vless = map[string]any{"port": v.Port, "sni": v.SNI, "network": v.Network}
+	}
 	writeJSON(w, map[string]any{
 		"users": views,
 		"server": map[string]any{"host": a.ep.Host, "port": a.ep.Port, "obfs": a.ep.ObfsType, "sni": a.ep.SNI, "pinned": a.ep.Pin != "",
-			"protocols": protos},
+			"vless": vless, "protocols": protos},
 		"problems":       strings.Join(problems, "; "),
 		"lastSync":       last.Unix(),
 		"onlineStatus":   freshness,
@@ -229,16 +351,17 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 }
 
 type userPatch struct {
-	Name         string  `json:"name"`
-	Password     *string `json:"password"` // "" = generate
-	Enabled      *bool   `json:"enabled"`
-	QuotaBytes   *int64  `json:"quotaBytes"`
-	ResetMonthly *bool   `json:"resetMonthly"`
-	ExpiresAt    *int64  `json:"expiresAt"`
-	MaxDevices   *int    `json:"maxDevices"`
-	Note         *string `json:"note"`
-	ResetTraffic bool    `json:"resetTraffic"`
-	NewKey       bool    `json:"newKey"` // new password and subscription link
+	Name         string    `json:"name"`
+	Password     *string   `json:"password"` // "" = generate
+	Enabled      *bool     `json:"enabled"`
+	QuotaBytes   *int64    `json:"quotaBytes"`
+	ResetMonthly *bool     `json:"resetMonthly"`
+	ExpiresAt    *int64    `json:"expiresAt"`
+	MaxDevices   *int      `json:"maxDevices"`
+	Note         *string   `json:"note"`
+	ProtoOff     *[]string `json:"protoOff"` // protocols the user may not use
+	ResetTraffic bool      `json:"resetTraffic"`
+	NewKey       bool      `json:"newKey"` // new password, VLESS key and subscription link
 }
 
 // check rejects a hand-set password too short for Hysteria, which also
@@ -246,6 +369,13 @@ type userPatch struct {
 func (p userPatch) check() error {
 	if p.Password != nil && *p.Password != "" && len(*p.Password) < 8 {
 		return errors.New("пароль: не короче 8 символов (пусто — сгенерировать)")
+	}
+	if p.ProtoOff != nil {
+		for _, id := range *p.ProtoOff {
+			if !knownProto(id) {
+				return errors.New("неизвестный протокол: " + id)
+			}
+		}
 	}
 	return nil
 }
@@ -272,6 +402,14 @@ func (p userPatch) apply(u *User, now time.Time) {
 	if p.Note != nil {
 		u.Note = strings.TrimSpace(*p.Note)
 	}
+	if p.ProtoOff != nil {
+		off := slices.Clone(*p.ProtoOff)
+		slices.Sort(off)
+		u.ProtoOff = slices.Compact(off)
+		if len(u.ProtoOff) == 0 {
+			u.ProtoOff = nil
+		}
+	}
 	if p.ResetTraffic {
 		u.Up, u.Down = 0, 0
 	}
@@ -284,11 +422,12 @@ func (p userPatch) apply(u *User, now time.Time) {
 	if p.NewKey {
 		u.Password = randStr(20)
 		u.SubToken = randStr(24)
+		u.UUID = newUUID()
 	}
 }
 
 func decode(w http.ResponseWriter, r *http.Request, p *userPatch) bool {
-	err := json.NewDecoder(r.Body).Decode(p)
+	err := decodeJSONBody(r, p)
 	if err != nil {
 		err = errors.New("bad request: " + err.Error())
 	} else {
@@ -311,10 +450,10 @@ func (a *App) handleCreate(w http.ResponseWriter, r *http.Request) {
 	p.apply(&u, time.Now())
 	u, err := a.store.Create(u)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), storeErrorStatus(err))
 		return
 	}
-	a.requestSync()
+	a.requestSync() // into Xray now, not in up to 10 s
 	writeJSON(w, u)
 }
 
@@ -336,7 +475,7 @@ func (a *App) handlePatch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	case err != nil:
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), storeErrorStatus(err))
 		return
 	}
 	if u.Password != oldPass {
@@ -345,13 +484,17 @@ func (a *App) handlePatch(w http.ResponseWriter, r *http.Request) {
 		a.revoked[name] = revocation{at: now, until: now.Add(revokeWindow)}
 		a.mu.Unlock()
 	}
-	a.requestSync()
+	a.requestSync() // blocks, re-keys and Xray's user list take effect now
 	writeJSON(w, u)
 }
 
 func (a *App) handleDelete(w http.ResponseWriter, r *http.Request) {
 	if err := a.store.Delete(r.PathValue("name")); err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		code := http.StatusInternalServerError
+		if errors.Is(err, errNotFound) {
+			code = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), code)
 		return
 	}
 	a.requestSync()
@@ -367,15 +510,24 @@ func (a *App) handleQR(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	text := a.ep.URI(u)
-	if p := r.URL.Query().Get("proto"); slices.Contains(a.ep.Protocols(), p) {
+	ps := a.ep.userProtos(u)
+	if len(ps) == 0 {
+		http.Error(w, "нет доступных протоколов для пользователя", http.StatusConflict)
+		return
+	}
+	text := ps[0].Link(a.ep, u)
+	if p := r.URL.Query().Get("proto"); p != "" {
+		if !slices.Contains(a.ep.UserProtocols(u), p) {
+			http.Error(w, "протокол недоступен пользователю", http.StatusBadRequest)
+			return
+		}
 		text = a.ep.Link(p, u)
 	}
 	if r.URL.Query().Has("sub") && a.subBase != "" {
 		text = a.subBase + "/sub/" + u.SubToken
 	}
 	level, size := qrcode.Medium, 320
-	if len(text) > 400 { // long link: use a larger QR code
+	if len(text) > 400 { // long share link
 		level, size = qrcode.Low, 480
 	}
 	png, err := qrcode.Encode(text, level, size)
@@ -395,6 +547,14 @@ func (a *App) handleMihomo(w http.ResponseWriter, r *http.Request) {
 	u, ok := a.store.Get(r.PathValue("name"))
 	if !ok {
 		http.NotFound(w, r)
+		return
+	}
+	if len(a.ep.userProtos(u)) == 0 {
+		http.Error(w, "нет доступных протоколов для пользователя", http.StatusConflict)
+		return
+	}
+	if p := r.URL.Query().Get("proto"); p != "" && !slices.Contains(a.ep.UserProtocols(u), p) {
+		http.Error(w, "протокол недоступен пользователю", http.StatusBadRequest)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -443,10 +603,10 @@ func (a *App) mihomoFull(u User, router bool) ([]byte, error) {
 
 // ---- subscription (public listener, token-protected) ----
 
-// noLinks answers 503 while the Hysteria config is unreadable, so
-// clients keep their working profile instead of fetching a broken one.
+// A failed protocol must not prevent exporting a healthy one. If no protocol
+// remains, fail instead of replacing a client's working profile with emptiness.
 func (a *App) noLinks(w http.ResponseWriter) bool {
-	if a.cfgErr != "" {
+	if a.cfgErr != "" && len(a.ep.running()) == 0 {
 		http.Error(w, a.cfgErr, http.StatusServiceUnavailable)
 		return true
 	}
@@ -454,12 +614,16 @@ func (a *App) noLinks(w http.ResponseWriter) bool {
 }
 
 func (a *App) handleSub(w http.ResponseWriter, r *http.Request) {
-	if a.noLinks(w) {
-		return
-	}
 	u, ok := a.store.BySubToken(r.PathValue("token"))
 	if !ok {
 		http.NotFound(w, r)
+		return
+	}
+	if a.noLinks(w) {
+		return
+	}
+	if len(a.ep.userProtos(u)) == 0 {
+		http.Error(w, "нет доступных протоколов для пользователя", http.StatusServiceUnavailable)
 		return
 	}
 	title := a.ep.remark(u)
@@ -508,6 +672,9 @@ func (a *App) handleSystem(w http.ResponseWriter, r *http.Request) {
 	if o := a.hyOpts; o != nil {
 		settings[protoHy2] = map[string]any{"port": o.Port, "obfs": o.Obfs, "domain": o.Domain, "email": o.Email}
 	}
+	if v := a.ep.Vless; v != nil {
+		settings[protoVless] = map[string]any{"port": v.Port, "sni": v.SNI, "network": v.Network}
+	}
 	writeJSON(w, map[string]any{"status": st, "settings": settings, "agentError": agentErr, "host": a.ep.Host})
 }
 
@@ -554,6 +721,42 @@ func (a *App) proxyAgent(w http.ResponseWriter, method, path string, body io.Rea
 	w.Write(b)
 }
 
+// handleCheckTarget checks a site for Reality before it is chosen.
+func (a *App) handleCheckTarget(w http.ResponseWriter, r *http.Request) {
+	d := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("domain")))
+	if !validHostname(d) || !strings.Contains(d, ".") {
+		http.Error(w, "нужен домен", http.StatusBadRequest)
+		return
+	}
+	res := map[string]any{"ok": true, "note": strings.TrimLeft(subnetNote(d, a.ep.Host), ",; ")}
+	if err := checkTarget(net.JoinHostPort(d, "443"), d); err != nil {
+		res["ok"], res["error"] = false, err.Error()
+	}
+	writeJSON(w, res)
+}
+
+// handleSiteScanStart starts the search for a Reality site in the server's
+// /24 (one at a time); handleSiteScan reports its progress and finds.
+func (a *App) handleSiteScanStart(w http.ResponseWriter, r *http.Request) {
+	ip, err := serverIPv4(a.ep.Host)
+	if err != nil {
+		http.Error(w, "адрес сервера: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	st := &a.siteScan
+	st.mu.Lock()
+	if !st.Running {
+		st.Running, st.Done, st.Found = true, 0, nil
+		go newSiteScanner().run(st, ip)
+	}
+	st.mu.Unlock()
+	writeJSON(w, st.snapshot())
+}
+
+func (a *App) handleSiteScan(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, a.siteScan.snapshot())
+}
+
 // underPath serves h only below a secret path, like 3x-ui's web base path:
 // everything else is a plain 404, so scanners do not find the panel.
 func underPath(p string, h http.Handler) http.Handler {
@@ -581,10 +784,7 @@ func (a *App) routes(withAuth bool) http.Handler {
 		mux.HandleFunc("POST /auth", a.handleAuth)
 	}
 	mux.HandleFunc("POST /api/login", a.handleLogin)
-	mux.HandleFunc("POST /api/logout", func(w http.ResponseWriter, r *http.Request) {
-		http.SetCookie(w, &http.Cookie{Name: cookieName, Path: "/", MaxAge: -1})
-		w.WriteHeader(http.StatusNoContent)
-	})
+	mux.HandleFunc("POST /api/logout", a.guard(a.handleLogout))
 	mux.HandleFunc("GET /api/state", a.guard(a.handleState))
 	mux.HandleFunc("POST /api/users", a.guard(a.handleCreate))
 	mux.HandleFunc("PATCH /api/users/{name}", a.guard(a.handlePatch))
@@ -595,6 +795,9 @@ func (a *App) routes(withAuth bool) http.Handler {
 	mux.HandleFunc("POST /api/system/jobs", a.guard(a.handleJobStart))
 	mux.HandleFunc("GET /api/system/job", a.guard(a.handleJob))
 	mux.HandleFunc("POST /api/system/releases", a.guard(a.handleReleases))
+	mux.HandleFunc("GET /api/system/check-target", a.guard(a.handleCheckTarget))
+	mux.HandleFunc("POST /api/system/site-scan", a.guard(a.handleSiteScanStart))
+	mux.HandleFunc("GET /api/system/site-scan", a.guard(a.handleSiteScan))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Content-Type", "text/html; charset=utf-8")
@@ -603,10 +806,61 @@ func (a *App) routes(withAuth bool) http.Handler {
 		b, _ := assets.ReadFile("index.html")
 		w.Write(b)
 	})
-	return mux
+	return sameOrigin(mux)
 }
 
 // ---- helpers ----
+
+func storeErrorStatus(err error) int {
+	if errors.Is(err, errNotFound) {
+		return http.StatusNotFound
+	}
+	var writeErr *storage.WriteError
+	if errors.As(err, &writeErr) {
+		return http.StatusInternalServerError
+	}
+	return http.StatusBadRequest
+}
+
+func decodeJSONBody(r *http.Request, out any) error {
+	d := json.NewDecoder(r.Body)
+	d.DisallowUnknownFields()
+	if err := d.Decode(out); err != nil {
+		return err
+	}
+	var extra any
+	if err := d.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return errors.New("expected one JSON value")
+		}
+		return err
+	}
+	return nil
+}
+
+func sameOrigin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/") && r.Method != "GET" && r.Method != "HEAD" {
+			if origin := r.Header.Get("Origin"); origin != "" {
+				u, err := url.Parse(origin)
+				if err != nil || (u.Scheme != "http" && u.Scheme != "https") || !strings.EqualFold(u.Host, r.Host) {
+					http.Error(w, "forbidden origin", http.StatusForbidden)
+					return
+				}
+			}
+			if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+				http.Error(w, "forbidden origin", http.StatusForbidden)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")

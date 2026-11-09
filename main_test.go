@@ -27,12 +27,18 @@ import (
 )
 
 func newStore(t *testing.T) *Store {
+	s, _ := newStoreWithPath(t)
+	return s
+}
+
+func newStoreWithPath(t *testing.T) (*Store, string) {
 	t.Helper()
-	s, err := OpenStore(filepath.Join(t.TempDir(), "users.json"))
+	path := filepath.Join(t.TempDir(), "users.json")
+	s, err := OpenStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s
+	return s, path
 }
 
 func mustCreate(t *testing.T, s *Store, u User) User {
@@ -66,7 +72,7 @@ func TestResolve(t *testing.T) {
 }
 
 func TestPasswordRules(t *testing.T) {
-	s := newStore(t)
+	s, path := newStoreWithPath(t)
 	a := mustCreate(t, s, User{Name: "a"})
 	if len(a.Password) != 20 {
 		t.Fatalf("generated password %q", a.Password)
@@ -88,7 +94,7 @@ func TestPasswordRules(t *testing.T) {
 		t.Fatalf("failed update changed user: %+v", got)
 	}
 	// Persisted and reloadable.
-	s2, err := OpenStore(s.path)
+	s2, err := OpenStore(path)
 	if err != nil || len(s2.List()) != 2 {
 		t.Fatalf("reload: %v %d", err, len(s2.List()))
 	}
@@ -221,16 +227,14 @@ func TestURIAndMihomo(t *testing.T) {
 	}
 }
 
-func TestLoadHyConfigKeysCaseInsensitive(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "c.yaml")
-	os.WriteFile(p, []byte(`
+func TestParseHyConfigKeysCaseInsensitive(t *testing.T) {
+	c, err := parseHyConfig([]byte(`
 listen: :8443
 TrafficStats: {Listen: 127.0.0.1:25413, secret: s}
 auth:
   type: userpass
   userpass: {Evo: "p:1", 42: two}
-`), 0o600)
-	c, err := loadHyConfig(p)
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -613,10 +617,10 @@ func TestApplyOptsKeepsLinks(t *testing.T) {
 }
 
 func TestCountersFlushedLater(t *testing.T) {
-	s := newStore(t)
+	s, path := newStoreWithPath(t)
 	mustCreate(t, s, User{Name: "u"})
 	disk := func() int64 {
-		s2, _ := OpenStore(s.path)
+		s2, _ := OpenStore(path)
 		u, _ := s2.Get("u")
 		return u.Down
 	}
@@ -636,7 +640,20 @@ func TestCountersFlushedLater(t *testing.T) {
 }
 
 // Drive the production sync loop deterministically.
-func (a *App) syncOnce(now time.Time) { a.syncAccess(now) }
+func (a *App) syncAccess(now time.Time) {
+	for _, b := range a.backends {
+		a.syncBackend(now, b)
+	}
+}
+
+func (a *App) syncOnce(now time.Time) {
+	for _, b := range a.backends {
+		if x, ok := b.(*xrayBackend); ok {
+			x.pollOnline(a.store.List())
+		}
+	}
+	a.syncAccess(now)
+}
 
 func TestReconnectAfterStaleFullSnapshot(t *testing.T) {
 	f, stats := newFakeHy(t)
@@ -813,6 +830,7 @@ func TestKindErr(t *testing.T) {
 
 func TestPrivateResponsesNotCached(t *testing.T) {
 	a := testApp(t, nil)
+	a.ep.Port = "443"
 	mustCreate(t, a.store, User{Name: "u"})
 	for _, h := range []http.HandlerFunc{a.handleState, a.handleMihomo} {
 		r := httptest.NewRequest("GET", "/", nil)

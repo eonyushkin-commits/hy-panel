@@ -1,0 +1,84 @@
+name: verify
+
+on:
+  push:
+    branches: ['codex/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:ui
+
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.25.x', stable]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+      - run: go vet ./...
+      - run: go test -race -count=1 -timeout=5m ./...
+      - name: Build Linux amd64 and arm64
+        run: |
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags='-s -w' -o dist/hy-panel-linux-$arch .
+          done
+          (cd dist && sha256sum hy-panel-linux-* > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        if: matrix.go == 'stable'
+        with:
+          name: linux-verification-builds
+          path: dist/
+
+  integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Download pinned official protocol binaries
+        run: python3 scripts/download-test-tools.py "$RUNNER_TEMP/protocol-tools"
+      - name: Real protocol integration tests
+        env:
+          HYSTERIA_BIN: ${{ runner.temp }}/protocol-tools/hysteria
+          XRAY_BIN: ${{ runner.temp }}/protocol-tools/xray
+          XRAY_MINIMUM_BIN: ${{ runner.temp }}/protocol-tools/xray-minimum
+          MIHOMO_BIN: ${{ runner.temp }}/protocol-tools/mihomo
+        run: go test -race -tags=e2e -run E2E -count=1 -timeout=5m -v .
+      - name: Build disposable systemd verification
+        run: |
+          go build -o "$RUNNER_TEMP/hy-panel-candidate" .
+          go test -tags=systemd -c -o "$RUNNER_TEMP/systemd.test" .
+      - name: Verify install, migration, agent and rollback under systemd
+        run: |
+          sudo env HYP_SYSTEMD_SMOKE=1 \
+            HYP_PANEL_BIN="$RUNNER_TEMP/hy-panel-candidate" \
+            HYSTERIA_BIN="$RUNNER_TEMP/protocol-tools/hysteria" \
+            XRAY_BIN="$RUNNER_TEMP/protocol-tools/xray" \
+            "$RUNNER_TEMP/systemd.test" -test.run '^TestSystemdLifecycle$' -test.v -test.timeout=10m

@@ -110,6 +110,11 @@ input:hover,textarea:hover,select:hover{border-color:var(--mute)}
 .check{font-size:12.5px;margin-top:6px}.check.ok{color:var(--ok)}.check.bad{color:var(--bad)}
 .empty button{margin-top:12px}
 
+.protos{display:flex;gap:8px 16px;flex-wrap:wrap}
+.sites{display:grid;gap:4px;margin-top:6px;max-height:220px;overflow:auto}
+.sites button{justify-content:space-between;text-align:left;font-size:13px;padding:6px 10px}
+.sites button small{color:var(--mute)}
+
 /* dialogs */
 dialog{border:0;border-radius:18px;background:var(--surface);color:var(--fg);padding:0;width:min(460px,calc(100vw - 24px));box-shadow:var(--shadow-lg)}
 #share{width:min(640px,calc(100vw - 24px))}
@@ -175,7 +180,7 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
   <div id="login" class="card" hidden>
     <div class="logo"><svg class="i"><use href="#i-globe"/></svg></div>
     <h1>hy-panel</h1>
-    <div class="mute small">VPN-панель Hysteria 2</div>
+    <div class="mute small">VPN-панель Hysteria 2 и VLESS/Reality</div>
     <form>
       <input type="password" name="password" placeholder="Пароль" autocomplete="current-password" autofocus>
       <button class="pri">Войти</button>
@@ -222,9 +227,10 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
     <div class="grid">
       <label class="full" id="nameWrap"><span>Имя (a-z 0-9 _ . -)</span><input name="name" required pattern="[A-Za-z0-9_.\-]{1,32}" autocapitalize="off" autocomplete="off"></label>
       <label><span>Лимит трафика, ГБ</span><input name="quota" type="number" min="0" step="any" placeholder="без лимита"></label>
-      <label><span>Устройств одновременно <button type="button" class="tip" onclick="this.focus()" aria-label="Подсказка" data-tip="Телефону лучше разрешить не меньше двух устройств. Когда телефон переключается между Wi-Fi и мобильной сетью, прежнее подключение сохраняется ещё около тридцати секунд и тоже учитывается в лимите."><svg class="i"><use href="#i-info"/></svg></button></span><input name="devices" type="number" min="0" placeholder="без лимита"></label>
+      <label><span>Сессий Hysteria <button type="button" class="tip" onclick="this.focus()" aria-label="Подсказка" data-tip="Лимит одновременных сессий Hysteria. Один клиент может открыть несколько сессий, в том числе при смене сети. Это не число физических устройств. На VLESS лимит не действует."><svg class="i"><use href="#i-info"/></svg></button></span><input name="devices" type="number" min="0" placeholder="без лимита"></label>
       <label><span>Действует до</span><input name="expires" type="date"></label>
       <label><span>Пароль</span><input name="password" autocomplete="off" pattern="[^:\s]{8,128}" title="8–128 символов, без двоеточия и пробелов"></label>
+      <div class="full" id="protoWrap"><label><span>Протоколы</span></label><div class="protos" id="protoBoxes"></div></div>
       <label class="full chk"><input type="checkbox" name="monthly" class="sw"> Сбрасывать трафик 1-го числа</label>
       <label class="full"><span>Заметка</span><input name="note" maxlength="200"></label>
     </div>
@@ -274,6 +280,22 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
   </form>
 </dialog>
 
+<dialog id="vlDlg">
+  <form method="dialog" id="vlForm" class="dlg">
+    <div class="dlg-h"><h2>VLESS + Reality</h2><button type="button" class="icon ghost" onclick="$('#vlDlg').close()" aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <div class="server-details small" id="vlInfo"></div>
+    <div class="grid">
+      <label class="full"><span>Порт (TCP)</span><input name="port" type="number" min="1" max="65535" value="443"></label>
+      <label class="full"><span>Сайт для маскировки — чужой сайт с TLS 1.3 и HTTP/2, лучше из той же подсети /24, что и сервер</span>
+        <div style="display:flex;gap:8px"><input name="target" placeholder="www.example.com" autocapitalize="off"><button type="button" onclick="checkSite()">Проверить</button><button type="button" id="findBtn" onclick="findSites()" title="Найти соседей сервера по /24 с TLS 1.3, HTTP/2 и ответом 200">Найти</button></div>
+        <div class="check" id="vlCheck"></div></label>
+      <div class="full" id="vlFind" hidden><div class="mute small" id="findState"></div><div class="sites" id="sites"></div></div>
+    </div>
+    <div class="mute small hint" id="vlHint"></div>
+    <div class="row"><button type="button" onclick="$('#vlDlg').close()">Отмена</button><button class="pri" value="ok" id="vlBtn">Установить</button></div>
+  </form>
+</dialog>
+
 <dialog id="jobDlg">
   <div class="dlg">
     <div class="dlg-h"><h2 id="jobTitle"></h2><button class="icon ghost" onclick="$('#jobDlg').close()" aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
@@ -288,6 +310,7 @@ textarea{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:va
 <script>
 const $ = s => document.querySelector(s);
 let S = null, stateReceivedAt = 0, editing = null, shareUser = null, filter = 'all';
+let stateRequest = 0, systemRequest = 0, authEpoch = 0, shareRequest = 0;
 
 const GB = 1024 ** 3;
 function fmt(b) {
@@ -319,10 +342,16 @@ function toast(msg, bad) {
   }, bad ? 5000 : 2200);
 }
 
-async function api(method, path, body) {
-  const r = await fetch(path, {method, headers: body ? {'Content-Type': 'application/json'} : {}, body: body ? JSON.stringify(body) : undefined});
+async function api(method, path, body, quiet = false) {
+  let r;
+  try {
+    r = await fetch(path, {method, signal: AbortSignal.timeout(35000), headers: body ? {'Content-Type': 'application/json'} : {}, body: body ? JSON.stringify(body) : undefined});
+  } catch (error) {
+    if (!quiet) toast('Нет ответа от панели. Проверь связь; перед повтором проверь, применилось ли изменение.', true);
+    throw error;
+  }
   if (r.status === 401 && path !== 'api/login') { showLogin(); throw new Error('unauthorized'); }
-  if (!r.ok) { const t = (await r.text()).trim() || r.statusText; toast(t, true); throw new Error(t); }
+  if (!r.ok) { const t = (await r.text()).trim() || r.statusText; if (!quiet) toast(t, true); throw new Error(t); }
   const ct = r.headers.get('content-type') || '';
   return ct.includes('json') ? r.json() : r.text();
 }
@@ -347,7 +376,7 @@ try { savedTheme = localStorage.getItem('theme'); } catch {}
 setTheme(savedTheme);
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => setTheme(document.documentElement.dataset.theme));
 
-function showLogin() { $('#app').hidden = true; $('#login').hidden = false; $('#login input').focus(); }
+function showLogin() { authEpoch++; stateRequest++; systemRequest++; S = null; SYS = null; document.querySelectorAll('dialog[open]').forEach(d => d.close()); $('#app').hidden = true; $('#login').hidden = false; $('#login input').focus(); }
 $('#login form').onsubmit = async e => {
   e.preventDefault();
   try { await api('POST', 'api/login', {password: e.target.password.value}); e.target.reset(); load(); loadSystem(); } catch {}
@@ -355,7 +384,8 @@ $('#login form').onsubmit = async e => {
 async function logout() { await api('POST', 'api/logout'); showLogin(); }
 
 async function load() {
-  try { S = await api('GET', 'api/state'); stateReceivedAt = Date.now(); }
+  const request = ++stateRequest;
+  try { const state = await api('GET', 'api/state', undefined, true); if (request !== stateRequest) return; S = state; stateReceivedAt = Date.now(); }
   catch { if (S) refreshOnlineView(); return; }
   $('#login').hidden = true; $('#app').hidden = false;
   $('#host').textContent = 'Сервер ' + S.server.host;
@@ -373,52 +403,59 @@ function refreshOnlineView() {
 // ---- protocols: installed and configured by the agent ----
 let SYS = null;
 async function loadSystem() {
-  try { SYS = await api('GET', 'api/system'); } catch { return; }
+  const request = ++systemRequest, epoch = authEpoch;
+  try { const system = await api('GET', 'api/system', undefined, true); if (request !== systemRequest || epoch !== authEpoch) return; SYS = system; } catch { return; }
   renderProtocols();
 }
 function renderProtocols() {
   if (!SYS) return;
-  const s = SYS.status?.hysteria2 || {}, c = SYS.settings?.hysteria2;
   const unavailable = !!SYS.agentError;
-  const title = unavailable ? 'Состояние сервера неизвестно' : c ? s.active ? 'Сервер работает' : 'Сервер остановлен'
-    : s.installed ? 'Hysteria не настроена' : 'Hysteria не установлена';
-  const tone = unavailable ? 'warn' : c ? s.active ? 'ok' : 'bad' : '';
-  const action = c ? 'Настройки' : s.installed ? 'Настроить' : 'Установить';
-  $('#serverStatus').innerHTML = `<div class="server-bar"><div class="server-state"><span class="server-dot ${tone}" aria-hidden="true"></span><span>${title}</span>${c ? `<span class="mute small">UDP ${esc(c.port)}</span>` : ''}</div><div class="server-actions">${s.update && !unavailable ? `<button data-do="update">Обновить до ${esc(s.latest)}</button>` : ''}<button class="${c ? '' : 'pri'}" data-do="cfg">${action}</button></div></div>`
+  $('#serverStatus').innerHTML = [['hysteria2', 'Hysteria 2', 'UDP'], ['vless', 'VLESS / Reality', 'TCP']].map(([id, name, transport]) => {
+    const s = SYS.status?.[id] || {}, c = SYS.settings?.[id];
+    const title = name + ': ' + (unavailable ? 'состояние неизвестно' : c ? s.active ? 'работает' : 'остановлен' : s.installed ? 'не настроен' : 'не установлен');
+    const tone = unavailable ? 'warn' : c ? s.active ? 'ok' : 'bad' : '';
+    const action = c ? 'Настройки' : s.installed ? 'Настроить' : 'Установить';
+    return `<div class="server-bar"><div class="server-state"><span class="server-dot ${tone}" aria-hidden="true"></span><span>${title}</span>${c ? `<span class="mute small">${transport} ${esc(c.port)}</span>` : ''}</div><div class="server-actions">${s.update && !unavailable ? `<button data-proto="${id}" data-do="update">Обновить до ${esc(s.latest)}</button>` : ''}<button class="${c ? '' : 'pri'}" data-proto="${id}" data-do="cfg">${action}</button></div></div>`;
+  }).join('')
     + (unavailable ? `<div class="err">${icon('alert')}<span>${esc(SYS.agentError)}</span></div>` : '');
   renderHyInfo();
+  renderProtoInfo('vless');
 }
-function renderHyInfo() {
+function renderHyInfo() { renderProtoInfo('hysteria2'); }
+function renderProtoInfo(id) {
   if (!SYS) return;
-  const s = SYS.status?.hysteria2 || {}, c = SYS.settings?.hysteria2;
+  const s = SYS.status?.[id] || {}, c = SYS.settings?.[id];
   let version = s.installed ? `Версия ${esc(s.version)}` : 'Не установлена';
   if (s.installed) version += s.update ? ` · доступна ${esc(s.latest)}` : s.latest ? ' · последняя' : ' · обновления не проверены';
-  $('#hyInfo').innerHTML = `<div>${version}</div>`
+  const info = id === 'hysteria2' ? c ? `<div class="detail"><span class="mute">Обфускация</span><span>${esc(c.obfs || 'без обфускации')}</span></div><div class="detail"><span class="mute">Сертификат</span><span>${c.domain ? esc(c.domain) + " (Let's Encrypt)" : 'Самоподписанный'}</span></div>` : ''
+    : c ? `<div class="detail"><span class="mute">Сайт маскировки</span><span>${esc(c.sni)}</span></div><div class="detail"><span class="mute">Транспорт</span><span>${esc(c.network)}</span></div>` : '';
+  $(id === 'hysteria2' ? '#hyInfo' : '#vlInfo').innerHTML = `<div>${version}</div>`
     + (s.latestErr && !s.latest ? `<div class="mute">${esc(s.latestErr)}</div>` : '')
-    + (c ? `<div class="detail"><span class="mute">Обфускация</span><span>${esc(c.obfs || 'без обфускации')}</span></div><div class="detail"><span class="mute">Сертификат</span><span>${c.domain ? esc(c.domain) + " (Let's Encrypt)" : 'Самоподписанный'}</span></div>` : '')
-    + (c && S ? onlineInfo('hysteria2') : '')
-    + (s.installed ? `<div class="detail-actions"><button type="button" data-do="check">Проверить обновления</button>${s.update ? `<button type="button" data-do="update">Обновить до ${esc(s.latest)}</button>` : ''}</div>` : '');
+    + info + (c && S ? onlineInfo(id) : '')
+    + (s.installed ? `<div class="detail-actions"><button type="button" data-proto="${id}" data-do="check">Проверить обновления</button>${s.update ? `<button type="button" data-proto="${id}" data-do="update">Обновить до ${esc(s.latest)}</button>` : ''}</div>` : '');
 }
 function systemAction(e) {
   const b = e.target.closest('[data-do]'); if (!b) return;
-  if (b.dataset.do === 'cfg') openHy();
-  else if (b.dataset.do === 'check') checkReleases(b);
-  else if (confirm('Скачать последний релиз Hysteria 2 и перезапустить его? Подключения прервутся на секунду.')) {
-    if ($('#hyDlg').open) $('#hyDlg').close();
-    startJob('update-hysteria', {}, 'Обновление Hysteria 2');
+  const id = b.dataset.proto, name = id === 'vless' ? 'Xray' : 'Hysteria 2';
+  if (b.dataset.do === 'cfg') (id === 'vless' ? openVl : openHy)();
+  else if (b.dataset.do === 'check') checkReleases(b, id);
+  else if (confirm(`Скачать последний релиз ${name} и перезапустить его? Подключения прервутся на секунду.`)) {
+    for (const dialog of ['#hyDlg', '#vlDlg']) if ($(dialog).open) $(dialog).close();
+    startJob(id === 'vless' ? 'update-xray' : 'update-hysteria', {}, 'Обновление ' + name);
   }
 }
 $('#serverStatus').onclick = systemAction;
 $('#hyInfo').onclick = systemAction;
+$('#vlInfo').onclick = systemAction;
 
-async function checkReleases(b) {
+async function checkReleases(b, id) {
   b.disabled = true; b.textContent = 'Проверяю…';
   try { SYS = await api('POST', 'api/system/releases'); } catch { return renderProtocols(); }
   renderProtocols();
-  const s = SYS.status?.hysteria2 || {};
-  if (s.update) toast(`Hysteria 2: вышла ${s.latest}`);
-  else if (s.latest) toast(`Hysteria 2: ${s.version} — последняя версия`);
-  else toast(`Hysteria 2: ${s.latestErr || 'GitHub не ответил'}`, true);
+  const s = SYS.status?.[id] || {}, name = id === 'vless' ? 'Xray' : 'Hysteria 2';
+  if (s.update) toast(`${name}: вышла ${s.latest}`);
+  else if (s.latest) toast(`${name}: ${s.version} — последняя версия`);
+  else toast(`${name}: ${s.latestErr || 'GitHub не ответил'}`, true);
 }
 
 function openHy() {
@@ -448,15 +485,78 @@ $('#hyDlg').onclose = () => {
   startJob('hysteria', params, SYS.settings.hysteria2 ? 'Настройка Hysteria 2' : 'Установка Hysteria 2');
 };
 
+function openVl() {
+  const f = $('#vlForm'), c = SYS.settings.vless;
+  renderProtoInfo('vless');
+  f.port.value = c ? c.port : 443;
+  f.target.value = c ? c.sni : ''; f.target.placeholder = c ? '' : 'www.example.com'; f.target.required = !c;
+  $('#vlCheck').textContent = ''; $('#vlFind').hidden = true; $('#findBtn').disabled = false;
+  $('#vlBtn').textContent = c ? 'Сохранить' : 'Установить';
+  $('#vlHint').textContent = c
+    ? `Сейчас порт ${c.port}, сайт — ${c.sni} (пустое поле — оставить его). Сайт меняют, если он перестал отвечать; порт — если провайдер режет TLS на этом порту. Ссылки VLESS изменятся, подписка обновится сама; кто добавил ссылку вручную — выдай новую.`
+    : 'Панель скачает официальный релиз Xray (с проверкой SHA-256), сделает ключи Reality и запустит службу. Конфиг Xray, написанный не панелью, заменится (прежний сохранится в .bak-hy-panel).';
+  $('#vlDlg').returnValue = ''; $('#vlDlg').showModal();
+}
+// findSites does what the guide did by hand: RealiTLScanner over the
+// server's /24, then a check of every site found (same /24, valid
+// certificate, TLS 1.3 + HTTP/2, answers 200).
+async function findSites() {
+  let st;
+  try { st = await api('POST', 'api/system/site-scan'); } catch { return; }
+  $('#vlFind').hidden = false; $('#findBtn').disabled = true;
+  while (st.running) {
+    showSites(st);
+    await new Promise(r => setTimeout(r, 1000));
+    if (!$('#vlDlg').open) { $('#findBtn').disabled = false; return; }
+    try { st = await api('GET', 'api/system/site-scan'); } catch { break; }
+  }
+  showSites(st); $('#findBtn').disabled = false;
+}
+function showSites(st) {
+  const ok = st.found.filter(c => c.status === 200).length;
+  $('#findState').textContent = st.running
+    ? `Ищу в ${st.net}: ${st.done} из ${st.total} адресов, подходящих ${ok}…`
+    : st.found.length ? `${st.net}: подходящих ${ok}. Лучшие сверху — выбери сайт, он подставится и проверится.`
+    : `${st.net}: соседей с TLS 1.3 и HTTP/2 не нашлось. Возьми сайт из соседней подсети провайдера или крупный сайт.`;
+  $('#sites').innerHTML = st.found.map(c => `<button type="button" data-d="${esc(c.domain)}">${esc(c.domain)}
+    <small>${esc(c.ip)}${c.sameIP ? '' : ' · DNS на соседний IP'} · ${c.ms} мс · ${c.status === 200 ? '200' : '<span style="color:var(--warn)">' + c.status + '</span>'}</small></button>`).join('');
+}
+$('#sites').onclick = e => {
+  const b = e.target.closest('[data-d]'); if (!b) return;
+  $('#vlForm').target.value = b.dataset.d; checkSite();
+};
+async function checkSite() {
+  const d = $('#vlForm').target.value.trim().toLowerCase(), el = $('#vlCheck');
+  if (!d) return;
+  el.className = 'check'; el.textContent = 'Проверяю…';
+  try {
+    const r = await api('GET', 'api/system/check-target?domain=' + encodeURIComponent(d));
+    el.className = 'check ' + (r.ok ? 'ok' : 'bad');
+    el.textContent = r.ok ? `✓ TLS 1.3, HTTP/2. ${r.note.charAt(0).toUpperCase() + r.note.slice(1)}.` : `✗ ${r.error}`;
+  } catch { el.textContent = ''; }
+}
+$('#vlDlg').onclose = () => {
+  if ($('#vlDlg').returnValue !== 'ok') return;
+  const f = $('#vlForm'), c = SYS.settings.vless;
+  const params = {target: f.target.value.trim().toLowerCase() || c.sni, port: String(f.port.value)};
+  if (c && params.target === c.sni && params.port === String(c.port)) return;
+  startJob('vless', params, c ? 'Настройка VLESS + Reality' : 'Установка VLESS + Reality');
+};
+
 // startJob asks the agent to run a job and follows its log. The panel
 // restarts at the end of most jobs: polling errors only mean "wait".
 async function startJob(action, params, title) {
-  try { await api('POST', 'api/system/jobs', {action, params}); } catch { return; }
+  let started;
+  try { started = await api('POST', 'api/system/jobs', {action, params}); } catch { return; }
   $('#jobTitle').textContent = title; $('#jobLog').textContent = ''; $('#jobState').textContent = 'Идёт…';
   if (!$('#jobDlg').open) $('#jobDlg').showModal();
   const t0 = Date.now(), secs = () => Math.round((Date.now() - t0) / 1000);
   let lost = 0;
   for (;;) {
+    if (Date.now() - t0 > 16 * 60 * 1000) {
+      $('#jobState').textContent = 'Не удалось получить результат. Проверь состояние протокола и журнал агента.';
+      return;
+    }
     await new Promise(r => setTimeout(r, 1000));
     let j = null;
     try { const r = await fetch('api/system/job'); if (r.ok) j = await r.json(); } catch {}
@@ -466,6 +566,11 @@ async function startJob(action, params, title) {
       continue;
     }
     lost = 0;
+    if (started.id != null && j.id !== started.id) {
+      $('#jobState').textContent = 'Агент больше не хранит результат этой операции. Проверь состояние протокола.';
+      await load(); await loadSystem();
+      return;
+    }
     const log = $('#jobLog'), end = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
     log.textContent = j.log; if (end) log.scrollTop = log.scrollHeight;
     if (j.running) {
@@ -507,8 +612,8 @@ function stats() {
   $('#stUsersSub').hidden = enabled === us.length;
   const stale = protos().some(p => onlineStale(p.id));
   $('#stOnline').textContent = stale ? on.length ? '≥ ' + on.length : '—' : on.length;
-  const sessions = on.reduce((n, u) => n + liveOn(u, 'hysteria2'), 0);
-  $('#stOnline').title = stale ? 'Данные о подключениях устарели' : `Пользователей: ${on.length}. Подключений: ${sessions}.`;
+  const counts = protos().map(p => `${p.title}: ${on.reduce((n, u) => n + liveOn(u, p.id), 0)} ${p.id === 'vless' ? 'IP' : 'сессий'}`).join('; ');
+  $('#stOnline').title = stale ? 'Данные о подключениях устарели' : `Пользователей: ${on.length}. ${counts}.`;
   $('#stOnlineSub').hidden = !stale;
   $('#stOnlineSub').textContent = stale ? 'Данные устарели' : '';
   $('#stTraffic').textContent = fmt(up + down);
@@ -535,12 +640,17 @@ function render() {
     const used = u.up + u.down, st = statusTag[u.status], days = daysLeft(u);
     const pct = u.quotaBytes ? Math.min(100, used / u.quotaBytes * 100) : 0;
     const h = hue(u.name);
-    const stale = userProtos(u).includes('hysteria2') && onlineStale('hysteria2');
-    const n = liveOn(u, 'hysteria2');
-    const onlineTip = stale ? 'Данные о подключениях устарели' : n ? `Онлайн. Подключений: ${n}` : 'Не подключён';
-    const sessions = !stale && (n > 1 || u.maxDevices) ? `<span class="sessions" title="Подключения${u.maxDevices ? ': лимит ' + u.maxDevices : ''}">${n}${u.maxDevices ? '/' + u.maxDevices : ''} подкл.</span>` : '';
+    const allowed = userProtos(u), many = protos().length > 1;
+    const stale = allowed.some(p => onlineStale(p));
+    const onlineTip = protos().filter(p => allowed.includes(p.id)).map(p => `${p.title}: ${onlineStale(p.id) ? 'данные устарели' : liveOn(u, p.id) + (p.id === 'vless' ? ' IP' : ' сессий')}`).join('; ') || 'Не подключён';
+    const sessions = protos().filter(p => allowed.includes(p.id)).map(p => {
+      if (onlineStale(p.id)) return many ? `<span class="pill warn">${esc(p.title)}: ?</span>` : '';
+      const n = liveOn(u, p.id), limit = p.id === 'hysteria2' ? u.maxDevices : 0;
+      if (!((many && n) || n > 1 || limit)) return '';
+      return `<span class="sessions" title="${p.id === 'vless' ? 'IP-адреса активных соединений' : 'Сессии Hysteria; один клиент может открыть несколько'}">${many ? esc(p.title) + ': ' : ''}${n}${limit ? '/' + limit : ''} ${p.id === 'vless' ? 'IP' : 'сесс.'}</span>`;
+    }).join('');
     return `<div class="user${u.enabled ? '' : ' off'}" data-n="${esc(u.name)}">
-      <div class="av${stale ? ' stale' : isOn(u) ? ' on' : ''}" style="--h:${h}" title="${onlineTip}" aria-label="${esc(u.name)}: ${onlineTip}">${esc(u.name[0])}</div>
+      <div class="av${isOn(u) ? ' on' : stale ? ' stale' : ''}" style="--h:${h}" title="${esc(onlineTip)}" aria-label="${esc(u.name)}: ${esc(onlineTip)}">${esc(u.name[0])}</div>
       <div class="body">
         <div class="name">${esc(u.name)}
           ${st ? `<span class="pill ${st[1]}">${st[0]}</span>` : ''}
@@ -557,7 +667,7 @@ function render() {
         ${u.quotaBytes ? `<div class="prog${pct >= 100 ? ' bad' : pct >= 90 ? ' warn' : ''}"><i style="width:${pct}%"></i></div>` : ''}
       </div>
       <div class="acts">
-        <input type="checkbox" class="sw" data-a="toggle" ${u.enabled ? 'checked' : ''} title="${u.enabled ? 'Выключить' : 'Включить'}" aria-label="Включён">
+        <input type="checkbox" class="sw" data-a="toggle" ${u.enabled ? 'checked' : ''} ${pendingUsers.has(u.name) ? 'disabled' : ''} title="${u.enabled ? 'Выключить' : 'Включить'}" aria-label="Включён">
         <button class="icon ghost" data-a="share" title="QR и ссылки" aria-label="QR и ссылки">${icon('qr')}</button>
         <button class="icon ghost" data-a="edit" title="Изменить" aria-label="Изменить">${icon('edit')}</button>
         <button class="icon ghost" data-a="reset" title="Сбросить счётчик трафика" aria-label="Сбросить трафик">${icon('reset')}</button>
@@ -581,13 +691,19 @@ $('#list').onclick = e => {
 };
 
 const find = n => S.users.find(u => u.name === n);
+const pendingUsers = new Set();
 async function toggle(n) {
+  if (pendingUsers.has(n)) return;
+  pendingUsers.add(n);
+  const input = [...$('#list').querySelectorAll('[data-n]')].find(row => row.dataset.n === n)?.querySelector('[data-a="toggle"]');
+  if (input) input.disabled = true;
   const on = !find(n).enabled;
   try { await api('PATCH', 'api/users/' + n, {enabled: on}); toast(`${n}: ${on ? 'включён' : 'выключен'}`); } catch {}
-  load();
+  pendingUsers.delete(n);
+  await load();
 }
 async function resetT(n) { if (confirm(`Сбросить трафик ${n}?`)) { try { await api('PATCH', 'api/users/' + n, {resetTraffic: true}); toast('Трафик сброшен'); } catch {} load(); } }
-async function del(n) { if (confirm(`Удалить ${n}? Клиент будет отключён.`)) { try { await api('DELETE', 'api/users/' + n); toast(`${n} удалён`); } catch {} load(); } }
+async function del(n) { if (confirm(`Удалить ${n}? Новые подключения будут запрещены; открытые соединения VLESS могут продолжить работу.`)) { try { await api('DELETE', 'api/users/' + n); toast(`${n} удалён`); } catch {} load(); } }
 
 function openEdit(n) {
   editing = n ? find(n) : null;
@@ -601,6 +717,10 @@ function openEdit(n) {
   f.expires.value = u.expiresAt ? localDate(u.expiresAt) : '';
   f.password.value = ''; f.password.placeholder = editing ? 'не менять' : 'случайный';
   f.note.value = u.note || '';
+  const off = u.protoOff || [];
+  $('#protoWrap').hidden = protos().length < 2;
+  $('#protoBoxes').innerHTML = protos().map(p =>
+    `<label class="chk"><input type="checkbox" class="sw" data-p="${esc(p.id)}"${off.includes(p.id) ? '' : ' checked'}> ${esc(p.title)}</label>`).join('');
   $('#rekeyBtn').hidden = !editing;
   $('#edit').returnValue = ''; // returnValue survives between openings; Esc must not re-save
   $('#edit').showModal();
@@ -609,29 +729,35 @@ function openEdit(n) {
 $('#edit').onclose = async () => {
   if ($('#edit').returnValue !== 'ok') return;
   const f = $('#editForm');
+  const protocolInputs = [...$('#protoBoxes').querySelectorAll('input')];
+  const absentOff = (editing?.protoOff || []).filter(id => !protocolInputs.some(i => i.dataset.p === id));
   const body = {
     quotaBytes: Math.round((+f.quota.value || 0) * GB),
     maxDevices: +f.devices.value || 0,
     resetMonthly: f.monthly.checked,
     expiresAt: f.expires.value ? Math.floor(new Date(f.expires.value + 'T23:59:59').getTime() / 1000) : 0,
     note: f.note.value,
+    protoOff: [...new Set([...absentOff, ...protocolInputs.filter(i => !i.checked).map(i => i.dataset.p)])],
   };
   if (f.password.value) body.password = f.password.value;
   try {
     if (editing) { await api('PATCH', 'api/users/' + editing.name, body); toast('Сохранено'); }
     else { body.name = f.name.value.toLowerCase(); await api('POST', 'api/users', body); toast(`${body.name} создан`); }
-  } catch {}
+  } catch {
+    if (!$('#app').hidden && !$('#edit').open) { $('#edit').returnValue = ''; $('#edit').showModal(); }
+    return;
+  }
   load();
 };
 
 async function rekey() {
   const n = editing.name;
-  if (!confirm(`Выдать ${n} новый ключ? Старые ссылки, QR и подписка перестанут работать, текущие сессии будут разорваны.`)) return;
+  if (!confirm(`Выдать ${n} новый ключ? Старые ссылки, QR и подписка перестанут работать. Открытые соединения VLESS могут продолжить работу.`)) return;
   try { await api('PATCH', 'api/users/' + n, {newKey: true}); } catch { return; }
   $('#edit').close(); await load(); openShare(n);
 }
 const localDate = t => { const d = new Date(t * 1000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
-let shareTab = '', mihomoView = '', dlURL = '';
+let mihomoView = '', dlURL = '';
 async function openShare(n) {
   shareUser = find(n);
   $('#shareTitle').textContent = n;
@@ -647,14 +773,16 @@ async function openShare(n) {
 const protoName = id => (protos().find(p => p.id === id) || {title: id}).title;
 const hints = {
   hysteria2: 'Hiddify, v2RayTun, Happ, Shadowrocket, v2rayN, официальный клиент.',
+  vless: 'VLESS + Reality: Happ, v2RayTun, Streisand, v2rayN, Hiddify. Запасной канал по TCP.',
 };
 async function setTab(t) {
-  shareTab = t;
+  const request = ++shareRequest;
+  $('#dlConf').hidden = true;
   $('#tabs').querySelectorAll('button').forEach(b => b.classList.toggle('act', b.dataset.t === t));
   const u = shareUser, q = 'api/users/' + u.name + '/qr.png?t=' + Date.now(), names = u.links.map(l => protoName(l.proto));
-  let text = '', hint = '', qr = '';
+  let text = '', hint = '', qr = '', download = '';
   const l = u.links.find(l => l.proto === t);
-  if (!t) hint = 'Hysteria ещё не настроена.';
+  if (!t) hint = 'Для пользователя нет доступных протоколов.';
   if (l) { text = l.uri; qr = q + '&proto=' + t; hint = typeof hints[t] === 'function' ? hints[t]() : hints[t] || ''; }
   if (t === 'sub') {
     text = S.subBase + u.subPath; qr = q + '&sub=1';
@@ -664,18 +792,21 @@ async function setTab(t) {
   if (t === 'mihomo') {
     // Whole configs first, then the pieces for one's own config.
     const parts = u.links.map(l => [l.proto, protoName(l.proto)]);
+    $('#mtabs').style.gridTemplateColumns = 'repeat(' + (parts.length > 1 ? 2 : 3) + ',minmax(0,1fr))';
     const btn = ([v, title]) => `<button data-v="${esc(v)}" style="flex:1" class="${v === mihomoView ? 'act' : ''}">${esc(title)}</button>`;
     $('#mtabs').innerHTML = [['router', 'Роутер (XKeen)'], ['desktop', 'Компьютер (Clash Verge)'], ...parts].map(btn).join('');
     const base = 'api/users/' + encodeURIComponent(u.name) + '/mihomo';
     const full = mihomoView === 'router' || mihomoView === 'desktop';
     const path = base + (full ? '?full=' + mihomoView : '?proto=' + mihomoView);
     try { text = await api('GET', path); } catch { text = ''; }
-    if (full) dlURL = path + '&download=1';
+    if (full) download = path + '&download=1';
     hint = {
       router: 'Полный конфиг для mihomo в XKeen на роутере: прокси пользователя, группы и правила (заблокированное — через VPN, остальное напрямую). Замени им конфиг mihomo в XKeen (обычно /opt/etc/mihomo/config.yaml). Панель zashboard: http://<роутер>:9090/ui, пароль — secret в конфиге.',
       desktop: 'Полный конфиг для Clash Verge и mihomo на компьютере: в Clash Verge — «Профили» → «Новый» → Local, стереть всё и вставить целиком, или скачать файл и импортировать. Ссылка «Подписка» отдаёт Clash Verge тот же конфиг, и он обновляется сам.',
     }[mihomoView] || `Прокси ${protoName(mihomoView)}: вставь в proxies: конфига mihomo.`;
   }
+  if (request !== shareRequest || shareUser !== u) return;
+  dlURL = download;
   $('#shareText').value = text; $('#shareHint').textContent = hint;
   $('#qr').hidden = !qr; if (qr) $('#qr').src = qr;
   const full = t === 'mihomo' && (mihomoView === 'router' || mihomoView === 'desktop');

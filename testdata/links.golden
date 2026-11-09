@@ -1,14 +1,16 @@
 === server full
-protocols [{"id":"hysteria2","title":"Hysteria 2"}]
+protocols [{"id":"hysteria2","title":"Hysteria 2"},{"id":"vless","title":"VLESS"}]
 state alice link {"proto":"hysteria2","uri":"hysteria2://alice:alice-pass-1@203.0.113.10:20000/?ech=AEX%2BDQBB\u0026insecure=1\u0026mport=20000-50000\u0026obfs=salamander\u0026obfs-password=obfs-pass\u0026pcs=ab12cd34\u0026pinSHA256=ab12cd34\u0026sni=vpn.example.com#NL-alice"}
+state alice link {"proto":"vless","uri":"vless://46d502e8-e63c-4b3e-893f-519135ad1de3@203.0.113.10:443?encryption=none\u0026fp=chrome\u0026mode=auto\u0026path=%2F2b1f2de74ce6\u0026pbk=pbk-xhttp\u0026security=reality\u0026sid=1187d00c55ca4d4c\u0026sni=www.example.org\u0026type=xhttp#NL-alice-vless"}
 state bob link {"proto":"hysteria2","uri":"hysteria2://bob:bob-pass-12@203.0.113.10:20000/?ech=AEX%2BDQBB\u0026insecure=1\u0026mport=20000-50000\u0026obfs=salamander\u0026obfs-password=obfs-pass\u0026pcs=ab12cd34\u0026pinSHA256=ab12cd34\u0026sni=vpn.example.com#NL-bob"}
-state carol link {"proto":"hysteria2","uri":"hysteria2://carol:carol-pass-1@203.0.113.10:20000/?ech=AEX%2BDQBB\u0026insecure=1\u0026mport=20000-50000\u0026obfs=salamander\u0026obfs-password=obfs-pass\u0026pcs=ab12cd34\u0026pinSHA256=ab12cd34\u0026sni=vpn.example.com#NL-carol"}
+state carol link {"proto":"vless","uri":"vless://9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4@203.0.113.10:443?encryption=none\u0026fp=chrome\u0026mode=auto\u0026path=%2F2b1f2de74ce6\u0026pbk=pbk-xhttp\u0026security=reality\u0026sid=1187d00c55ca4d4c\u0026sni=www.example.org\u0026type=xhttp#NL-carol-vless"}
 == full / alice
 --- sub format=raw: 200
 Content-Disposition: attachment; filename*=UTF-8''NL-alice
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:TkwtYWxpY2U=
 hysteria2://alice:alice-pass-1@203.0.113.10:20000/?ech=AEX%2BDQBB&insecure=1&mport=20000-50000&obfs=salamander&obfs-password=obfs-pass&pcs=ab12cd34&pinSHA256=ab12cd34&sni=vpn.example.com#NL-alice
+vless://46d502e8-e63c-4b3e-893f-519135ad1de3@203.0.113.10:443?encryption=none&fp=chrome&mode=auto&path=%2F2b1f2de74ce6&pbk=pbk-xhttp&security=reality&sid=1187d00c55ca4d4c&sni=www.example.org&type=xhttp#NL-alice-vless
 
 --- sub format=mihomo: 200
 Content-Disposition: attachment; filename*=UTF-8''NL-alice
@@ -27,6 +29,19 @@ mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b27
 +     sni: "vpn.example.com"
 +     fingerprint: "ab12cd34"
 +     ech-opts: {enable: true, config: "AEX+DQBB"}
++   - name: "NL-alice-vless"
++     type: vless
++     server: "203.0.113.10"
++     port: 443
++     uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.org"
++     client-fingerprint: chrome
++     network: xhttp
++     xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
++     reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c", support-x25519mlkem768: true}
 +   - IP-CIDR,203.0.113.10/32,DIRECT,no-resolve # свой сервер напрямую
 - redir-port: 5000
 - tproxy-port: 5001
@@ -41,7 +56,7 @@ mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b27
 Content-Disposition: attachment; filename*=UTF-8''NL-alice
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:TkwtYWxpY2U=
-aHlzdGVyaWEyOi8vYWxpY2U6YWxpY2UtcGFzcy0xQDIwMy4wLjExMy4xMDoyMDAwMC8/ZWNoPUFFWCUyQkRRQkImaW5zZWN1cmU9MSZtcG9ydD0yMDAwMC01MDAwMCZvYmZzPXNhbGFtYW5kZXImb2Jmcy1wYXNzd29yZD1vYmZzLXBhc3MmcGNzPWFiMTJjZDM0JnBpblNIQTI1Nj1hYjEyY2QzNCZzbmk9dnBuLmV4YW1wbGUuY29tI05MLWFsaWNlCg==
+aHlzdGVyaWEyOi8vYWxpY2U6YWxpY2UtcGFzcy0xQDIwMy4wLjExMy4xMDoyMDAwMC8/ZWNoPUFFWCUyQkRRQkImaW5zZWN1cmU9MSZtcG9ydD0yMDAwMC01MDAwMCZvYmZzPXNhbGFtYW5kZXImb2Jmcy1wYXNzd29yZD1vYmZzLXBhc3MmcGNzPWFiMTJjZDM0JnBpblNIQTI1Nj1hYjEyY2QzNCZzbmk9dnBuLmV4YW1wbGUuY29tI05MLWFsaWNlCnZsZXNzOi8vNDZkNTAyZTgtZTYzYy00YjNlLTg5M2YtNTE5MTM1YWQxZGUzQDIwMy4wLjExMy4xMDo0NDM/ZW5jcnlwdGlvbj1ub25lJmZwPWNocm9tZSZtb2RlPWF1dG8mcGF0aD0lMkYyYjFmMmRlNzRjZTYmcGJrPXBiay14aHR0cCZzZWN1cml0eT1yZWFsaXR5JnNpZD0xMTg3ZDAwYzU1Y2E0ZDRjJnNuaT13d3cuZXhhbXBsZS5vcmcmdHlwZT14aHR0cCNOTC1hbGljZS12bGVzcwo=
 --- sub clash UA: 200
 Content-Disposition: attachment; filename*=UTF-8''NL-alice
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
@@ -59,6 +74,19 @@ mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b27
 +     sni: "vpn.example.com"
 +     fingerprint: "ab12cd34"
 +     ech-opts: {enable: true, config: "AEX+DQBB"}
++   - name: "NL-alice-vless"
++     type: vless
++     server: "203.0.113.10"
++     port: 443
++     uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.org"
++     client-fingerprint: chrome
++     network: xhttp
++     xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
++     reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c", support-x25519mlkem768: true}
 +   - IP-CIDR,203.0.113.10/32,DIRECT,no-resolve # свой сервер напрямую
 - redir-port: 5000
 - tproxy-port: 5001
@@ -82,6 +110,19 @@ proxies:
     sni: "vpn.example.com"
     fingerprint: "ab12cd34"
     ech-opts: {enable: true, config: "AEX+DQBB"}
+  - name: "NL-alice-vless"
+    type: vless
+    server: "203.0.113.10"
+    port: 443
+    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.org"
+    client-fingerprint: chrome
+    network: xhttp
+    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
+    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c", support-x25519mlkem768: true}
 
 --- mihomo fallback: 200
 proxies:
@@ -96,10 +137,23 @@ proxies:
     sni: "vpn.example.com"
     fingerprint: "ab12cd34"
     ech-opts: {enable: true, config: "AEX+DQBB"}
+  - name: "NL-alice-vless"
+    type: vless
+    server: "203.0.113.10"
+    port: 443
+    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.org"
+    client-fingerprint: chrome
+    network: xhttp
+    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
+    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c", support-x25519mlkem768: true}
 proxy-groups:
   - name: "NL"
     type: fallback
-    proxies: ["NL-alice"]
+    proxies: ["NL-alice", "NL-alice-vless"]
     url: https://www.gstatic.com/generate_204
     interval: 120
 
@@ -119,6 +173,19 @@ mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b27
 +     sni: "vpn.example.com"
 +     fingerprint: "ab12cd34"
 +     ech-opts: {enable: true, config: "AEX+DQBB"}
++   - name: "NL-alice-vless"
++     type: vless
++     server: "203.0.113.10"
++     port: 443
++     uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.org"
++     client-fingerprint: chrome
++     network: xhttp
++     xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
++     reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c", support-x25519mlkem768: true}
 +   - IP-CIDR,203.0.113.10/32,DIRECT,no-resolve # свой сервер напрямую
 - secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
 - proxies: [] # заполняет панель
@@ -137,6 +204,19 @@ mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b27
 +     sni: "vpn.example.com"
 +     fingerprint: "ab12cd34"
 +     ech-opts: {enable: true, config: "AEX+DQBB"}
++   - name: "NL-alice-vless"
++     type: vless
++     server: "203.0.113.10"
++     port: 443
++     uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.org"
++     client-fingerprint: chrome
++     network: xhttp
++     xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
++     reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c", support-x25519mlkem768: true}
 +   - IP-CIDR,203.0.113.10/32,DIRECT,no-resolve # свой сервер напрямую
 - redir-port: 5000
 - tproxy-port: 5001
@@ -163,6 +243,25 @@ proxies:
 
 --- qr proto=hysteria2: 200
 png 320x320 sha256 054b7a91e150f9754095e2981350f478400918108e3ac1a051074784378452bb
+
+--- mihomo proto=vless: 200
+proxies:
+  - name: "NL-alice-vless"
+    type: vless
+    server: "203.0.113.10"
+    port: 443
+    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.org"
+    client-fingerprint: chrome
+    network: xhttp
+    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
+    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c", support-x25519mlkem768: true}
+
+--- qr proto=vless: 200
+png 320x320 sha256 6178d65f0084d8185095f392d494b1f7af3ab716834e458aced9d03f0a75c61f
 
 --- qr: 200
 png 320x320 sha256 054b7a91e150f9754095e2981350f478400918108e3ac1a051074784378452bb
@@ -328,6 +427,12 @@ proxies:
 --- qr proto=hysteria2: 200
 png 320x320 sha256 7ec14b995b6a12034829df495581dfd9e23c0a93b23cb3edfc7ae267d3027bd3
 
+--- mihomo proto=vless: 400
+протокол недоступен пользователю
+
+--- qr proto=vless: 400
+протокол недоступен пользователю
+
 --- qr: 200
 png 320x320 sha256 7ec14b995b6a12034829df495581dfd9e23c0a93b23cb3edfc7ae267d3027bd3
 
@@ -336,7 +441,7 @@ png 320x320 sha256 7ec14b995b6a12034829df495581dfd9e23c0a93b23cb3edfc7ae267d3027
 Content-Disposition: attachment; filename*=UTF-8''NL-carol
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:TkwtY2Fyb2w=
-hysteria2://carol:carol-pass-1@203.0.113.10:20000/?ech=AEX%2BDQBB&insecure=1&mport=20000-50000&obfs=salamander&obfs-password=obfs-pass&pcs=ab12cd34&pinSHA256=ab12cd34&sni=vpn.example.com#NL-carol
+vless://9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4@203.0.113.10:443?encryption=none&fp=chrome&mode=auto&path=%2F2b1f2de74ce6&pbk=pbk-xhttp&security=reality&sid=1187d00c55ca4d4c&sni=www.example.org&type=xhttp#NL-carol-vless
 
 --- sub format=mihomo: 200
 Content-Disposition: attachment; filename*=UTF-8''NL-carol
@@ -344,17 +449,19 @@ Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:TkwtY2Fyb2w=
 mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b270deb6f7
 + proxies:
-+   - name: "NL-carol"
-+     type: hysteria2
++   - name: "NL-carol-vless"
++     type: vless
 +     server: "203.0.113.10"
-+     port: 20000
-+     ports: "20000-50000"
-+     password: "carol:carol-pass-1"
-+     obfs: salamander
-+     obfs-password: "obfs-pass"
-+     sni: "vpn.example.com"
-+     fingerprint: "ab12cd34"
-+     ech-opts: {enable: true, config: "AEX+DQBB"}
++     port: 443
++     uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.org"
++     client-fingerprint: chrome
++     network: xhttp
++     xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
++     reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c", support-x25519mlkem768: true}
 +   - IP-CIDR,203.0.113.10/32,DIRECT,no-resolve # свой сервер напрямую
 - redir-port: 5000
 - tproxy-port: 5001
@@ -369,24 +476,26 @@ mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b27
 Content-Disposition: attachment; filename*=UTF-8''NL-carol
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:TkwtY2Fyb2w=
-aHlzdGVyaWEyOi8vY2Fyb2w6Y2Fyb2wtcGFzcy0xQDIwMy4wLjExMy4xMDoyMDAwMC8/ZWNoPUFFWCUyQkRRQkImaW5zZWN1cmU9MSZtcG9ydD0yMDAwMC01MDAwMCZvYmZzPXNhbGFtYW5kZXImb2Jmcy1wYXNzd29yZD1vYmZzLXBhc3MmcGNzPWFiMTJjZDM0JnBpblNIQTI1Nj1hYjEyY2QzNCZzbmk9dnBuLmV4YW1wbGUuY29tI05MLWNhcm9sCg==
+dmxlc3M6Ly85YzNmMWE3Ny0yZDRiLTRlOGEtYjZjNS03MWUwZDNmOWEyYjRAMjAzLjAuMTEzLjEwOjQ0Mz9lbmNyeXB0aW9uPW5vbmUmZnA9Y2hyb21lJm1vZGU9YXV0byZwYXRoPSUyRjJiMWYyZGU3NGNlNiZwYms9cGJrLXhodHRwJnNlY3VyaXR5PXJlYWxpdHkmc2lkPTExODdkMDBjNTVjYTRkNGMmc25pPXd3dy5leGFtcGxlLm9yZyZ0eXBlPXhodHRwI05MLWNhcm9sLXZsZXNzCg==
 --- sub clash UA: 200
 Content-Disposition: attachment; filename*=UTF-8''NL-carol
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:TkwtY2Fyb2w=
 mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b270deb6f7
 + proxies:
-+   - name: "NL-carol"
-+     type: hysteria2
++   - name: "NL-carol-vless"
++     type: vless
 +     server: "203.0.113.10"
-+     port: 20000
-+     ports: "20000-50000"
-+     password: "carol:carol-pass-1"
-+     obfs: salamander
-+     obfs-password: "obfs-pass"
-+     sni: "vpn.example.com"
-+     fingerprint: "ab12cd34"
-+     ech-opts: {enable: true, config: "AEX+DQBB"}
++     port: 443
++     uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.org"
++     client-fingerprint: chrome
++     network: xhttp
++     xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
++     reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c", support-x25519mlkem768: true}
 +   - IP-CIDR,203.0.113.10/32,DIRECT,no-resolve # свой сервер напрямую
 - redir-port: 5000
 - tproxy-port: 5001
@@ -399,35 +508,39 @@ mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b27
 
 --- mihomo: 200
 proxies:
-  - name: "NL-carol"
-    type: hysteria2
+  - name: "NL-carol-vless"
+    type: vless
     server: "203.0.113.10"
-    port: 20000
-    ports: "20000-50000"
-    password: "carol:carol-pass-1"
-    obfs: salamander
-    obfs-password: "obfs-pass"
-    sni: "vpn.example.com"
-    fingerprint: "ab12cd34"
-    ech-opts: {enable: true, config: "AEX+DQBB"}
+    port: 443
+    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.org"
+    client-fingerprint: chrome
+    network: xhttp
+    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
+    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c", support-x25519mlkem768: true}
 
 --- mihomo fallback: 200
 proxies:
-  - name: "NL-carol"
-    type: hysteria2
+  - name: "NL-carol-vless"
+    type: vless
     server: "203.0.113.10"
-    port: 20000
-    ports: "20000-50000"
-    password: "carol:carol-pass-1"
-    obfs: salamander
-    obfs-password: "obfs-pass"
-    sni: "vpn.example.com"
-    fingerprint: "ab12cd34"
-    ech-opts: {enable: true, config: "AEX+DQBB"}
+    port: 443
+    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.org"
+    client-fingerprint: chrome
+    network: xhttp
+    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
+    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c", support-x25519mlkem768: true}
 proxy-groups:
   - name: "NL"
     type: fallback
-    proxies: ["NL-carol"]
+    proxies: ["NL-carol-vless"]
     url: https://www.gstatic.com/generate_204
     interval: 120
 
@@ -436,17 +549,19 @@ Content-Disposition: attachment; filename="NL-carol-router.yaml"
 mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b270deb6f7
 + secret: '699a99bdedbbff15' # пароль панели управления (zashboard)
 + proxies:
-+   - name: "NL-carol"
-+     type: hysteria2
++   - name: "NL-carol-vless"
++     type: vless
 +     server: "203.0.113.10"
-+     port: 20000
-+     ports: "20000-50000"
-+     password: "carol:carol-pass-1"
-+     obfs: salamander
-+     obfs-password: "obfs-pass"
-+     sni: "vpn.example.com"
-+     fingerprint: "ab12cd34"
-+     ech-opts: {enable: true, config: "AEX+DQBB"}
++     port: 443
++     uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.org"
++     client-fingerprint: chrome
++     network: xhttp
++     xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
++     reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c", support-x25519mlkem768: true}
 +   - IP-CIDR,203.0.113.10/32,DIRECT,no-resolve # свой сервер напрямую
 - secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
 - proxies: [] # заполняет панель
@@ -454,17 +569,19 @@ mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b27
 --- mihomo full desktop: 200
 mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b270deb6f7
 + proxies:
-+   - name: "NL-carol"
-+     type: hysteria2
++   - name: "NL-carol-vless"
++     type: vless
 +     server: "203.0.113.10"
-+     port: 20000
-+     ports: "20000-50000"
-+     password: "carol:carol-pass-1"
-+     obfs: salamander
-+     obfs-password: "obfs-pass"
-+     sni: "vpn.example.com"
-+     fingerprint: "ab12cd34"
-+     ech-opts: {enable: true, config: "AEX+DQBB"}
++     port: 443
++     uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.org"
++     client-fingerprint: chrome
++     network: xhttp
++     xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
++     reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c", support-x25519mlkem768: true}
 +   - IP-CIDR,203.0.113.10/32,DIRECT,no-resolve # свой сервер напрямую
 - redir-port: 5000
 - tproxy-port: 5001
@@ -475,37 +592,47 @@ mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b27
 - external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
 - proxies: [] # заполняет панель
 
---- mihomo proto=hysteria2: 200
-proxies:
-  - name: "NL-carol"
-    type: hysteria2
-    server: "203.0.113.10"
-    port: 20000
-    ports: "20000-50000"
-    password: "carol:carol-pass-1"
-    obfs: salamander
-    obfs-password: "obfs-pass"
-    sni: "vpn.example.com"
-    fingerprint: "ab12cd34"
-    ech-opts: {enable: true, config: "AEX+DQBB"}
+--- mihomo proto=hysteria2: 400
+протокол недоступен пользователю
 
---- qr proto=hysteria2: 200
-png 320x320 sha256 f3ad873ae5a937c1bfa34762d3fbdcf0f5561704330f311c5a918906e423a4d5
+--- qr proto=hysteria2: 400
+протокол недоступен пользователю
+
+--- mihomo proto=vless: 200
+proxies:
+  - name: "NL-carol-vless"
+    type: vless
+    server: "203.0.113.10"
+    port: 443
+    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.org"
+    client-fingerprint: chrome
+    network: xhttp
+    xhttp-opts: {path: "/2b1f2de74ce6", mode: "auto"}
+    reality-opts: {public-key: "pbk-xhttp", short-id: "1187d00c55ca4d4c", support-x25519mlkem768: true}
+
+--- qr proto=vless: 200
+png 320x320 sha256 bb8c599349f9e0f6a914e2c96ea6390fa5802a331d3534d09085d137a1aa16ff
 
 --- qr: 200
-png 320x320 sha256 f3ad873ae5a937c1bfa34762d3fbdcf0f5561704330f311c5a918906e423a4d5
+png 320x320 sha256 bb8c599349f9e0f6a914e2c96ea6390fa5802a331d3534d09085d137a1aa16ff
 
 === server plain
-protocols [{"id":"hysteria2","title":"Hysteria 2"}]
+protocols [{"id":"hysteria2","title":"Hysteria 2"},{"id":"vless","title":"VLESS"}]
 state alice link {"proto":"hysteria2","uri":"hysteria2://alice:alice-pass-1@vpn.example.net:443/#alice"}
+state alice link {"proto":"vless","uri":"vless://46d502e8-e63c-4b3e-893f-519135ad1de3@vpn.example.net:8443?encryption=none\u0026flow=xtls-rprx-vision\u0026fp=chrome\u0026pbk=pbk-tcp\u0026security=reality\u0026sni=www.example.com\u0026type=tcp#alice-vless"}
 state bob link {"proto":"hysteria2","uri":"hysteria2://bob:bob-pass-12@vpn.example.net:443/#bob"}
-state carol link {"proto":"hysteria2","uri":"hysteria2://carol:carol-pass-1@vpn.example.net:443/#carol"}
+state carol link {"proto":"vless","uri":"vless://9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4@vpn.example.net:8443?encryption=none\u0026flow=xtls-rprx-vision\u0026fp=chrome\u0026pbk=pbk-tcp\u0026security=reality\u0026sni=www.example.com\u0026type=tcp#carol-vless"}
 == plain / alice
 --- sub format=raw: 200
 Content-Disposition: attachment; filename*=UTF-8''alice
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:YWxpY2U=
 hysteria2://alice:alice-pass-1@vpn.example.net:443/#alice
+vless://46d502e8-e63c-4b3e-893f-519135ad1de3@vpn.example.net:8443?encryption=none&flow=xtls-rprx-vision&fp=chrome&pbk=pbk-tcp&security=reality&sni=www.example.com&type=tcp#alice-vless
 
 --- sub format=mihomo: 200
 Content-Disposition: attachment; filename*=UTF-8''alice
@@ -518,6 +645,19 @@ mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b27
 +     server: "vpn.example.net"
 +     port: 443
 +     password: "alice:alice-pass-1"
++   - name: "alice-vless"
++     type: vless
++     server: "vpn.example.net"
++     port: 8443
++     uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.com"
++     client-fingerprint: chrome
++     network: tcp
++     flow: xtls-rprx-vision
++     reality-opts: {public-key: "pbk-tcp", short-id: "", support-x25519mlkem768: true}
 +   - DOMAIN,vpn.example.net,DIRECT # свой сервер напрямую
 - redir-port: 5000
 - tproxy-port: 5001
@@ -532,7 +672,7 @@ mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b27
 Content-Disposition: attachment; filename*=UTF-8''alice
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:YWxpY2U=
-aHlzdGVyaWEyOi8vYWxpY2U6YWxpY2UtcGFzcy0xQHZwbi5leGFtcGxlLm5ldDo0NDMvI2FsaWNlCg==
+aHlzdGVyaWEyOi8vYWxpY2U6YWxpY2UtcGFzcy0xQHZwbi5leGFtcGxlLm5ldDo0NDMvI2FsaWNlCnZsZXNzOi8vNDZkNTAyZTgtZTYzYy00YjNlLTg5M2YtNTE5MTM1YWQxZGUzQHZwbi5leGFtcGxlLm5ldDo4NDQzP2VuY3J5cHRpb249bm9uZSZmbG93PXh0bHMtcnByeC12aXNpb24mZnA9Y2hyb21lJnBiaz1wYmstdGNwJnNlY3VyaXR5PXJlYWxpdHkmc25pPXd3dy5leGFtcGxlLmNvbSZ0eXBlPXRjcCNhbGljZS12bGVzcwo=
 --- sub clash UA: 200
 Content-Disposition: attachment; filename*=UTF-8''alice
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
@@ -544,6 +684,19 @@ mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b27
 +     server: "vpn.example.net"
 +     port: 443
 +     password: "alice:alice-pass-1"
++   - name: "alice-vless"
++     type: vless
++     server: "vpn.example.net"
++     port: 8443
++     uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.com"
++     client-fingerprint: chrome
++     network: tcp
++     flow: xtls-rprx-vision
++     reality-opts: {public-key: "pbk-tcp", short-id: "", support-x25519mlkem768: true}
 +   - DOMAIN,vpn.example.net,DIRECT # свой сервер напрямую
 - redir-port: 5000
 - tproxy-port: 5001
@@ -561,6 +714,19 @@ proxies:
     server: "vpn.example.net"
     port: 443
     password: "alice:alice-pass-1"
+  - name: "alice-vless"
+    type: vless
+    server: "vpn.example.net"
+    port: 8443
+    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.com"
+    client-fingerprint: chrome
+    network: tcp
+    flow: xtls-rprx-vision
+    reality-opts: {public-key: "pbk-tcp", short-id: "", support-x25519mlkem768: true}
 
 --- mihomo fallback: 200
 proxies:
@@ -569,10 +735,23 @@ proxies:
     server: "vpn.example.net"
     port: 443
     password: "alice:alice-pass-1"
+  - name: "alice-vless"
+    type: vless
+    server: "vpn.example.net"
+    port: 8443
+    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.com"
+    client-fingerprint: chrome
+    network: tcp
+    flow: xtls-rprx-vision
+    reality-opts: {public-key: "pbk-tcp", short-id: "", support-x25519mlkem768: true}
 proxy-groups:
   - name: "VPN"
     type: fallback
-    proxies: ["alice"]
+    proxies: ["alice", "alice-vless"]
     url: https://www.gstatic.com/generate_204
     interval: 120
 
@@ -586,6 +765,19 @@ mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b27
 +     server: "vpn.example.net"
 +     port: 443
 +     password: "alice:alice-pass-1"
++   - name: "alice-vless"
++     type: vless
++     server: "vpn.example.net"
++     port: 8443
++     uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.com"
++     client-fingerprint: chrome
++     network: tcp
++     flow: xtls-rprx-vision
++     reality-opts: {public-key: "pbk-tcp", short-id: "", support-x25519mlkem768: true}
 +   - DOMAIN,vpn.example.net,DIRECT # свой сервер напрямую
 - secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
 - proxies: [] # заполняет панель
@@ -598,6 +790,19 @@ mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b27
 +     server: "vpn.example.net"
 +     port: 443
 +     password: "alice:alice-pass-1"
++   - name: "alice-vless"
++     type: vless
++     server: "vpn.example.net"
++     port: 8443
++     uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.com"
++     client-fingerprint: chrome
++     network: tcp
++     flow: xtls-rprx-vision
++     reality-opts: {public-key: "pbk-tcp", short-id: "", support-x25519mlkem768: true}
 +   - DOMAIN,vpn.example.net,DIRECT # свой сервер напрямую
 - redir-port: 5000
 - tproxy-port: 5001
@@ -618,6 +823,25 @@ proxies:
 
 --- qr proto=hysteria2: 200
 png 320x320 sha256 4e810a4501c5dda73e1756b43cf55df9ed807e9fc709f251773420114185d61f
+
+--- mihomo proto=vless: 200
+proxies:
+  - name: "alice-vless"
+    type: vless
+    server: "vpn.example.net"
+    port: 8443
+    uuid: "46d502e8-e63c-4b3e-893f-519135ad1de3"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.com"
+    client-fingerprint: chrome
+    network: tcp
+    flow: xtls-rprx-vision
+    reality-opts: {public-key: "pbk-tcp", short-id: "", support-x25519mlkem768: true}
+
+--- qr proto=vless: 200
+png 320x320 sha256 6766baa9042d0441a0d243064f5eb41d792ea944ee3da4c5a543148ae47f0118
 
 --- qr: 200
 png 320x320 sha256 4e810a4501c5dda73e1756b43cf55df9ed807e9fc709f251773420114185d61f
@@ -741,6 +965,12 @@ proxies:
 --- qr proto=hysteria2: 200
 png 320x320 sha256 b7e42aee5227bb7444f39146bf63781cc26e123dba71394b7ca587cf1e814b2f
 
+--- mihomo proto=vless: 400
+протокол недоступен пользователю
+
+--- qr proto=vless: 400
+протокол недоступен пользователю
+
 --- qr: 200
 png 320x320 sha256 b7e42aee5227bb7444f39146bf63781cc26e123dba71394b7ca587cf1e814b2f
 
@@ -749,7 +979,7 @@ png 320x320 sha256 b7e42aee5227bb7444f39146bf63781cc26e123dba71394b7ca587cf1e814
 Content-Disposition: attachment; filename*=UTF-8''carol
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:Y2Fyb2w=
-hysteria2://carol:carol-pass-1@vpn.example.net:443/#carol
+vless://9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4@vpn.example.net:8443?encryption=none&flow=xtls-rprx-vision&fp=chrome&pbk=pbk-tcp&security=reality&sni=www.example.com&type=tcp#carol-vless
 
 --- sub format=mihomo: 200
 Content-Disposition: attachment; filename*=UTF-8''carol
@@ -757,11 +987,19 @@ Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:Y2Fyb2w=
 mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b270deb6f7
 + proxies:
-+   - name: "carol"
-+     type: hysteria2
++   - name: "carol-vless"
++     type: vless
 +     server: "vpn.example.net"
-+     port: 443
-+     password: "carol:carol-pass-1"
++     port: 8443
++     uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.com"
++     client-fingerprint: chrome
++     network: tcp
++     flow: xtls-rprx-vision
++     reality-opts: {public-key: "pbk-tcp", short-id: "", support-x25519mlkem768: true}
 +   - DOMAIN,vpn.example.net,DIRECT # свой сервер напрямую
 - redir-port: 5000
 - tproxy-port: 5001
@@ -776,18 +1014,26 @@ mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b27
 Content-Disposition: attachment; filename*=UTF-8''carol
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:Y2Fyb2w=
-aHlzdGVyaWEyOi8vY2Fyb2w6Y2Fyb2wtcGFzcy0xQHZwbi5leGFtcGxlLm5ldDo0NDMvI2Nhcm9sCg==
+dmxlc3M6Ly85YzNmMWE3Ny0yZDRiLTRlOGEtYjZjNS03MWUwZDNmOWEyYjRAdnBuLmV4YW1wbGUubmV0Ojg0NDM/ZW5jcnlwdGlvbj1ub25lJmZsb3c9eHRscy1ycHJ4LXZpc2lvbiZmcD1jaHJvbWUmcGJrPXBiay10Y3Amc2VjdXJpdHk9cmVhbGl0eSZzbmk9d3d3LmV4YW1wbGUuY29tJnR5cGU9dGNwI2Nhcm9sLXZsZXNzCg==
 --- sub clash UA: 200
 Content-Disposition: attachment; filename*=UTF-8''carol
 Subscription-Userinfo: upload=0; download=0; total=0; expire=0
 Profile-Title: base64:Y2Fyb2w=
 mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b270deb6f7
 + proxies:
-+   - name: "carol"
-+     type: hysteria2
++   - name: "carol-vless"
++     type: vless
 +     server: "vpn.example.net"
-+     port: 443
-+     password: "carol:carol-pass-1"
++     port: 8443
++     uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.com"
++     client-fingerprint: chrome
++     network: tcp
++     flow: xtls-rprx-vision
++     reality-opts: {public-key: "pbk-tcp", short-id: "", support-x25519mlkem768: true}
 +   - DOMAIN,vpn.example.net,DIRECT # свой сервер напрямую
 - redir-port: 5000
 - tproxy-port: 5001
@@ -800,23 +1046,39 @@ mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b27
 
 --- mihomo: 200
 proxies:
-  - name: "carol"
-    type: hysteria2
+  - name: "carol-vless"
+    type: vless
     server: "vpn.example.net"
-    port: 443
-    password: "carol:carol-pass-1"
+    port: 8443
+    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.com"
+    client-fingerprint: chrome
+    network: tcp
+    flow: xtls-rprx-vision
+    reality-opts: {public-key: "pbk-tcp", short-id: "", support-x25519mlkem768: true}
 
 --- mihomo fallback: 200
 proxies:
-  - name: "carol"
-    type: hysteria2
+  - name: "carol-vless"
+    type: vless
     server: "vpn.example.net"
-    port: 443
-    password: "carol:carol-pass-1"
+    port: 8443
+    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.com"
+    client-fingerprint: chrome
+    network: tcp
+    flow: xtls-rprx-vision
+    reality-opts: {public-key: "pbk-tcp", short-id: "", support-x25519mlkem768: true}
 proxy-groups:
   - name: "VPN"
     type: fallback
-    proxies: ["carol"]
+    proxies: ["carol-vless"]
     url: https://www.gstatic.com/generate_204
     interval: 120
 
@@ -825,11 +1087,19 @@ Content-Disposition: attachment; filename="carol-router.yaml"
 mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b270deb6f7
 + secret: '699a99bdedbbff15' # пароль панели управления (zashboard)
 + proxies:
-+   - name: "carol"
-+     type: hysteria2
++   - name: "carol-vless"
++     type: vless
 +     server: "vpn.example.net"
-+     port: 443
-+     password: "carol:carol-pass-1"
++     port: 8443
++     uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.com"
++     client-fingerprint: chrome
++     network: tcp
++     flow: xtls-rprx-vision
++     reality-opts: {public-key: "pbk-tcp", short-id: "", support-x25519mlkem768: true}
 +   - DOMAIN,vpn.example.net,DIRECT # свой сервер напрямую
 - secret: '' # пароль панели управления; панель задаёт свой для каждого пользователя
 - proxies: [] # заполняет панель
@@ -837,11 +1107,19 @@ mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b27
 --- mihomo full desktop: 200
 mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b270deb6f7
 + proxies:
-+   - name: "carol"
-+     type: hysteria2
++   - name: "carol-vless"
++     type: vless
 +     server: "vpn.example.net"
-+     port: 443
-+     password: "carol:carol-pass-1"
++     port: 8443
++     uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
++     udp: true
++     packet-encoding: xudp
++     tls: true
++     servername: "www.example.com"
++     client-fingerprint: chrome
++     network: tcp
++     flow: xtls-rprx-vision
++     reality-opts: {public-key: "pbk-tcp", short-id: "", support-x25519mlkem768: true}
 +   - DOMAIN,vpn.example.net,DIRECT # свой сервер напрямую
 - redir-port: 5000
 - tproxy-port: 5001
@@ -852,17 +1130,31 @@ mihomo template sha256 05ece54777ef1b62bca614c42a7987e2f64263b7bc43fc9aa0a0f1b27
 - external-ui-url: https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip
 - proxies: [] # заполняет панель
 
---- mihomo proto=hysteria2: 200
-proxies:
-  - name: "carol"
-    type: hysteria2
-    server: "vpn.example.net"
-    port: 443
-    password: "carol:carol-pass-1"
+--- mihomo proto=hysteria2: 400
+протокол недоступен пользователю
 
---- qr proto=hysteria2: 200
-png 320x320 sha256 28d5308d8b4e397b8022663b1a3bed15cf3e4bbd681d8f222780b8b6720bbc5e
+--- qr proto=hysteria2: 400
+протокол недоступен пользователю
+
+--- mihomo proto=vless: 200
+proxies:
+  - name: "carol-vless"
+    type: vless
+    server: "vpn.example.net"
+    port: 8443
+    uuid: "9c3f1a77-2d4b-4e8a-b6c5-71e0d3f9a2b4"
+    udp: true
+    packet-encoding: xudp
+    tls: true
+    servername: "www.example.com"
+    client-fingerprint: chrome
+    network: tcp
+    flow: xtls-rprx-vision
+    reality-opts: {public-key: "pbk-tcp", short-id: "", support-x25519mlkem768: true}
+
+--- qr proto=vless: 200
+png 320x320 sha256 3a863b2d93d8763137cb22b9975bf878ffd82d5d953f9613e575318c69410864
 
 --- qr: 200
-png 320x320 sha256 28d5308d8b4e397b8022663b1a3bed15cf3e4bbd681d8f222780b8b6720bbc5e
+png 320x320 sha256 3a863b2d93d8763137cb22b9975bf878ffd82d5d953f9613e575318c69410864
 

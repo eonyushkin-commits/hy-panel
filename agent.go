@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,7 +21,7 @@ import (
 // The agent is the panel's root helper. The panel runs as an unprivileged
 // user and cannot touch the system; the agent does a fixed set of things
 // for it: install a protocol's server and change its settings. Each action
-// is this binary's own command (settings, fetch) run with checked
+// is this binary's own command (settings, xray, fetch) run with checked
 // flags, one at a time; its output is the job log the panel shows. A
 // stolen panel password gets these actions, not a root shell.
 
@@ -29,6 +30,7 @@ const (
 	agentSock     = agentDir + "/agent.sock"
 	agentUnitPath = "/etc/systemd/system/hy-panel-agent.service"
 	panelUser     = "hy-panel"
+	agentStateDir = "/var/lib/hy-panel-agent"
 )
 
 const agentUnit = `[Unit]
@@ -39,6 +41,8 @@ After=network-online.target
 ExecStart=/usr/local/bin/hy-panel agent
 RuntimeDirectory=hy-panel
 RuntimeDirectoryMode=0755
+StateDirectory=hy-panel-agent
+StateDirectoryMode=0700
 Restart=always
 RestartSec=2
 
@@ -55,19 +59,60 @@ type job struct {
 }
 
 type agent struct {
-	bin string
-	mu  sync.Mutex
-	job job
-	log bytes.Buffer
+	bin     string
+	jobPath string // empty only in tests
+	mu      sync.Mutex
+	job     job
+	log     bytes.Buffer
 }
 
 func (a *agent) Write(p []byte) (int, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.log.Len() > 1<<20 {
-		return len(p), nil // a runaway job: keep the start
+	n := len(p)
+	remaining := (1 << 20) - a.log.Len()
+	if remaining > 0 {
+		a.log.Write(p[:min(len(p), remaining)])
 	}
-	return a.log.Write(p)
+	return n, nil
+}
+
+func (a *agent) saveJob(j job) error {
+	if a.jobPath == "" {
+		return nil
+	}
+	b, err := json.Marshal(j)
+	if err != nil {
+		return err
+	}
+	return writeAtomic(a.jobPath, b, 0600)
+}
+
+func (a *agent) restoreJob() error {
+	if a.jobPath == "" {
+		return nil
+	}
+	b, err := os.ReadFile(a.jobPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err = json.Unmarshal(b, &a.job); err != nil {
+		return err
+	}
+	if a.job.Running {
+		a.job.Running = false
+		a.job.OK = false
+		a.job.Log += "\n✗ Агент перезапущен во время операции. Проверь состояние протокола перед повтором.\n"
+		if err = a.saveJob(a.job); err != nil {
+			return err
+		}
+	}
+	a.log.WriteString(a.job.Log)
+	a.job.Log = ""
+	return nil
 }
 
 // jobArgs turns a request from the panel into the command to run, or says
@@ -86,7 +131,20 @@ func jobArgs(action string, p map[string]string) ([]string, error) {
 			}
 		}
 		return args, nil
-	case "update-hysteria":
+	case "vless":
+		args := []string{"xray"}
+		if port := p["port"]; port != "" {
+			if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+				return nil, fmt.Errorf("порт %q: нужен 1–65535", port)
+			}
+			args = append(args, "-port", port)
+		}
+		t := strings.ToLower(strings.TrimSpace(p["target"]))
+		if !validHostname(t) || !strings.Contains(t, ".") {
+			return nil, fmt.Errorf("сайт для маскировки %q: нужен домен", t)
+		}
+		return append(args, "-target", t), nil
+	case "update-hysteria", "update-xray":
 		return []string{"fetch", strings.TrimPrefix(action, "update-")}, nil
 	}
 	return nil, fmt.Errorf("неизвестное действие %q", action)
@@ -101,7 +159,13 @@ func runAgent() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	a := &agent{bin: bin}
+	if err := os.MkdirAll(agentStateDir, 0700); err != nil {
+		log.Fatal(err)
+	}
+	a := &agent{bin: bin, jobPath: agentStateDir + "/job.json"}
+	if err := a.restoreJob(); err != nil {
+		log.Fatalf("read agent job: %v", err)
+	}
 	rel := &releases{latest: map[string]release{}}
 	go rel.watch()
 	os.Remove(agentSock)
@@ -142,7 +206,7 @@ func (a *agent) handleStart(w http.ResponseWriter, r *http.Request) {
 		Action string            `json:"action"`
 		Params map[string]string `json:"params"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
@@ -153,13 +217,19 @@ func (a *agent) handleStart(w http.ResponseWriter, r *http.Request) {
 	}
 	a.mu.Lock()
 	if a.job.Running {
+		action := a.job.Action
 		a.mu.Unlock()
-		http.Error(w, "уже идёт: "+a.job.Action, http.StatusConflict)
+		http.Error(w, "уже идёт: "+action, http.StatusConflict)
 		return
 	}
-	a.job = job{ID: time.Now().UnixNano(), Action: req.Action, Running: true}
+	j := job{ID: time.Now().UnixNano(), Action: req.Action, Running: true}
+	if err := a.saveJob(j); err != nil {
+		a.mu.Unlock()
+		http.Error(w, "не удалось сохранить задание: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	a.job = j
 	a.log.Reset()
-	j := a.job
 	a.mu.Unlock()
 	log.Printf("job %s: %s %s", req.Action, a.bin, strings.Join(args, " "))
 	go a.run(args)
@@ -181,6 +251,12 @@ func (a *agent) run(args []string) {
 	if err != nil {
 		fmt.Fprintf(&a.log, "\n✗ %v\n", err)
 	}
+	j := a.job
+	j.Log = a.log.String()
+	if err := a.saveJob(j); err != nil {
+		a.job.OK = false
+		fmt.Fprintf(&a.log, "\n✗ Не удалось сохранить результат задания: %v\n", err)
+	}
 	log.Printf("job %s: ok=%v", a.job.Action, a.job.OK)
 }
 
@@ -198,6 +274,7 @@ type protoStatus struct {
 func systemStatus(rel *releases) map[string]protoStatus {
 	env := readEnvNoFatal()
 	_, hySvc := hyPaths(env)
+	_, xSvc := xrayPaths(env)
 	st := func(proto, bin, svc string, version func() hyVersion) protoStatus {
 		s := protoStatus{Installed: fileExists(bin) && unitExists(svc)}
 		if s.Installed {
@@ -213,7 +290,8 @@ func systemStatus(rel *releases) map[string]protoStatus {
 		return s
 	}
 	return map[string]protoStatus{
-		protoHy2: st(protoHy2, hysteriaBin, hySvc, hysteriaVersion),
+		protoHy2:   st(protoHy2, hysteriaBin, hySvc, hysteriaVersion),
+		protoVless: st(protoVless, xrayBin, xSvc, xrayVersion),
 	}
 }
 
@@ -239,28 +317,40 @@ func (r *releases) get(proto string) (hyVersion, string) {
 	return hyVersion{}, "ещё не проверено"
 }
 
-// check refreshes the latest Hysteria release, retaining a known version on failure.
+// check asks GitHub now, for both servers at once; false if it did not
+// answer for one of them. A failed check keeps the version learned before:
+// a hiccup is not a reason to forget it.
 func (r *releases) check() bool {
-	v, err := latestRelease(hysteriaURL)
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if err != nil {
-		log.Printf("latest release: %v", err)
-		if r.latest[protoHy2].v == (hyVersion{}) {
-			r.latest[protoHy2] = release{err: err.Error()}
-		}
-		return false
+	ok := true
+	var wg sync.WaitGroup
+	for proto, base := range map[string]string{protoHy2: hysteriaURL, protoVless: xrayURL} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			v, err := latestRelease(base)
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			if err != nil {
+				log.Printf("latest release: %v", err)
+				ok = false
+				if r.latest[proto].v == (hyVersion{}) {
+					r.latest[proto] = release{err: err.Error()}
+				}
+				return
+			}
+			r.latest[proto] = release{v: v}
+		}()
 	}
-	r.latest[protoHy2] = release{v: v}
-	return true
+	wg.Wait()
+	return ok
 }
 
-// watch checks a few times a day; while Hysteria is not installed there
+// watch checks a few times a day; while neither server is installed there
 // is nothing to compare with, so it does not ask.
 func (r *releases) watch() {
 	for {
 		next := 6 * time.Hour
-		if fileExists(hysteriaBin) && !r.check() {
+		if (fileExists(hysteriaBin) || fileExists(xrayBin)) && !r.check() {
 			next = 30 * time.Minute
 		}
 		time.Sleep(next)
@@ -280,7 +370,7 @@ var releaseClient = &http.Client{Timeout: 20 * time.Second,
 
 // latestRelease reads the version off where releases/latest leads, the
 // page the downloads come from (base is its download/ URL): GitHub sends it
-// to .../releases/tag/app/v2.6.1,
+// to .../releases/tag/app/v2.6.1 (Hysteria) or .../tag/v25.9.11 (Xray),
 // through a moved repository's redirect first if there is one. No API, so
 // no API rate limit.
 func latestRelease(base string) (hyVersion, error) {

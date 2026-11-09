@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -11,24 +13,26 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
 
 var version = "dev" // set by -ldflags "-X main.version=v0.2.0"
 
-const usage = `hy-panel — VPN-панель: Hysteria 2
+const usage = `hy-panel — VPN-панель: Hysteria 2 и VLESS + Reality (Xray)
 
   hy-panel install     поставить панель или обновить программу (настройки и пользователи остаются);
-                       Hysteria устанавливается и настраивается в самой панели
+                       протоколы ставятся и настраиваются в самой панели
   hy-panel info        адрес и пароль панели
   hy-panel passwd      новый пароль панели
   hy-panel uninstall -y          удалить панель; пользователи и настройки сохранятся
                        (-purge — удалить и их)
 
-Их запускает агент панели (из настроек Hysteria), можно и вручную, только с флагами:
+Их запускает агент панели (из окон «Протоколы»), можно и вручную, только с флагами:
   hy-panel settings -port … -obfs … -cert …   Hysteria: установить, сменить порт, обфускацию, сертификат
-  hy-panel fetch hysteria                 поставить или обновить сервер из официального релиза
+  hy-panel xray -target сайт [-port 443]       VLESS + Reality: установить или сменить сайт для маскировки
+  hy-panel fetch hysteria|xray                 поставить или обновить сервер из официального релиза
 `
 
 func main() {
@@ -49,6 +53,8 @@ func main() {
 		runFetch(os.Args[2:])
 	case "agent":
 		runAgent()
+	case "xray":
+		runXray(os.Args[2:])
 	case "info":
 		printInfo(readEnv())
 	case "passwd":
@@ -65,6 +71,10 @@ func main() {
 // start the process exits; any other problem is shown in the panel instead.
 func serve() {
 	log.SetFlags(0) // journald adds timestamps
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+	var workers sync.WaitGroup
+	start := func(fn func()) { workers.Add(1); go func() { defer workers.Done(); fn() }() }
 	env := readEnv()
 	if len(env["HYP_PASSWORD"]) < 8 {
 		log.Fatal("HYP_PASSWORD (8+ chars) is not set — run hy-panel install")
@@ -101,13 +111,29 @@ func serve() {
 	if !hyOn {
 		ep.Port = "" // no Hysteria links
 	}
+	// VLESS is on once hy-panel xray has set it up.
+	var xs *xraySetup
+	if xp := env["HYP_XRAY_CONFIG"]; xp != "" {
+		if xs, err = readXray(xp); err != nil {
+			log.Printf("WARN: xray %s: %v", xp, err)
+			cfgErr = strings.TrimPrefix(cfgErr+"; конфиг Xray: "+err.Error(), "; ")
+		} else {
+			xs.Link.setServerVersion(xrayVersion())
+			ep.Vless = &xs.Link
+		}
+	}
 	// The session key survives restarts: the panel restarts after every
 	// protocol change made in it, and must not log the admin out.
 	key, err := sessionKey(dataDir + "/session.key")
 	if err != nil {
 		log.Printf("WARN: session key: %v", err)
-		key = make([]byte, 32)
-		rand.Read(key)
+		warns = append(warns, "Не удалось надёжно сохранить ключ сеансов: после перезапуска может потребоваться вход")
+		if len(key) != 32 {
+			key = make([]byte, 32)
+			if _, err := rand.Read(key); err != nil {
+				log.Fatal(err)
+			}
+		}
 	}
 	var stats *statsClient
 	if hyOn {
@@ -116,23 +142,23 @@ func serve() {
 		hyOpts = &o
 	}
 	app := newApp(store, stats, ep, env["HYP_PASSWORD"], key)
+	app.sessionPath = dataDir + "/session.key"
 	app.cfgErr, app.warns, app.hyOpts = cfgErr, warns, hyOpts
 	app.agent = newAgentClient(agentSock)
 	log.Printf("hy-panel %s; links: %s:%s sni=%q obfs=%q pinned=%v ech=%v", version,
 		app.ep.Host, app.ep.Port, app.ep.SNI, app.ep.ObfsType, app.ep.Pin != "", app.ep.ECH != "")
-	if port := env["HYP_UI_PORT"]; port != "" && port != "off" {
-		addr := ":" + port
-		go app.keepServing("порт панели "+port, func() error {
-			cert, fp, err := panelCert(dataDir, app.ep.Host)
-			if err != nil {
-				return err
-			}
-			srv := server(addr, underPath(env["HYP_UI_PATH"], app.routes(false)))
-			srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
-			log.Printf("UI on https://%s%s (cert sha256 %s)", addr, env["HYP_UI_PATH"], fp)
-			return srv.ListenAndServeTLS("", "")
-		})
+	if xs != nil {
+		app.addBackend(&xrayBackend{api: newXrayAPI(xs.API), tag: xs.Tag, flow: xs.Link.Flow})
+		if xs.Warn != "" {
+			log.Printf("WARN: xray: %s", xs.Warn)
+			app.warns = append(app.warns, xs.Warn)
+		}
+		log.Printf("vless: :%s/tcp %s sni=%q, inbound %q, api %s", xs.Link.Port, xs.Link.Network, xs.Link.SNI, xs.Tag, xs.API)
+		if xs.Link.Target != "" {
+			start(func() { app.watchTarget(ctx, xs.Link.Target, xs.Link.SNI) })
+		}
 	}
+
 	if sub := env["HYP_SUB_LISTEN"]; sub != "" {
 		app.subBase = strings.TrimRight(env["HYP_SUB_URL"], "/")
 		if _, p, err := net.SplitHostPort(sub); err == nil && app.subBase == "" {
@@ -144,24 +170,38 @@ func serve() {
 		}
 		mux := http.NewServeMux()
 		mux.HandleFunc("GET /sub/{token}", app.handleSub)
-		go app.keepServing("подписка "+sub, server(sub, mux).ListenAndServe)
+		start(func() {
+			app.keepServing(ctx, "подписка "+sub, func() error { return serveHTTP(ctx, server(sub, mux), false) })
+		})
 		log.Printf("subscriptions on %s (%s)", sub, app.subBase)
 	}
 
-	// On stop, write the traffic counted since the last flush.
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
-	go func() {
-		<-sig
-		if err := store.Flush(); err != nil {
-			log.Printf("save: %v", err)
-		}
-		os.Exit(0)
-	}()
-
-	go app.syncLoop(10 * time.Second)
+	if port := env["HYP_UI_PORT"]; port != "" && port != "off" {
+		addr := ":" + port
+		start(func() {
+			app.keepServing(ctx, "порт панели "+port, func() error {
+				cert, fp, err := panelCert(dataDir, app.ep.Host)
+				if err != nil {
+					return err
+				}
+				srv := server(addr, underPath(env["HYP_UI_PATH"], app.routes(false)))
+				srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
+				log.Printf("UI on https://%s%s (cert sha256 %s)", addr, env["HYP_UI_PATH"], fp)
+				return serveHTTP(ctx, srv, true)
+			})
+		})
+	}
+	start(func() { app.syncLoop(ctx, 10*time.Second) })
 	log.Printf("auth backend on http://%s, users: %d", panelAddr, len(store.List()))
-	log.Fatal(server(panelAddr, loopbackHost(app.routes(true))).ListenAndServe())
+	err = serveHTTP(ctx, server(panelAddr, loopbackHost(app.routes(true))), false)
+	cancel()
+	workers.Wait()
+	if saveErr := store.Flush(); saveErr != nil {
+		log.Printf("save: %v", saveErr)
+	}
+	if err != nil && err != http.ErrServerClosed && err != context.Canceled {
+		log.Fatal(err)
+	}
 }
 
 // checkHyConfig warns about Hysteria settings that make the panel ineffective or exposed.
@@ -187,10 +227,19 @@ func checkHyConfig(c *hyConfig) {
 
 // sessionKey reads the key that signs panel sessions, creating it once.
 func sessionKey(path string) ([]byte, error) {
-	if b, err := os.ReadFile(path); err == nil && len(b) == 32 {
+	b, err := os.ReadFile(path)
+	if err == nil {
+		if len(b) != 32 {
+			return nil, errors.New("invalid session key length")
+		}
 		return b, nil
 	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
 	key := make([]byte, 32)
-	rand.Read(key)
+	if _, err := rand.Read(key); err != nil {
+		return nil, err
+	}
 	return key, writeAtomic(path, key, 0o600)
 }

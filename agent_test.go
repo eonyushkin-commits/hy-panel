@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -24,7 +26,9 @@ func TestJobArgs(t *testing.T) {
 			[]string{"settings", "-port", "443", "-obfs", "salamander", "-cert", "self"}},
 		"hysteria acme": {"hysteria", map[string]string{"port": "20000-50000", "obfs": "none", "cert": "acme", "domain": "vpn.example.com", "email": "a@b.cd"},
 			[]string{"settings", "-port", "20000-50000", "-obfs", "none", "-cert", "acme", "-domain", "vpn.example.com", "-email", "a@b.cd"}},
-		"update hysteria": {"update-hysteria", nil, []string{"fetch", "hysteria"}},
+		"vless new":   {"vless", map[string]string{"port": "443", "target": "Lurkpro.tech"}, []string{"xray", "-port", "443", "-target", "lurkpro.tech"}},
+		"vless site":  {"vless", map[string]string{"target": "api.ilexa.online"}, []string{"xray", "-target", "api.ilexa.online"}},
+		"update xray": {"update-xray", nil, []string{"fetch", "xray"}},
 	}
 	for name, c := range ok {
 		if got, err := jobArgs(c.action, c.p); err != nil || !slices.Equal(got, c.want) {
@@ -35,17 +39,16 @@ func TestJobArgs(t *testing.T) {
 		action string
 		p      map[string]string
 	}{
-		"unknown":        {"shell", map[string]string{"cmd": "id"}},
-		"port":           {"hysteria", map[string]string{"port": "443; rm -rf /"}},
-		"obfs":           {"hysteria", map[string]string{"obfs": "-config=/etc/shadow"}},
-		"acme no domain": {"hysteria", map[string]string{"cert": "acme"}},
-		"flag in domain": {"hysteria", map[string]string{"cert": "acme", "domain": "-y"}},
-		"bad email":      {"hysteria", map[string]string{"cert": "acme", "domain": "a.example", "email": "x y@z"}},
-		"removed vless":  {"vless", nil},
-		"removed awg":    {"awg", nil},
-		"removed update": {"update-xray", nil},
-		"vless target":   {"vless", map[string]string{"target": "-port=1"}},
-		"vless port":     {"vless", map[string]string{"port": "0", "target": "a.example"}},
+		"unknown":         {"shell", map[string]string{"cmd": "id"}},
+		"removed awg":     {"awg", nil},
+		"port":            {"hysteria", map[string]string{"port": "443; rm -rf /"}},
+		"obfs":            {"hysteria", map[string]string{"obfs": "-config=/etc/shadow"}},
+		"acme no domain":  {"hysteria", map[string]string{"cert": "acme"}},
+		"flag in domain":  {"hysteria", map[string]string{"cert": "acme", "domain": "-y"}},
+		"bad email":       {"hysteria", map[string]string{"cert": "acme", "domain": "a.example", "email": "x y@z"}},
+		"vless no target": {"vless", nil},
+		"vless target":    {"vless", map[string]string{"target": "-port=1"}},
+		"vless port":      {"vless", map[string]string{"port": "0", "target": "a.example"}},
 	} {
 		if args, err := jobArgs(c.action, c.p); err == nil {
 			t.Errorf("%s accepted: %v", name, args)
@@ -81,10 +84,10 @@ func TestAgentJob(t *testing.T) {
 		t.Fatal("job never ends")
 		return job{}
 	}
-	if code := start(`{"action":"hysteria","params":{"port":"443"}}`); code != 200 {
+	if code := start(`{"action":"vless","params":{"target":"lurkpro.tech"}}`); code != 200 {
 		t.Fatalf("start: %d", code)
 	}
-	if j := wait(); !j.OK || !strings.Contains(j.Log, "✓ settings -port 443") {
+	if j := wait(); !j.OK || !strings.Contains(j.Log, "✓ xray -target lurkpro.tech") {
 		t.Fatalf("%+v", j)
 	}
 	start(`{"action":"update-hysteria"}`)
@@ -96,18 +99,28 @@ func TestAgentJob(t *testing.T) {
 	}
 	// One job at a time.
 	os.WriteFile(bin, []byte("#!/bin/sh\nsleep 1\n"), 0o755)
-	start(`{"action":"update-hysteria"}`)
-	if code := start(`{"action":"update-hysteria"}`); code != 409 {
+	start(`{"action":"update-xray"}`)
+	if code := start(`{"action":"update-xray"}`); code != 409 {
 		t.Fatalf("second job: %d", code)
 	}
 	wait()
 }
 
 func TestFetch(t *testing.T) {
+	bin := []byte("#!/bin/sh\necho Xray 26.3.27\n")
+	var zb bytes.Buffer
+	zw := zip.NewWriter(&zb)
+	for name, b := range map[string][]byte{"xray": bin, "geoip.dat": []byte("ip"), "geosite.dat": []byte("site")} {
+		w, _ := zw.Create(name)
+		w.Write(b)
+	}
+	zw.Close()
 	sum := func(b []byte) string { s := sha256.Sum256(b); return hex.EncodeToString(s[:]) }
 	files := map[string][]byte{
-		"/hy/hysteria-linux-amd64": []byte("hy-bin"),
-		"/hy/hashes.txt":           []byte(sum([]byte("other")) + "  build/hysteria-linux-arm64\n" + sum([]byte("hy-bin")) + "  build/hysteria-linux-amd64\n"),
+		"/hy/hysteria-linux-amd64":  []byte("hy-bin"),
+		"/hy/hashes.txt":            []byte(sum([]byte("other")) + "  build/hysteria-linux-arm64\n" + sum([]byte("hy-bin")) + "  build/hysteria-linux-amd64\n"),
+		"/x/Xray-linux-64.zip":      zb.Bytes(),
+		"/x/Xray-linux-64.zip.dgst": []byte("MD5= 00\nSHA1= 00\nSHA2-256= " + sum(zb.Bytes()) + "\nSHA2-512= 00\n"),
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if b, ok := files[r.URL.Path]; ok {
@@ -118,6 +131,10 @@ func TestFetch(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	d, err := dgst(files["/x/Xray-linux-64.zip.dgst"])
+	if err != nil || d != sum(zb.Bytes()) {
+		t.Fatalf("dgst %q %v", d, err)
+	}
 	b, err := download(srv.URL+"/hy/", "hysteria-linux-amd64", hashesTxt(files["/hy/hashes.txt"]))
 	if err != nil || string(b) != "hy-bin" {
 		t.Fatalf("%q %v", b, err)
@@ -130,7 +147,10 @@ func TestFetch(t *testing.T) {
 	if _, err := download(srv.URL+"/hy/", "hysteria-linux-mips", hashesTxt(files["/hy/hashes.txt"])); err == nil {
 		t.Fatal("file without a published hash accepted")
 	}
-
+	z, err := download(srv.URL+"/x/", "Xray-linux-64.zip", func(string) (string, error) { return d, nil })
+	if err != nil || !bytes.Equal(z, zb.Bytes()) {
+		t.Fatal(err)
+	}
 }
 
 func TestSystemNeedsAgent(t *testing.T) {
@@ -159,6 +179,8 @@ func TestLatestRelease(t *testing.T) {
 			http.Redirect(w, r, "/new-org/hysteria/releases/tag/app/v2.6.1", http.StatusFound)
 		case "/new-org/hysteria/releases/tag/app/v2.6.1":
 			t.Error("the tag page itself is not needed")
+		case "/XTLS/Xray-core/releases/latest":
+			http.Redirect(w, r, "/XTLS/Xray-core/releases/tag/v25.9.11", http.StatusFound)
 		default:
 			http.NotFound(w, r)
 		}
@@ -166,6 +188,7 @@ func TestLatestRelease(t *testing.T) {
 	defer srv.Close()
 	for base, want := range map[string]hyVersion{
 		srv.URL + "/apernet/hysteria/releases/latest/download/": {2, 6, 1},
+		srv.URL + "/XTLS/Xray-core/releases/latest/download/":   {25, 9, 11},
 	} {
 		if v, err := latestRelease(base); err != nil || v != want {
 			t.Errorf("%s: %v %v, want %v", base, v, err, want)
@@ -176,29 +199,19 @@ func TestLatestRelease(t *testing.T) {
 		t.Errorf("mirror: %v, want an error", v)
 	}
 
-	defer func(h string) { hysteriaURL = h }(hysteriaURL)
-	hysteriaURL = srv.URL + "/apernet/hysteria/releases/latest/download/"
+	defer func(h, x string) { hysteriaURL, xrayURL = h, x }(hysteriaURL, xrayURL)
+	hysteriaURL, xrayURL = srv.URL+"/apernet/hysteria/releases/latest/download/", srv.URL+"/mirror/download/"
 	r := releases{latest: map[string]release{}}
 	if v, e := r.get(protoHy2); v != (hyVersion{}) || e == "" {
 		t.Errorf("before a check: %v %q", v, e)
 	}
-	if !r.check() {
-		t.Error("check failed")
+	if r.check() {
+		t.Error("check: ok with a failing mirror")
 	}
 	if v, e := r.get(protoHy2); v != (hyVersion{2, 6, 1}) || e != "" {
 		t.Errorf("hysteria: %v %q", v, e)
 	}
-	hysteriaURL = srv.URL + "/mirror/download/"
-	if r.check() {
-		t.Error("failing mirror accepted")
+	if v, e := r.get(protoVless); v != (hyVersion{}) || !strings.Contains(e, "404") {
+		t.Errorf("xray: %v %q, want the reason", v, e)
 	}
-	if v, _ := r.get(protoHy2); v != (hyVersion{2, 6, 1}) {
-		t.Fatal("failed check forgot known release")
-	}
-	r = releases{latest: map[string]release{}}
-	r.check()
-	if v, e := r.get(protoHy2); v != (hyVersion{}) || !strings.Contains(e, "404") {
-		t.Fatalf("missing error: %v %q", v, e)
-	}
-
 }

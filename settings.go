@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -15,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eonyushkin-commits/hy-panel/internal/atomicfile"
+	"github.com/eonyushkin-commits/hy-panel/internal/transaction"
 	"gopkg.in/yaml.v3"
 )
 
@@ -275,16 +278,6 @@ func runSettings(args []string) {
 		fmt.Println("Конфиг Hysteria не настроен — настраиваю.")
 	}
 	o := hyOptsFrom(cur, f, env["HYP_HOST"])
-	if cur != nil && *cur == o {
-		_, changed := rewriteHyConfig(cfgPath, b, false, nil)
-		if changed {
-			step("apply Hysteria ACL", systemctl("restart", svc))
-			step("restart hy-panel", systemctl("restart", "hy-panel"))
-		} else {
-			fmt.Println("\nНичего не изменилось.")
-		}
-		return
-	}
 	fmt.Printf("\nБудет: порт %s, %s, %s.\n", o.Port, o.obfsLabel(), o.certLabel())
 	noInterrupt()
 	// Links name the domain when there is one, else the server's IP.
@@ -294,19 +287,54 @@ func runSettings(args []string) {
 		} else if ip := publicIP(); ip != "" && env["HYP_HOST"] == oldDomain {
 			env["HYP_HOST"] = ip
 		}
-		step("settings → "+envPath, writeEnv(env))
 	}
 	old := cfg
-	cfg, _ = rewriteHyConfig(cfgPath, b, cur == nil, func(d *yamlDoc) error {
-		return applyOpts(d, old, cur, o, filepath.Dir(cfgPath))
-	})
-	// Links come from the config file: the panel shows the new ones right
-	// away, whatever happens to Hysteria's restart below.
-	step("restart hy-panel", systemctl("restart", "hy-panel"))
+	var edit func(*yamlDoc) error
+	if cur == nil || *cur != o {
+		edit = func(d *yamlDoc) error { return applyOpts(d, old, cur, o, filepath.Dir(cfgPath)) }
+	}
+	cfg, out, changed, err := prepareHyConfig(b, edit)
+	step("prepare Hysteria settings", err)
+	if !changed {
+		fmt.Println("Ничего не изменилось.")
+		return
+	}
+	if len(b) > 0 {
+		step("backup → "+cfgPath+backupExt, backupOnce(cfgPath, b))
+	}
 	ufwAllow(o.firewallRules()...)
 	step("enable "+svc, systemctl("enable", svc))
-	step("restart "+svc, systemctl("restart", svc))
-	waitHysteria(cfg, svc, o.Domain != "")
+	wasActive := systemctl("is-active", "--quiet", svc) == nil
+	err = transaction.Run([]transaction.File{
+		{Path: cfgPath, Data: out, Options: atomicfile.Options{Mode: 0640, PreserveOwner: true, FollowSymlink: true}},
+		{Path: envPath, Data: renderEnv(env), Options: atomicfile.Options{Mode: 0600}},
+	}, func() error {
+		if cur == nil {
+			uid, gid := hysteriaIDs()
+			if err := os.Chown(cfgPath, uid, gid); err != nil {
+				return err
+			}
+			if err := os.Chmod(cfgPath, 0640); err != nil {
+				return err
+			}
+		}
+		if err := restartService(svc); err != nil {
+			return err
+		}
+		if err := restartService("hy-panel"); err != nil {
+			return err
+		}
+		return waitHysteriaReady(cfg, o.Domain != "")
+	}, func() error {
+		if err := errors.Join(restoreServiceState(svc, wasActive), restartService("hy-panel")); err != nil {
+			return err
+		}
+		if wasActive && cur != nil {
+			return waitHysteriaReady(old, cur.Domain != "")
+		}
+		return waitPanelReady()
+	})
+	step("apply Hysteria settings (rollback on failure)", err)
 	fmt.Println("\nГотово. Новые ссылки — в панели (кнопка QR).")
 }
 
@@ -350,22 +378,31 @@ func statsFor(cfg *hyConfig) *statsClient {
 	return newStatsClient(cfg.TrafficStats.Listen, cfg.TrafficStats.Secret)
 }
 
-// waitHysteria waits until Hysteria's trafficStats answers (up to 2 minutes
-// with Let's Encrypt, which first has to get the certificate).
-func waitHysteria(cfg *hyConfig, svc string, acme bool) {
-	sc := statsFor(cfg)
-	tries := 20
+func waitHysteriaReady(cfg *hyConfig, acme bool) error {
+	timeout := 15 * time.Second
 	if acme {
+		timeout = 2 * time.Minute
 		fmt.Println("… жду сертификат Let's Encrypt (до 2 минут)")
-		tries = 240
 	}
-	var verr error
-	for i := 0; i < tries; i++ {
-		if _, verr = sc.Online(); verr == nil {
-			step("hysteria trafficStats reachable", nil)
-			return
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	sc := statsFor(cfg)
+	var last error
+	for ctx.Err() == nil {
+		var online map[string]int
+		last = checkPanelReady(ctx)
+		if last == nil {
+			last = sc.doContext(ctx, "GET", "/online", nil, &online)
 		}
-		time.Sleep(500 * time.Millisecond)
+		if last == nil {
+			return nil
+		}
+		timer := time.NewTimer(500 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+		case <-timer.C:
+		}
 	}
-	log.Fatalf("✗ Hysteria не поднялась: %v\n  смотри: journalctl -u %s -n 30 --no-pager", verr, svc)
+	return fmt.Errorf("Hysteria не готова: %w", errors.Join(ctx.Err(), last))
 }
