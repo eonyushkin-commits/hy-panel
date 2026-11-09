@@ -17,23 +17,29 @@ const launchBrowser=require('./browser.cjs');
  await page.locator('#list [data-a="edit"]').click();
  assert.equal(await page.locator('#protoWrap').isVisible(),false);
  await page.locator('#editForm input[name="note"]').fill('Changed note only');
- await page.locator('#edit button[value="ok"]').click();
- await page.waitForTimeout(100);
+ await Promise.all([
+  page.waitForResponse(response=>response.request().method()==='PATCH'),
+  page.locator('#edit button[value="ok"]').click(),
+ ]);
  console.log(JSON.stringify({before:user.protoOff,after:sent.protoOff,note:sent.note}));
  assert.deepEqual(sent.protoOff,['vless']);
  state.server.protocols.push({id:'vless',title:'VLESS'});
  await page.evaluate(()=>load());
  await page.locator('#list [data-a="edit"]').click();
  await page.locator('#protoBoxes input[data-p="vless"]').check();
- await page.locator('#edit button[value="ok"]').click();
- await page.waitForTimeout(100);
+ await Promise.all([
+  page.waitForResponse(response=>response.request().method()==='PATCH'),
+  page.locator('#edit button[value="ok"]').click(),
+ ]);
  assert.deepEqual(sent.protoOff,[]);
  state.server.protocols=[];
  user.protoOff=['hysteria2','vless'];
  await page.evaluate(()=>load());
  await page.locator('#list [data-a="edit"]').click();
- await page.locator('#edit button[value="ok"]').click();
- await page.waitForTimeout(100);
+ await Promise.all([
+  page.waitForResponse(response=>response.request().method()==='PATCH'),
+  page.locator('#edit button[value="ok"]').click(),
+ ]);
  assert.deepEqual(sent.protoOff,['hysteria2','vless']);
  console.log('PASS: absent protocol restrictions preserved, visible switches editable, all restrictions preserved without configured protocols');
  }finally{await browser.close();}

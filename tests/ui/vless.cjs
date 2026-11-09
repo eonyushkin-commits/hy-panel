@@ -42,7 +42,10 @@ const launchBrowser=require('./browser.cjs');
  await page.locator('#list [data-a="edit"]').click();
  assert.equal(await page.locator('#protoBoxes input').count(),2);
  await page.locator('#protoBoxes input[data-p="vless"]').uncheck();
- await page.locator('#edit button[value="ok"]').click();
+ await Promise.all([
+  page.waitForResponse(response=>response.request().method()==='PATCH'),
+  page.locator('#edit button[value="ok"]').click(),
+ ]);
  await page.waitForFunction(()=>!document.querySelector('#edit').open);
  assert.deepEqual(patch.protoOff,['vless']);
  await page.locator('#list [data-a="share"]').click();
