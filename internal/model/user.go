@@ -43,8 +43,14 @@ func (u *User) Uses(protocol string) bool {
 	return KnownProtocol(protocol) && !slices.Contains(u.ProtoOff, protocol)
 }
 func KnownProtocol(protocol string) bool { return protocol == Hysteria || protocol == VLESS }
-func Month(t time.Time) int              { return t.Year()*100 + int(t.Month()) }
-func (u User) Clone() User               { u.ProtoOff = slices.Clone(u.ProtoOff); return u }
+
+// Allowed reports whether u may connect over protocol at now: not blocked and
+// the protocol not switched off. Who a server lets in follows this rule.
+func (u *User) Allowed(protocol string, now time.Time) bool {
+	return u.Blocked(now) == "" && u.Uses(protocol)
+}
+func Month(t time.Time) int { return t.Year()*100 + int(t.Month()) }
+func (u User) Clone() User  { u.ProtoOff = slices.Clone(u.ProtoOff); return u }
 func (u *User) Blocked(now time.Time) string {
 	if !u.Enabled {
 		return "disabled"

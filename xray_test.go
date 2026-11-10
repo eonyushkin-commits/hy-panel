@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -295,7 +296,7 @@ func TestXrayUsersFollowPanel(t *testing.T) {
 		t.Fatal(syncState(a, protoVless).err)
 	}
 	want := map[string]string{"alice": alice.UUID, "bob": bob.UUID}
-	if got := fx.snapshot(); !mapsEqual(got, want) {
+	if got := fx.snapshot(); !maps.Equal(got, want) {
 		t.Fatalf("xray users %v, want %v", got, want)
 	}
 
@@ -319,21 +320,9 @@ func TestXrayUsersFollowPanel(t *testing.T) {
 	a.store.Update("bob", func(u *User) error { u.QuotaBytes = 0; return nil })
 	fx.users = map[string]string{}
 	a.syncOnce(time.Now())
-	if got := fx.snapshot(); !mapsEqual(got, map[string]string{"bob": bob.UUID}) {
+	if got := fx.snapshot(); !maps.Equal(got, map[string]string{"bob": bob.UUID}) {
 		t.Fatalf("after restart %v", got)
 	}
-}
-
-func mapsEqual(a, b map[string]string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if bv, ok := b[k]; !ok || bv != v {
-			return false
-		}
-	}
-	return true
 }
 
 func patch(t *testing.T, a *App, name, body string) {

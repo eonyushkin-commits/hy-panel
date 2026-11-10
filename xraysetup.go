@@ -13,12 +13,14 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/user"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/eonyushkin-commits/hy-panel/internal/atomicfile"
+	"github.com/eonyushkin-commits/hy-panel/internal/hostname"
 	"github.com/eonyushkin-commits/hy-panel/internal/transaction"
 )
 
@@ -278,7 +280,7 @@ func (d *xrayDoc) inbounds() []*jobj {
 // inbound returns the VLESS + Reality inbound: the first, as parseXray picks it.
 func (d *xrayDoc) inbound() *jobj {
 	for _, in := range d.inbounds() {
-		if strings.EqualFold(in.str("protocol"), "vless") && strings.EqualFold(in.obj("streamSettings").str("security"), "reality") {
+		if isVlessReality(in.str("protocol"), in.obj("streamSettings").str("security")) {
 			return in
 		}
 	}
@@ -319,7 +321,8 @@ func runXray(args []string) {
 		log.Fatal("✗ ", err)
 	}
 	site := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(*target), "https://"), "/"))
-	if !validHostname(strings.TrimSuffix(site, ".")) || !strings.Contains(site, ".") {
+	site = strings.TrimSuffix(site, ".") // "example.com." is the same name; the SNI carries no trailing dot
+	if !hostname.Domain(site) {
 		log.Fatalf("✗ -target %q: нужен домен сайта для маскировки", *target)
 	}
 	managed := env["HYP_XRAY_CONFIG"] != "" // the panel runs a config it wrote
@@ -331,6 +334,8 @@ func runXray(args []string) {
 	if v := xrayVersion(); !v.atLeast(minXray) {
 		log.Fatalf("✗ нужен Xray ≥ %s, установлен %s — обнови: hy-panel fetch xray", minXray, v)
 	}
+	cfgOpts, err := xrayConfigOptions(svc)
+	step("xray config owner", err)
 	orig, readErr := os.ReadFile(cfgPath)
 	d, kind := classifyXray(orig, readErr)
 	switch kind {
@@ -393,7 +398,7 @@ func runXray(args []string) {
 	}
 	env["HYP_XRAY_CONFIG"] = cfgPath
 	err = transaction.Run([]transaction.File{
-		{Path: cfgPath, Data: out, Options: xrayConfigOptions()},
+		{Path: cfgPath, Data: out, Options: cfgOpts},
 		{Path: envPath, Data: renderEnv(env), Options: atomicfile.Options{Mode: 0600}},
 	}, func() error {
 		if err := restartService(svc); err != nil {
@@ -457,7 +462,7 @@ func xrayNewPort(port string) string {
 }
 
 func validPort(port string) {
-	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+	if !validPortNumber(port) {
 		log.Fatalf("✗ -port %q: нужен порт 1–65535", port)
 	}
 }
@@ -481,11 +486,15 @@ func subnetNote(domain, host string) string {
 	return "; он в другой подсети, сосед по /24 был бы незаметнее"
 }
 
-// writeXrayConfig writes the new config after Xray's own check passed;
-// otherwise the old one stays.
-func xrayConfigOptions() atomicfile.Options {
-	return atomicfile.Options{
-		Mode: 0644, PreserveOwner: true, FollowSymlink: true,
+// xrayConfigOptions writes the new config after Xray's own check passed
+// (otherwise the old one stays). The config holds the Reality private key:
+// it becomes root:<the group Xray runs with> 0640, whatever its mode was.
+// The official XTLS unit runs Xray as nobody and the panel's as xray, so the
+// group comes from the unit. A DynamicUser unit has no group to give the file
+// to: its config keeps its owner and mode, as before.
+func xrayConfigOptions(svc string) (atomicfile.Options, error) {
+	opts := atomicfile.Options{
+		Mode: 0640, FollowSymlink: true,
 		Validate: func(candidate string) error {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
@@ -497,6 +506,63 @@ func xrayConfigOptions() atomicfile.Options {
 			return nil
 		},
 	}
+	out, err := exec.Command("systemctl", "show", svc, "-p", "User", "-p", "Group", "-p", "DynamicUser").Output()
+	if err != nil {
+		return opts, fmt.Errorf("systemctl show %s: %w", svc, err)
+	}
+	gid, ok, err := unitGID(string(out), lookupGroupID, lookupUserGID)
+	switch {
+	case err != nil:
+		return opts, fmt.Errorf("группа службы %s: %w", svc, err)
+	case !ok:
+		fmt.Printf("  ✗ %s запущен с DynamicUser: права конфига Xray не меняю, проверь их сам\n", svc)
+		opts.Mode, opts.PreserveOwner = 0644, true // the previous behaviour: the dynamic user must read it
+	default:
+		opts.Owner = &atomicfile.Owner{UID: 0, GID: gid}
+	}
+	return opts, nil
+}
+
+// unitGID is the group a unit's process runs with, from `systemctl show -p
+// User -p Group -p DynamicUser`: Group, else User's primary group, else root.
+// ok is false for a DynamicUser unit, whose IDs are made up at start.
+func unitGID(show string, groupID, userGID func(string) (int, error)) (gid int, ok bool, err error) {
+	props := map[string]string{}
+	for _, l := range strings.Split(show, "\n") {
+		if k, v, found := strings.Cut(strings.TrimSpace(l), "="); found {
+			props[k] = v
+		}
+	}
+	switch {
+	case props["DynamicUser"] == "yes":
+		return 0, false, nil
+	case props["Group"] != "":
+		gid, err = groupID(props["Group"])
+	case props["User"] != "":
+		gid, err = userGID(props["User"])
+	}
+	return gid, err == nil, err
+}
+
+// lookupGroupID and lookupUserGID accept a name or a numeric ID, as units do.
+func lookupGroupID(name string) (int, error) {
+	g, err := user.LookupGroup(name)
+	if err != nil {
+		if g, err = user.LookupGroupId(name); err != nil {
+			return 0, err
+		}
+	}
+	return strconv.Atoi(g.Gid)
+}
+
+func lookupUserGID(name string) (int, error) {
+	u, err := user.Lookup(name)
+	if err != nil {
+		if u, err = user.LookupId(name); err != nil {
+			return 0, err
+		}
+	}
+	return strconv.Atoi(u.Gid)
 }
 
 // waitXrayReady verifies the actual active UUIDs, not just the user count.
@@ -517,43 +583,30 @@ func waitXrayReady(xs *xraySetup) error {
 				return err
 			}
 		}
-		if last = checkPanelReady(ctx); last != nil {
-			t := time.NewTimer(500 * time.Millisecond)
-			select {
-			case <-ctx.Done():
-				t.Stop()
-			case <-t.C:
-			}
-			continue
-		}
-		have, err := api.usersContext(ctx, xs.Tag)
-		last = err
-		if err == nil {
-			missing := 0
-			for _, u := range list {
-				if u.Blocked(time.Now()) == "" && u.Uses(protoVless) {
-					if id, ok := have[u.Name]; !ok || u.UUID == "" || id != u.UUID {
-						missing++
+		if last = checkPanelReady(ctx); last == nil {
+			var have map[string]string
+			if have, last = api.usersContext(ctx, xs.Tag); last == nil {
+				missing := 0
+				for _, u := range list {
+					if u.Allowed(protoVless, time.Now()) {
+						if id, ok := have[u.Name]; !ok || u.UUID == "" || id != u.UUID {
+							missing++
+						}
 					}
 				}
+				if missing == 0 {
+					fmt.Printf("✓ Xray API: пользователи синхронизированы\n")
+					return nil
+				}
+				last = fmt.Errorf("Xray: не синхронизированы %d пользователей", missing)
 			}
-			if missing == 0 {
-				fmt.Printf("✓ Xray API: пользователи синхронизированы\n")
-				return nil
-			}
-			last = fmt.Errorf("Xray: не синхронизированы %d пользователей", missing)
 		}
-		t := time.NewTimer(500 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			t.Stop()
-		case <-t.C:
-		}
+		sleepCtx(ctx, 500*time.Millisecond)
 	}
 	return fmt.Errorf("Xray не готов: %w", errors.Join(ctx.Err(), last))
 }
 
 // xrayPaths returns the Xray config path and service name.
 func xrayPaths(env map[string]string) (cfg, svc string) {
-	return envOr(env, "HYP_XRAY_CONFIG", defaultXrayCfg), envOr(env, "HYP_XRAY_SERVICE", defaultXraySvc)
+	return cmp.Or(env["HYP_XRAY_CONFIG"], defaultXrayCfg), cmp.Or(env["HYP_XRAY_SERVICE"], defaultXraySvc)
 }

@@ -68,8 +68,8 @@ func (a *App) authorize(auth string) (bool, string, string) {
 	}
 	if u.MaxDevices > 0 {
 		a.mu.RLock()
-		n := a.onlineOf(protoHy2)[u.Name]
-		last := a.lastSync
+		on, last := a.hyOnline()
+		n := on[u.Name]
 		a.mu.RUnlock()
 		if a.hy != nil && time.Since(last) > 30*time.Second {
 			last = time.Now()
@@ -81,8 +81,8 @@ func (a *App) authorize(auth string) (bool, string, string) {
 		}
 		a.mu.Lock()
 		defer a.mu.Unlock()
-		if a.lastSync.After(last) {
-			n, last = a.onlineOf(protoHy2)[u.Name], a.lastSync
+		if on, at := a.hyOnline(); at.After(last) {
+			n, last = on[u.Name], at
 		}
 		pending := a.reservations[u.Name]
 		for len(pending) > 0 && !pending[0].After(last) {
@@ -105,7 +105,7 @@ func (a *App) authorize(auth string) (bool, string, string) {
 // traffic, access changes or fresh online status for the other.
 func (a *App) syncLoop(ctx context.Context, every time.Duration) {
 	var wg sync.WaitGroup
-	run := func(fn func()) { wg.Add(1); go func() { defer wg.Done(); fn() }() }
+	run := wg.Go
 	wake := make([]chan struct{}, len(a.backends))
 	for i, b := range a.backends {
 		wake[i] = make(chan struct{}, 1)
@@ -204,6 +204,15 @@ func (a *App) onlineOf(p string) map[string]int {
 	return nil
 }
 
+// hyOnline is Hysteria's last session snapshot and when it was taken (zero
+// before the first); a.mu held.
+func (a *App) hyOnline() (map[string]int, time.Time) {
+	if l := a.live[protoHy2]; l != nil {
+		return l.online, l.onlineAt
+	}
+	return nil, time.Time{}
+}
+
 func (a *App) syncBackend(now time.Time, b backend) {
 	tr, on, statsErr := b.stats(now, a.store.List())
 	a.store.Tick(now, tr, on.users)
@@ -216,7 +225,6 @@ func (a *App) syncBackend(now time.Time, b backend) {
 	if on.users != nil {
 		l.online, l.onlineAt = on.users, on.at
 		if b.proto() == protoHy2 {
-			a.lastSync = on.at
 			for name, deadlines := range a.reservations {
 				if len(deadlines) == 0 || !deadlines[len(deadlines)-1].After(on.at) {
 					delete(a.reservations, name)
@@ -339,9 +347,7 @@ func (b *xrayBackend) pollOnlineLegacy(ctx context.Context, users []User) (map[s
 	jobs := make(chan User)
 	var wg sync.WaitGroup
 	for range min(8, len(users)) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for u := range jobs {
 				n, err := b.api.onlineContext(ctx, u.Name)
 				mu.Lock()
@@ -355,7 +361,7 @@ func (b *xrayBackend) pollOnlineLegacy(ctx context.Context, users []User) (map[s
 				}
 				mu.Unlock()
 			}
-		}()
+		})
 	}
 send:
 	for _, u := range users {
@@ -408,7 +414,7 @@ func (b *xrayBackend) pushContext(ctx context.Context, now time.Time, users []Us
 	}
 	var add []User
 	for _, u := range users {
-		if u.Blocked(now) != "" || !u.Uses(protoVless) {
+		if !u.Allowed(protoVless, now) {
 			continue // stays in have: taken out below
 		}
 		if have[u.Name] == u.UUID {
@@ -472,12 +478,8 @@ func (a *App) watchTarget(ctx context.Context, target, sni string) {
 		if fails == 1 {
 			delay = time.Minute
 		}
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
+		if !sleepCtx(ctx, delay) {
 			return
-		case <-timer.C:
 		}
 	}
 }
@@ -485,7 +487,7 @@ func (a *App) watchTarget(ctx context.Context, target, sni string) {
 // mustDrop reports whether online sessions of name must be closed.
 func (a *App) mustDrop(name string, now time.Time) bool {
 	u, ok := a.store.Get(name)
-	if !ok || u.Blocked(now) != "" || !u.Uses(protoHy2) {
+	if !ok || !u.Allowed(protoHy2, now) {
 		return true
 	}
 	a.mu.RLock()

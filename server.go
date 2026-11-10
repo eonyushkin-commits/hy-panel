@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -21,6 +20,9 @@ import (
 
 	"github.com/eonyushkin-commits/hy-panel/internal/adminauth"
 	"github.com/eonyushkin-commits/hy-panel/internal/atomicfile"
+	"github.com/eonyushkin-commits/hy-panel/internal/hostname"
+	"github.com/eonyushkin-commits/hy-panel/internal/model"
+	"github.com/eonyushkin-commits/hy-panel/internal/sitescan"
 	"github.com/eonyushkin-commits/hy-panel/internal/storage"
 
 	qrcode "github.com/skip2/go-qrcode"
@@ -36,7 +38,7 @@ type App struct {
 	backends     []backend  // the protocols' servers the panel syncs, Hysteria's first
 	hyOpts       *hyOpts    // Hysteria's port, obfs, certificate; nil: not set up
 	agent        *agentClient
-	siteScan     scanState // the search for a Reality site
+	siteScan     sitescan.State // the search for a Reality site
 	ep           Endpoint
 	password     string
 	subBase      string   // public base URL of the subscription listener, "" = disabled
@@ -51,7 +53,6 @@ type App struct {
 	mu        sync.RWMutex
 	live      map[string]*live // per protocol: who is online, sync errors
 	targetErr string
-	lastSync  time.Time             // Hysteria's sessions were last read
 	revoked   map[string]revocation // password changed: drop old sessions
 	listenErr map[string]string     // public listener → why it does not run
 
@@ -115,14 +116,21 @@ func waitPanelReady() error {
 		if last = checkPanelReady(ctx); last == nil {
 			return nil
 		}
-		timer := time.NewTimer(200 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-		case <-timer.C:
-		}
+		sleepCtx(ctx, 200*time.Millisecond)
 	}
 	return fmt.Errorf("панель не восстановилась: %w", errors.Join(ctx.Err(), last))
+}
+
+// sleepCtx waits d; false if ctx ended first.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
 }
 
 // keepServing runs a public listener; if it fails (port taken, certificate),
@@ -142,12 +150,8 @@ func (a *App) keepServing(ctx context.Context, name string, run func() error) {
 			a.listenErr[name] = err.Error()
 		}
 		a.mu.Unlock()
-		t := time.NewTimer(30 * time.Second)
-		select {
-		case <-ctx.Done():
-			t.Stop()
+		if !sleepCtx(ctx, 30*time.Second) {
 			return
-		case <-t.C:
 		}
 	}
 }
@@ -234,8 +238,7 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	ok := ctEq(req.Password, a.password)
-	if !ok {
+	if !model.EqualSecret(req.Password, a.password) {
 		log.Printf("login failed from %s", r.RemoteAddr)
 		http.Error(w, "wrong password", http.StatusUnauthorized)
 		return
@@ -292,7 +295,7 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 		}
 		freshness[p] = status
 	}
-	last := a.lastSync
+	_, last := a.hyOnline()
 	var listen []string
 	for name, e := range a.listenErr {
 		listen = append(listen, name+": "+e)
@@ -470,11 +473,7 @@ func (a *App) handlePatch(w http.ResponseWriter, r *http.Request) {
 		p.apply(u, now)
 		return nil
 	})
-	switch {
-	case errors.Is(err, errNotFound):
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
-	case err != nil:
+	if err != nil {
 		http.Error(w, err.Error(), storeErrorStatus(err))
 		return
 	}
@@ -490,37 +489,42 @@ func (a *App) handlePatch(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleDelete(w http.ResponseWriter, r *http.Request) {
 	if err := a.store.Delete(r.PathValue("name")); err != nil {
-		code := http.StatusInternalServerError
-		if errors.Is(err, errNotFound) {
-			code = http.StatusNotFound
-		}
-		http.Error(w, err.Error(), code)
+		http.Error(w, err.Error(), storeErrorStatus(err))
 		return
 	}
 	a.requestSync()
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (a *App) handleQR(w http.ResponseWriter, r *http.Request) {
+// exportUser is the user a QR code or mihomo export is for and the protocols
+// it may get, in fallback order; ?proto= must be one of them. Otherwise it
+// answers the request itself and ok is false.
+func (a *App) exportUser(w http.ResponseWriter, r *http.Request) (u User, ps []protocol, ok bool) {
 	if a.noLinks(w) {
-		return
+		return u, nil, false
 	}
-	u, ok := a.store.Get(r.PathValue("name"))
-	if !ok {
+	if u, ok = a.store.Get(r.PathValue("name")); !ok {
 		http.NotFound(w, r)
-		return
+		return u, nil, false
 	}
-	ps := a.ep.userProtos(u)
-	if len(ps) == 0 {
+	if ps = a.ep.userProtos(u); len(ps) == 0 {
 		http.Error(w, "нет доступных протоколов для пользователя", http.StatusConflict)
+		return u, nil, false
+	}
+	if p := r.URL.Query().Get("proto"); p != "" && !slices.ContainsFunc(ps, func(x protocol) bool { return x.ID() == p }) {
+		http.Error(w, "протокол недоступен пользователю", http.StatusBadRequest)
+		return u, nil, false
+	}
+	return u, ps, true
+}
+
+func (a *App) handleQR(w http.ResponseWriter, r *http.Request) {
+	u, ps, ok := a.exportUser(w, r)
+	if !ok {
 		return
 	}
 	text := ps[0].Link(a.ep, u)
 	if p := r.URL.Query().Get("proto"); p != "" {
-		if !slices.Contains(a.ep.UserProtocols(u), p) {
-			http.Error(w, "протокол недоступен пользователю", http.StatusBadRequest)
-			return
-		}
 		text = a.ep.Link(p, u)
 	}
 	if r.URL.Query().Has("sub") && a.subBase != "" {
@@ -541,20 +545,8 @@ func (a *App) handleQR(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleMihomo(w http.ResponseWriter, r *http.Request) {
-	if a.noLinks(w) {
-		return
-	}
-	u, ok := a.store.Get(r.PathValue("name"))
+	u, _, ok := a.exportUser(w, r)
 	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	if len(a.ep.userProtos(u)) == 0 {
-		http.Error(w, "нет доступных протоколов для пользователя", http.StatusConflict)
-		return
-	}
-	if p := r.URL.Query().Get("proto"); p != "" && !slices.Contains(a.ep.UserProtocols(u), p) {
-		http.Error(w, "протокол недоступен пользователю", http.StatusBadRequest)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -573,7 +565,7 @@ func (a *App) handleMihomo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch p := q.Get("proto"); {
-	case slices.Contains(a.ep.Protocols(), p):
+	case p != "": // exportUser checked it
 		fmt.Fprint(w, "proxies:\n"+a.ep.MihomoProxy(p, u))
 	case q.Has("fallback"):
 		fmt.Fprint(w, a.ep.MihomoFallback(u))
@@ -724,7 +716,7 @@ func (a *App) proxyAgent(w http.ResponseWriter, method, path string, body io.Rea
 // handleCheckTarget checks a site for Reality before it is chosen.
 func (a *App) handleCheckTarget(w http.ResponseWriter, r *http.Request) {
 	d := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("domain")))
-	if !validHostname(d) || !strings.Contains(d, ".") {
+	if !hostname.Domain(d) {
 		http.Error(w, "нужен домен", http.StatusBadRequest)
 		return
 	}
@@ -738,23 +730,17 @@ func (a *App) handleCheckTarget(w http.ResponseWriter, r *http.Request) {
 // handleSiteScanStart starts the search for a Reality site in the server's
 // /24 (one at a time); handleSiteScan reports its progress and finds.
 func (a *App) handleSiteScanStart(w http.ResponseWriter, r *http.Request) {
-	ip, err := serverIPv4(a.ep.Host)
+	ip, err := sitescan.ServerIPv4(a.ep.Host)
 	if err != nil {
 		http.Error(w, "адрес сервера: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	st := &a.siteScan
-	st.mu.Lock()
-	if !st.Running {
-		st.Running, st.Done, st.Found = true, 0, nil
-		go newSiteScanner().run(st, ip)
-	}
-	st.mu.Unlock()
-	writeJSON(w, st.snapshot())
+	a.siteScan.Start(ip)
+	writeJSON(w, a.siteScan.Snapshot())
 }
 
 func (a *App) handleSiteScan(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, a.siteScan.snapshot())
+	writeJSON(w, a.siteScan.Snapshot())
 }
 
 // underPath serves h only below a secret path, like 3x-ui's web base path:
@@ -867,8 +853,6 @@ func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Cache-Control", "no-store") // carries passwords and links
 	json.NewEncoder(w).Encode(v)
 }
-
-func ctEq(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
 
 func isLoopbackHost(h string) bool {
 	if h == "localhost" {

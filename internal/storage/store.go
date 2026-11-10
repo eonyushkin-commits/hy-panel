@@ -103,18 +103,7 @@ func open(path string, write func(string, []byte) error) (*Store, error) {
 // The first automatic migration keeps the original database, including its
 // original client credentials. An existing backup is never overwritten.
 func migrationBackup(path string, b []byte) error {
-	f, err := os.OpenFile(path+".pre-v2", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if errors.Is(err, os.ErrExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	err = atomicfile.WriteAndClose(f, b)
-	if err != nil {
-		os.Remove(f.Name())
-	}
-	return err
+	return atomicfile.CreateOnce(path+".pre-v2", b, 0600)
 }
 
 func writeUsers(path string, b []byte) error {
@@ -146,18 +135,10 @@ func (s *Store) persist(users map[string]model.User) error {
 		return err
 	}
 	err = s.write(s.path, b)
-	if atomicfile.Committed(err) {
-		s.problem = err
-		s.dirty = true
-		return nil
-	}
-	if err != nil {
-		s.problem = err
-		s.dirty = true
+	s.problem, s.dirty = err, err != nil
+	if err != nil && !atomicfile.Committed(err) {
 		return &WriteError{err}
 	}
-	s.problem = nil
-	s.dirty = false
 	return nil
 }
 func (s *Store) unique(u model.User, self string) error {
@@ -243,14 +224,23 @@ func (s *Store) Create(u model.User) (model.User, error) {
 	if err := s.unique(u, u.Name); err != nil {
 		return model.User{}, err
 	}
-	next := cloneUsers(s.users)
-	next[u.Name] = u
-	if err := s.persist(next); err != nil {
+	if err := s.commit(func(next map[string]model.User) { next[u.Name] = u }); err != nil {
 		return model.User{}, err
+	}
+	return u.Clone(), nil
+}
+
+// commit saves a copy of the users with edit applied and makes it current
+// only if the save succeeded; s.mu and s.saveMu are held.
+func (s *Store) commit(edit func(next map[string]model.User)) error {
+	next := cloneUsers(s.users)
+	edit(next)
+	if err := s.persist(next); err != nil {
+		return err
 	}
 	s.users = next
 	s.reindex()
-	return u.Clone(), nil
+	return nil
 }
 func (s *Store) Update(name string, edit func(*model.User) error) (model.User, error) {
 	s.saveMu.Lock()
@@ -274,13 +264,9 @@ func (s *Store) Update(name string, edit func(*model.User) error) (model.User, e
 	if err := s.unique(u, name); err != nil {
 		return model.User{}, err
 	}
-	next := cloneUsers(s.users)
-	next[name] = u.Clone()
-	if err := s.persist(next); err != nil {
+	if err := s.commit(func(next map[string]model.User) { next[name] = u.Clone() }); err != nil {
 		return model.User{}, err
 	}
-	s.users = next
-	s.reindex()
 	return u.Clone(), nil
 }
 func (s *Store) Delete(name string) error {
@@ -291,14 +277,7 @@ func (s *Store) Delete(name string) error {
 	if _, ok := s.users[name]; !ok {
 		return ErrNotFound
 	}
-	next := cloneUsers(s.users)
-	delete(next, name)
-	if err := s.persist(next); err != nil {
-		return err
-	}
-	s.users = next
-	s.reindex()
-	return nil
+	return s.commit(func(next map[string]model.User) { delete(next, name) })
 }
 func (s *Store) Flush() error {
 	s.saveMu.Lock()

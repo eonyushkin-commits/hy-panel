@@ -1,9 +1,7 @@
 package main
 
 import (
-	"crypto/sha256"
 	_ "embed"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -69,8 +67,7 @@ func (e Endpoint) MihomoFull(tmpl []byte, u User, router bool) ([]byte, error) {
 
 	if router {
 		if s, ok := t.span("secret"); ok {
-			sum := sha256.Sum256([]byte("mihomo-secret:" + u.SubToken))
-			t.replace(s, "secret: '"+hex.EncodeToString(sum[:])[:16]+"' # пароль панели управления (zashboard)")
+			t.replace(s, "secret: '"+sha256hex([]byte("mihomo-secret:" + u.SubToken))[:16]+"' # пароль панели управления (zashboard)")
 		}
 	} else {
 		for _, k := range mihomoRouterOnly {

@@ -12,10 +12,11 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/eonyushkin-commits/hy-panel/internal/hostname"
 )
 
 // The agent is the panel's root helper. The panel runs as an unprivileged
@@ -134,13 +135,13 @@ func jobArgs(action string, p map[string]string) ([]string, error) {
 	case "vless":
 		args := []string{"xray"}
 		if port := p["port"]; port != "" {
-			if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			if !validPortNumber(port) {
 				return nil, fmt.Errorf("порт %q: нужен 1–65535", port)
 			}
 			args = append(args, "-port", port)
 		}
 		t := strings.ToLower(strings.TrimSpace(p["target"]))
-		if !validHostname(t) || !strings.Contains(t, ".") {
+		if !hostname.Domain(t) {
 			return nil, fmt.Errorf("сайт для маскировки %q: нужен домен", t)
 		}
 		return append(args, "-target", t), nil
@@ -324,9 +325,7 @@ func (r *releases) check() bool {
 	ok := true
 	var wg sync.WaitGroup
 	for proto, base := range map[string]string{protoHy2: hysteriaURL, protoVless: xrayURL} {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			v, err := latestRelease(base)
 			r.mu.Lock()
 			defer r.mu.Unlock()
@@ -339,7 +338,7 @@ func (r *releases) check() bool {
 				return
 			}
 			r.latest[proto] = release{v: v}
-		}()
+		})
 	}
 	wg.Wait()
 	return ok
@@ -389,19 +388,6 @@ func latestRelease(base string) (hyVersion, error) {
 		return v, fmt.Errorf("%s: %s, версии в перенаправлении нет (%s)", page, resp.Status, loc)
 	}
 	return v, nil
-}
-
-// readEnvNoFatal is readEnv for the long-running agent: an unreadable file
-// means defaults here, not an exit.
-func readEnvNoFatal() map[string]string {
-	env := map[string]string{}
-	b, _ := os.ReadFile(envPath)
-	for _, l := range strings.Split(string(b), "\n") {
-		if k, v, ok := strings.Cut(strings.TrimSpace(l), "="); ok && !strings.HasPrefix(k, "#") {
-			env[k] = v
-		}
-	}
-	return env
 }
 
 // ---- the panel's side ----

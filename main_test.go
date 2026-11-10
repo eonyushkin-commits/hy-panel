@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -49,55 +50,6 @@ func mustCreate(t *testing.T, s *Store, u User) User {
 		t.Fatal(err)
 	}
 	return got
-}
-
-func TestResolve(t *testing.T) {
-	s := newStore(t)
-	mustCreate(t, s, User{Name: "Phone", Password: "secret123"})
-
-	cases := map[string]string{
-		"phone:secret123": "phone",
-		"PHONE:secret123": "phone", // Hysteria userpass: names are case-insensitive
-		"secret123":       "phone", // bare password
-		"phone:wrong":     "",
-		"":                "",
-		"default:":        "",
-	}
-	for auth, want := range cases {
-		u, ok := s.Resolve(auth)
-		if got := map[bool]string{true: u.Name}[ok]; got != want {
-			t.Errorf("Resolve(%q) = %q, want %q", auth, got, want)
-		}
-	}
-}
-
-func TestPasswordRules(t *testing.T) {
-	s, path := newStoreWithPath(t)
-	a := mustCreate(t, s, User{Name: "a"})
-	if len(a.Password) != 20 {
-		t.Fatalf("generated password %q", a.Password)
-	}
-	for _, pw := range []string{"short", "has:colon1", "has space1", a.Password} {
-		if _, err := s.Create(User{Name: "b", Password: pw}); err == nil {
-			t.Errorf("Create with password %q succeeded", pw)
-		}
-	}
-	if _, err := s.Create(User{Name: "Bad Name"}); err == nil {
-		t.Error("bad name accepted")
-	}
-	b := mustCreate(t, s, User{Name: "b"})
-	// Duplicate on update is rejected and leaves the user untouched.
-	if _, err := s.Update("b", func(u *User) error { u.Password = a.Password; u.Note = "x"; return nil }); err == nil {
-		t.Fatal("duplicate password accepted on update")
-	}
-	if got, _ := s.Get("b"); got.Password != b.Password || got.Note != "" {
-		t.Fatalf("failed update changed user: %+v", got)
-	}
-	// Persisted and reloadable.
-	s2, err := OpenStore(path)
-	if err != nil || len(s2.List()) != 2 {
-		t.Fatalf("reload: %v %d", err, len(s2.List()))
-	}
 }
 
 func TestBlockedAndMonthlyReset(t *testing.T) {
@@ -616,29 +568,6 @@ func TestApplyOptsKeepsLinks(t *testing.T) {
 	}
 }
 
-func TestCountersFlushedLater(t *testing.T) {
-	s, path := newStoreWithPath(t)
-	mustCreate(t, s, User{Name: "u"})
-	disk := func() int64 {
-		s2, _ := OpenStore(path)
-		u, _ := s2.Get("u")
-		return u.Down
-	}
-	s.Tick(time.Now(), map[string]trafficEntry{"u": {Rx: 500}}, nil)
-	if disk() != 0 {
-		t.Fatal("counters written on every tick")
-	}
-	if err := s.Flush(); err != nil || disk() != 500 {
-		t.Fatalf("flush: %v %d", err, disk())
-	}
-	// An admin change is written at once, with the counters.
-	s.Tick(time.Now(), map[string]trafficEntry{"u": {Rx: 1}}, nil)
-	s.Update("u", func(u *User) error { u.Note = "x"; return nil })
-	if disk() != 501 {
-		t.Fatal("admin change not written with counters")
-	}
-}
-
 // Drive the production sync loop deterministically.
 func (a *App) syncAccess(now time.Time) {
 	for _, b := range a.backends {
@@ -716,6 +645,46 @@ func TestLoopbackACLPrecedesUserRules(t *testing.T) {
 	backup, _ := os.ReadFile(path + backupExt)
 	if string(backup) != original {
 		t.Fatal("ACL backup lost")
+	}
+	if changed, err := d.protectLoopback(); err != nil || changed {
+		t.Fatal(changed, err)
+	}
+}
+
+// A config protected by an earlier version (loopback only) gets the full
+// list once, without repeating the old rules, and keeps the user's own.
+func TestLoopbackACLReplacesOldRules(t *testing.T) {
+	want := strings.Join(loopbackRules, "\n") + "\ndirect(all)"
+	if !slices.Contains(loopbackRules, "reject(169.254.0.0/16)") || !slices.Contains(loopbackRules, "reject(10.0.0.0/8)") {
+		t.Fatal("private networks are not rejected")
+	}
+	d, _ := parseDoc(nil)
+	d.set("acl", map[string]any{"inline": slices.Concat(oldLoopbackRules, []string{"direct(all)"})})
+	if changed, err := d.protectLoopback(); err != nil || !changed {
+		t.Fatal(changed, err)
+	}
+	var rules []string
+	if err := mapGet(d.get("acl"), "inline").Decode(&rules); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(rules, "\n") != want {
+		t.Fatal(rules)
+	}
+	if changed, err := d.protectLoopback(); err != nil || changed {
+		t.Fatal(changed, err)
+	}
+
+	path := filepath.Join(t.TempDir(), "acl.txt")
+	if err := os.WriteFile(path, []byte(strings.Join(oldLoopbackRules, "\n")+"\ndirect(all)\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	d, _ = parseDoc(nil)
+	d.set("acl", map[string]string{"file": path})
+	if changed, err := d.protectLoopback(); err != nil || !changed {
+		t.Fatal(changed, err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != want+"\n" {
+		t.Fatal(string(b))
 	}
 	if changed, err := d.protectLoopback(); err != nil || changed {
 		t.Fatal(changed, err)

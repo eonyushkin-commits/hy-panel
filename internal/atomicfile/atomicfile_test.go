@@ -44,6 +44,26 @@ func TestReplacePreservesOriginalUntilCommit(t *testing.T) {
 	}
 }
 
+// An explicit owner wins over the existing file's mode: a secret that was
+// world-readable becomes 0640 for the given group.
+func TestReplaceSetsExplicitOwner(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no Unix ownership")
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	owner := &Owner{UID: os.Getuid(), GID: os.Getgid()} // a non-root user may chown to itself
+	if err := Replace(path, []byte("new"), Options{Mode: 0640, Owner: owner, PreserveOwner: true}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0640 {
+		t.Fatalf("mode %v: %v", info.Mode().Perm(), err)
+	}
+}
+
 func TestRejectDirectory(t *testing.T) {
 	dir := t.TempDir()
 	if err := Replace(dir, []byte("bad"), Options{}); err == nil {

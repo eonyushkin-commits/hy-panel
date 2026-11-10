@@ -15,14 +15,8 @@ import (
 
 func database(t *testing.T) *Store {
 	t.Helper()
-	s, err := Open(filepath.Join(t.TempDir(), "users.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = s.Create(model.User{Name: "phone", Enabled: true, ProtoOff: []string{model.VLESS}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := newStore(t)
+	mustCreate(t, s, model.User{Name: "phone", ProtoOff: []string{model.VLESS}})
 	return s
 }
 
@@ -189,5 +183,103 @@ func TestMigrationKeepsOriginalAndDoesNotPublishUnsavedKeys(t *testing.T) {
 	u2, _ := reloaded.Get("old")
 	if u.UUID != u2.UUID {
 		t.Fatal("new UUID changed on restart")
+	}
+}
+
+func newStore(t *testing.T) *Store {
+	t.Helper()
+	s, _ := newStoreWithPath(t)
+	return s
+}
+
+func newStoreWithPath(t *testing.T) (*Store, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "users.json")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, path
+}
+
+func mustCreate(t *testing.T, s *Store, u model.User) model.User {
+	t.Helper()
+	u.Enabled = true
+	got, err := s.Create(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func TestResolve(t *testing.T) {
+	s := newStore(t)
+	mustCreate(t, s, model.User{Name: "Phone", Password: "secret123"})
+
+	cases := map[string]string{
+		"phone:secret123": "phone",
+		"PHONE:secret123": "phone", // Hysteria userpass: names are case-insensitive
+		"secret123":       "phone", // bare password
+		"phone:wrong":     "",
+		"":                "",
+		"default:":        "",
+	}
+	for auth, want := range cases {
+		u, ok := s.Resolve(auth)
+		if got := map[bool]string{true: u.Name}[ok]; got != want {
+			t.Errorf("Resolve(%q) = %q, want %q", auth, got, want)
+		}
+	}
+}
+
+func TestPasswordRules(t *testing.T) {
+	s, path := newStoreWithPath(t)
+	a := mustCreate(t, s, model.User{Name: "a"})
+	if len(a.Password) != 20 {
+		t.Fatalf("generated password %q", a.Password)
+	}
+	for _, pw := range []string{"short", "has:colon1", "has space1", a.Password} {
+		if _, err := s.Create(model.User{Name: "b", Password: pw}); err == nil {
+			t.Errorf("Create with password %q succeeded", pw)
+		}
+	}
+	if _, err := s.Create(model.User{Name: "Bad Name"}); err == nil {
+		t.Error("bad name accepted")
+	}
+	b := mustCreate(t, s, model.User{Name: "b"})
+	// Duplicate on update is rejected and leaves the user untouched.
+	if _, err := s.Update("b", func(u *model.User) error { u.Password = a.Password; u.Note = "x"; return nil }); err == nil {
+		t.Fatal("duplicate password accepted on update")
+	}
+	if got, _ := s.Get("b"); got.Password != b.Password || got.Note != "" {
+		t.Fatalf("failed update changed user: %+v", got)
+	}
+	// Persisted and reloadable.
+	s2, err := Open(path)
+	if err != nil || len(s2.List()) != 2 {
+		t.Fatalf("reload: %v %d", err, len(s2.List()))
+	}
+}
+
+func TestCountersFlushedLater(t *testing.T) {
+	s, path := newStoreWithPath(t)
+	mustCreate(t, s, model.User{Name: "u"})
+	disk := func() int64 {
+		s2, _ := Open(path)
+		u, _ := s2.Get("u")
+		return u.Down
+	}
+	s.Tick(time.Now(), map[string]model.Traffic{"u": {Rx: 500}}, nil)
+	if disk() != 0 {
+		t.Fatal("counters written on every tick")
+	}
+	if err := s.Flush(); err != nil || disk() != 500 {
+		t.Fatalf("flush: %v %d", err, disk())
+	}
+	// An admin change is written at once, with the counters.
+	s.Tick(time.Now(), map[string]model.Traffic{"u": {Rx: 1}}, nil)
+	s.Update("u", func(u *model.User) error { u.Note = "x"; return nil })
+	if disk() != 501 {
+		t.Fatal("admin change not written with counters")
 	}
 }

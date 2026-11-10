@@ -1,4 +1,5 @@
-package main
+// Package sitescan finds and verifies neighbouring sites for Reality.
+package sitescan
 
 import (
 	"context"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/eonyushkin-commits/hy-panel/internal/hostname"
 )
 
 // Finding a site for Reality: what the guide did by hand, RealiTLScanner
@@ -18,7 +21,8 @@ import (
 // a neighbour (same /24, so its IP does not stand out next to ours), speaks
 // TLS 1.3 with X25519 and HTTP/2, has a valid certificate and answers 200.
 
-type siteCandidate struct {
+// Candidate describes a verified neighbouring site.
+type Candidate struct {
 	Domain string `json:"domain"`
 	IP     string `json:"ip"`     // where it answered
 	SameIP bool   `json:"sameIP"` // its DNS points at that very address
@@ -26,34 +30,36 @@ type siteCandidate struct {
 	Status int    `json:"status"` // GET / (redirects are not followed)
 }
 
-// siteScanner holds what tests replace: the port, DNS and trusted roots.
-type siteScanner struct {
+// scanner holds what tests replace: the port, DNS and trusted roots.
+type scanner struct {
 	port    string
 	resolve func(ctx context.Context, host string) ([]net.IP, error)
 	roots   *x509.CertPool // nil: the system's
 	timeout time.Duration
 }
 
-func newSiteScanner() *siteScanner {
-	return &siteScanner{port: "443", timeout: 4 * time.Second, resolve: func(ctx context.Context, h string) ([]net.IP, error) {
+func newScanner() *scanner {
+	return &scanner{port: "443", timeout: 4 * time.Second, resolve: func(ctx context.Context, h string) ([]net.IP, error) {
 		return net.DefaultResolver.LookupIP(ctx, "ip4", h)
 	}}
 }
 
-func browserTLS() *tls.Config {
+// BrowserTLS is the handshake Reality needs a site to accept: TLS 1.3 with
+// X25519 and HTTP/2. The search and the panel's own site check share it.
+func BrowserTLS() *tls.Config {
 	return &tls.Config{MinVersion: tls.VersionTLS13, CurvePreferences: []tls.CurveID{tls.X25519}, NextProtos: []string{"h2"}}
 }
 
 // probe connects to an address the way RealiTLScanner does and returns the
 // names on its certificate if it speaks TLS 1.3 + h2.
-func (s *siteScanner) probe(ctx context.Context, ip net.IP) []string {
+func (s *scanner) probe(ctx context.Context, ip net.IP) []string {
 	d := &net.Dialer{Timeout: s.timeout}
 	c, err := d.DialContext(ctx, "tcp", net.JoinHostPort(ip.String(), s.port))
 	if err != nil {
 		return nil
 	}
 	defer c.Close()
-	cfg := browserTLS()
+	cfg := BrowserTLS()
 	cfg.InsecureSkipVerify = true // the name is what we are after
 	tc := tls.Client(c, cfg)
 	tc.SetDeadline(time.Now().Add(s.timeout))
@@ -68,7 +74,7 @@ func (s *siteScanner) probe(ctx context.Context, ip net.IP) []string {
 	var names []string
 	for _, n := range append(slices.Clone(leaf.DNSNames), leaf.Subject.CommonName) {
 		n = strings.TrimPrefix(strings.ToLower(n), "*.")
-		if strings.Contains(n, ".") && validHostname(n) && !slices.Contains(names, n) {
+		if hostname.Domain(n) && !slices.Contains(names, n) {
 			names = append(names, n)
 		}
 	}
@@ -77,8 +83,8 @@ func (s *siteScanner) probe(ctx context.Context, ip net.IP) []string {
 
 // verify checks a domain the way a browser and a probe see it: through its
 // own DNS, with certificate verification, TLS 1.3 + X25519 + h2, GET /.
-func (s *siteScanner) verify(ctx context.Context, domain string, found net.IP, net24 *net.IPNet) (siteCandidate, bool) {
-	c := siteCandidate{Domain: domain, IP: found.String()}
+func (s *scanner) verify(ctx context.Context, domain string, found net.IP, net24 *net.IPNet) (Candidate, bool) {
+	c := Candidate{Domain: domain, IP: found.String()}
 	ips, err := s.resolve(ctx, domain)
 	if err != nil {
 		return c, false
@@ -96,7 +102,7 @@ func (s *siteScanner) verify(ctx context.Context, domain string, found net.IP, n
 	if to == nil {
 		return c, false // lives elsewhere (a CDN): not a neighbour
 	}
-	cfg := browserTLS()
+	cfg := BrowserTLS()
 	cfg.ServerName, cfg.RootCAs = domain, s.roots
 	tr := &http.Transport{
 		Proxy:             nil,
@@ -122,38 +128,71 @@ func (s *siteScanner) verify(ctx context.Context, domain string, found net.IP, n
 	return c, ok
 }
 
-// scanResult is a search's progress and finds, as the panel shows them.
-type scanResult struct {
-	Running bool            `json:"running"`
-	Net     string          `json:"net"`
-	Done    int             `json:"done"`
-	Total   int             `json:"total"`
-	Found   []siteCandidate `json:"found"`
+// Result is a search's progress and finds, as the panel shows them.
+type Result struct {
+	Running bool        `json:"running"`
+	Net     string      `json:"net"`
+	Done    int         `json:"done"`
+	Total   int         `json:"total"`
+	Found   []Candidate `json:"found"`
 }
 
-// scanState is the panel's one running (or last) search.
-type scanState struct {
-	mu sync.Mutex
-	scanResult
+// State is the panel's one running (or last) search.
+type State struct {
+	mu     sync.Mutex
+	result Result
 }
 
-func (st *scanState) snapshot() scanResult {
+// Snapshot returns an independent copy of the search progress and results.
+func (st *State) Snapshot() Result {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	r := st.scanResult
-	r.Found = append([]siteCandidate{}, st.Found...)
+	r := st.result
+	r.Found = append([]Candidate{}, st.result.Found...)
 	return r
+}
+
+// Start launches a search of server's /24 unless one is already running or
+// server is not an IPv4 address. State's zero value is ready to use.
+func (st *State) Start(server net.IP) {
+	ip4 := server.To4()
+	if ip4 == nil {
+		return
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.result.Running {
+		return
+	}
+	// The subnet and total are set here, not in run, so that a snapshot
+	// taken right after Start already describes this search.
+	st.result = Result{Running: true, Net: subnet24(ip4).String(), Total: hosts24}
+	go newScanner().run(st, ip4)
+}
+
+// hosts24 is how many addresses of a /24 are probed: .1 to .254.
+const hosts24 = 254
+
+func subnet24(ip4 net.IP) *net.IPNet {
+	mask := net.CIDRMask(24, 32)
+	return &net.IPNet{IP: ip4.Mask(mask), Mask: mask}
 }
 
 // run scans the /24 of server: every neighbour is probed, every name found
 // is verified; good ones (200 first, then same IP, then fast) end up in Found.
-func (s *siteScanner) run(st *scanState, server net.IP) {
+func (s *scanner) run(st *State, server net.IP) {
+	ip4 := server.To4()
+	if ip4 == nil {
+		st.mu.Lock()
+		st.result.Running = false
+		st.mu.Unlock()
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	ip4 := server.To4()
-	net24 := &net.IPNet{IP: ip4.Mask(net.CIDRMask(24, 32)), Mask: net.CIDRMask(24, 32)}
+	net24 := subnet24(ip4)
 	st.mu.Lock()
-	st.Net, st.Total = net24.String(), 254
+	st.result.Net, st.result.Total = net24.String(), hosts24
 	st.mu.Unlock()
 
 	type hit struct {
@@ -163,10 +202,8 @@ func (s *siteScanner) run(st *scanState, server net.IP) {
 	ips := make(chan net.IP)
 	hits := make(chan hit)
 	var wg sync.WaitGroup
-	for w := 0; w < 32; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 32 {
+		wg.Go(func() {
 			for ip := range ips {
 				if !ip.Equal(ip4) { // ourselves: Reality cannot point at itself
 					if names := s.probe(ctx, ip); names != nil {
@@ -174,13 +211,13 @@ func (s *siteScanner) run(st *scanState, server net.IP) {
 					}
 				}
 				st.mu.Lock()
-				st.Done++
+				st.result.Done++
 				st.mu.Unlock()
 			}
-		}()
+		})
 	}
 	go func() {
-		for i := 1; i < 255; i++ {
+		for i := 1; i <= hosts24; i++ {
 			ips <- net.IP{ip4[0], ip4[1], ip4[2], byte(i)}
 		}
 		close(ips)
@@ -196,31 +233,30 @@ func (s *siteScanner) run(st *scanState, server net.IP) {
 				continue
 			}
 			seen[n] = true
-			vw.Add(1)
 			sem <- struct{}{}
-			go func(n string, ip net.IP) {
-				defer vw.Done()
+			vw.Go(func() {
 				defer func() { <-sem }()
-				if c, ok := s.verify(ctx, n, ip, net24); ok {
+				if c, ok := s.verify(ctx, n, h.ip, net24); ok {
 					st.mu.Lock()
-					st.Found = append(st.Found, c)
-					slices.SortFunc(st.Found, rankSites)
+					st.result.Found = append(st.result.Found, c)
+					slices.SortFunc(st.result.Found, rank)
 					st.mu.Unlock()
 				}
-			}(n, h.ip)
+			})
 		}
 	}
 	vw.Wait()
 	st.mu.Lock()
-	st.Running = false
-	if len(st.Found) > 20 {
-		st.Found = st.Found[:20]
+	st.result.Running = false
+	if len(st.result.Found) > 20 {
+		st.result.Found = st.result.Found[:20]
 	}
 	st.mu.Unlock()
 }
 
-func rankSites(a, b siteCandidate) int {
-	score := func(c siteCandidate) int {
+// rank orders candidates best first: 200 answers, then same IP, then speed.
+func rank(a, b Candidate) int {
+	score := func(c Candidate) int {
 		s := 0
 		if c.Status == 200 {
 			s += 2
@@ -236,8 +272,8 @@ func rankSites(a, b siteCandidate) int {
 	return a.Ms - b.Ms
 }
 
-// serverIPv4 is the address whose /24 is searched: HYP_HOST, resolved if a domain.
-func serverIPv4(host string) (net.IP, error) {
+// ServerIPv4 is the address whose /24 is searched: HYP_HOST, resolved if a domain.
+func ServerIPv4(host string) (net.IP, error) {
 	if ip := net.ParseIP(host); ip != nil && ip.To4() != nil {
 		return ip.To4(), nil
 	}

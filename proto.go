@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 
@@ -75,9 +76,6 @@ func ids(ps []protocol) []string {
 	return s
 }
 
-// Protocols the server runs, in fallback order.
-func (e Endpoint) Protocols() []string { return ids(e.running()) }
-
 // UserProtocols are the server's protocols u may use, in fallback order.
 func (e Endpoint) UserProtocols(u User) []string { return ids(e.userProtos(u)) }
 
@@ -130,12 +128,5 @@ func (e Endpoint) MihomoFallback(u User) string {
     proxies: [%s]
     url: https://www.gstatic.com/generate_204
     interval: 120
-`, e.groupName(), strings.Join(names, ", "))
-}
-
-func (e Endpoint) groupName() string {
-	if e.Name == "" {
-		return "VPN"
-	}
-	return e.Name
+`, cmp.Or(e.Name, "VPN"), strings.Join(names, ", "))
 }

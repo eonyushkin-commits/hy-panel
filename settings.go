@@ -8,15 +8,14 @@ import (
 	"log"
 	"net"
 	"os"
-	"os/user"
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/eonyushkin-commits/hy-panel/internal/atomicfile"
+	"github.com/eonyushkin-commits/hy-panel/internal/hostname"
 	"github.com/eonyushkin-commits/hy-panel/internal/transaction"
 	"gopkg.in/yaml.v3"
 )
@@ -71,10 +70,8 @@ func (f *hyFlags) register(fs *flag.FlagSet) {
 
 func (f hyFlags) check() error {
 	var errs []error
-	if p := f.port; p != "" && p != hopRange {
-		if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 {
-			errs = append(errs, fmt.Errorf("-port %q: нужен порт 1–65535 или %s", p, hopRange))
-		}
+	if p := f.port; p != "" && p != hopRange && !validPortNumber(p) {
+		errs = append(errs, fmt.Errorf("-port %q: нужен порт 1–65535 или %s", p, hopRange))
 	}
 	if f.obfs != "" && !slices.Contains([]string{"salamander", "gecko", "none"}, f.obfs) {
 		errs = append(errs, fmt.Errorf("-obfs %q: salamander, gecko или none", f.obfs))
@@ -82,7 +79,7 @@ func (f hyFlags) check() error {
 	switch f.cert {
 	case "", "self":
 	case "acme":
-		if !validHostname(f.domain) || !strings.Contains(f.domain, ".") {
+		if !hostname.Domain(f.domain) {
 			errs = append(errs, fmt.Errorf("-domain %q: нужен домен", f.domain))
 		}
 		if f.email != "" && !emailRe.MatchString(f.email) {
@@ -208,7 +205,7 @@ func applyOpts(d *yamlDoc, cfg *hyConfig, curp *hyOpts, o hyOpts, cfgDir string)
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return err
 		}
-		uid, gid := hysteriaIDs()
+		uid, gid := userIDs("hysteria")
 		os.Chown(dir, uid, gid) // the only place hysteria may write
 		// Edit acme in place: keep the rest (DNS challenge, ca, …).
 		acme := d.get("acme")
@@ -305,19 +302,15 @@ func runSettings(args []string) {
 	ufwAllow(o.firewallRules()...)
 	step("enable "+svc, systemctl("enable", svc))
 	wasActive := systemctl("is-active", "--quiet", svc) == nil
+	cfgOpts := atomicfile.Options{Mode: 0640, PreserveOwner: true, FollowSymlink: true}
+	if cur == nil { // a config the panel did not write: Hysteria's own from now on
+		uid, gid := userIDs("hysteria")
+		cfgOpts.Owner = &atomicfile.Owner{UID: uid, GID: gid}
+	}
 	err = transaction.Run([]transaction.File{
-		{Path: cfgPath, Data: out, Options: atomicfile.Options{Mode: 0640, PreserveOwner: true, FollowSymlink: true}},
+		{Path: cfgPath, Data: out, Options: cfgOpts},
 		{Path: envPath, Data: renderEnv(env), Options: atomicfile.Options{Mode: 0600}},
 	}, func() error {
-		if cur == nil {
-			uid, gid := hysteriaIDs()
-			if err := os.Chown(cfgPath, uid, gid); err != nil {
-				return err
-			}
-			if err := os.Chmod(cfgPath, 0640); err != nil {
-				return err
-			}
-		}
 		if err := restartService(svc); err != nil {
 			return err
 		}
@@ -350,30 +343,6 @@ func hysteriaDir(dir string) error {
 	return nil
 }
 
-// writeHysteriaConfig writes the config; a config the panel creates (fresh)
-// is root:hysteria 0640, since it holds the obfs password and stats secret.
-func writeHysteriaConfig(path string, b []byte, fresh bool) error {
-	if err := writeKeepingOwner(path, b); err != nil {
-		return err
-	}
-	if fresh {
-		chownHysteria(path)
-		return os.Chmod(path, 0o640)
-	}
-	return nil
-}
-
-// hysteriaIDs returns the uid and gid of the hysteria user, 0 if absent.
-func hysteriaIDs() (int, int) {
-	u, err := user.Lookup("hysteria")
-	if err != nil {
-		return 0, 0
-	}
-	uid, _ := strconv.Atoi(u.Uid)
-	gid, _ := strconv.Atoi(u.Gid)
-	return uid, gid
-}
-
 func statsFor(cfg *hyConfig) *statsClient {
 	return newStatsClient(cfg.TrafficStats.Listen, cfg.TrafficStats.Secret)
 }
@@ -397,12 +366,7 @@ func waitHysteriaReady(cfg *hyConfig, acme bool) error {
 		if last == nil {
 			return nil
 		}
-		timer := time.NewTimer(500 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-		case <-timer.C:
-		}
+		sleepCtx(ctx, 500*time.Millisecond)
 	}
 	return fmt.Errorf("Hysteria не готова: %w", errors.Join(ctx.Err(), last))
 }

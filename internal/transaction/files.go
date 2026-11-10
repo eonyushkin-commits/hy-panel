@@ -17,9 +17,8 @@ type File struct {
 	Options atomicfile.Options
 }
 type previous struct {
-	data   []byte
-	info   os.FileInfo
-	exists bool
+	data []byte
+	info os.FileInfo // nil: the file did not exist
 }
 
 // Run validates snapshots before changing any file. recoverServices runs only
@@ -46,14 +45,14 @@ func Run(files []File, activate, recoverServices func() error) error {
 		if err != nil {
 			return err
 		}
-		old[i] = previous{data, info, true}
+		old[i] = previous{data, info}
 	}
 	rollback := func(last int, cause error, activated bool) error {
 		var failures []error
 		for i := last; i >= 0; i-- {
 			f, p := files[i], old[i]
 			var err error
-			if p.exists {
+			if p.info != nil {
 				err = atomicfile.Replace(f.Path, p.data, atomicfile.Options{Metadata: p.info, FollowSymlink: f.Options.FollowSymlink})
 			} else {
 				err = os.Remove(f.Path)

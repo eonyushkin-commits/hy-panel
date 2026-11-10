@@ -74,7 +74,7 @@ func serve() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 	var workers sync.WaitGroup
-	start := func(fn func()) { workers.Add(1); go func() { defer workers.Done(); fn() }() }
+	start := workers.Go
 	env := readEnv()
 	if len(env["HYP_PASSWORD"]) < 8 {
 		log.Fatal("HYP_PASSWORD (8+ chars) is not set — run hy-panel install")
@@ -137,7 +137,7 @@ func serve() {
 	}
 	var stats *statsClient
 	if hyOn {
-		stats = newStatsClient(cfg.TrafficStats.Listen, cfg.TrafficStats.Secret)
+		stats = statsFor(cfg)
 		o := currentOpts(cfg)
 		hyOpts = &o
 	}

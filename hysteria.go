@@ -6,13 +6,11 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -204,19 +202,19 @@ func kindErr(k cfgKind) error {
 	return nil
 }
 
-// rewriteHyConfig applies edit (may be nil) and points auth at the panel,
-// writing the file only if something changed: an untouched config stays
-// byte for byte. Returns the resulting config and whether it was written.
-func rewriteHyConfig(path string, orig []byte, fresh bool, edit func(*yamlDoc) error) (*hyConfig, bool) {
-	cfg, out, changed, err := prepareHyConfig(orig, edit)
+// rewriteHyConfig points auth at the panel (and its ACL up to date), writing
+// the file only if something changed: an untouched config stays byte for
+// byte. Reports whether it was written.
+func rewriteHyConfig(path string, orig []byte) bool {
+	_, out, changed, err := prepareHyConfig(orig, nil)
 	step("prepare "+path, err)
 	if changed {
 		if len(orig) > 0 {
 			step("backup → "+path+backupExt, backupOnce(path, orig))
 		}
-		step("hysteria config "+path, writeHysteriaConfig(path, out, fresh))
+		step("hysteria config "+path, writeKeepingOwner(path, out))
 	}
-	return cfg, changed
+	return changed
 }
 
 func prepareHyConfig(orig []byte, edit func(*yamlDoc) error) (*hyConfig, []byte, bool, error) {
@@ -233,15 +231,14 @@ func prepareHyConfig(orig []byte, edit func(*yamlDoc) error) (*hyConfig, []byte,
 	if err != nil {
 		return nil, nil, false, err
 	}
-	out := orig
-	if changed := edit != nil || c; changed {
-		out, err = d.bytes()
-		if err != nil {
+	out, changed := orig, edit != nil || c
+	if changed {
+		if out, err = d.bytes(); err != nil {
 			return nil, nil, false, err
 		}
 	}
 	cfg, err := parseHyConfig(out)
-	return cfg, out, edit != nil || c, err
+	return cfg, out, changed, err
 }
 
 // ---- editing the config as a YAML tree (comments and other keys stay) ----
@@ -347,8 +344,18 @@ func (d *yamlDoc) connectPanel() (bool, error) {
 	return changed || secured, err
 }
 
-// Prepend before any user allow rule. Hysteria resolves domains for IP-based ACLs.
-var loopbackRules = []string{"reject(127.0.0.0/8)", "reject(0.0.0.0/32)", "reject(::1/128)", "reject(::/128)"}
+// oldLoopbackRules is what earlier versions prepended: the server's loopback only.
+var oldLoopbackRules = []string{"reject(127.0.0.0/8)", "reject(0.0.0.0/32)", "reject(::1/128)", "reject(::/128)"}
+
+// loopbackRules keep clients out of the server's own and private networks:
+// loopback (the panel's /auth and the protocols' APIs), RFC 1918, CGNAT,
+// link-local (169.254.169.254 is the cloud metadata service) and their IPv6
+// counterparts, as geoip:private does for Xray. Prepended before any user
+// allow rule. Hysteria resolves domains for IP-based ACLs.
+var loopbackRules = slices.Concat(oldLoopbackRules, []string{
+	"reject(10.0.0.0/8)", "reject(100.64.0.0/10)", "reject(169.254.0.0/16)", "reject(172.16.0.0/12)", "reject(192.168.0.0/16)",
+	"reject(fc00::/7)", "reject(fe80::/10)",
+})
 
 func (d *yamlDoc) protectLoopback() (bool, error) {
 	acl := d.get("acl")
@@ -374,7 +381,9 @@ func (d *yamlDoc) protectLoopback() (bool, error) {
 		if err := backupOnce(path, b); err != nil {
 			return false, err
 		}
-		return true, writeKeepingOwner(path, append([]byte(prefix), b...))
+		// An earlier version's shorter list is replaced, not repeated.
+		rest := strings.TrimPrefix(string(b), strings.Join(oldLoopbackRules, "\n")+"\n")
+		return true, writeKeepingOwner(path, []byte(prefix+rest))
 	}
 	var rules []string
 	if inline := mapGet(acl, "inline"); inline != nil {
@@ -382,8 +391,12 @@ func (d *yamlDoc) protectLoopback() (bool, error) {
 			return false, err
 		}
 	}
-	if len(rules) >= len(loopbackRules) && slices.Equal(rules[:len(loopbackRules)], loopbackRules) {
+	hasPrefix := func(p []string) bool { return len(rules) >= len(p) && slices.Equal(rules[:len(p)], p) }
+	if hasPrefix(loopbackRules) {
 		return false, nil
+	}
+	if hasPrefix(oldLoopbackRules) { // an earlier version's shorter list is replaced, not repeated
+		rules = rules[len(oldLoopbackRules):]
 	}
 	return true, mapSet(acl, "inline", slices.Concat(loopbackRules, rules))
 }
@@ -402,7 +415,7 @@ func writeKeepingOwner(path string, b []byte) error {
 
 // chownHysteria makes a file root-owned and readable by Hysteria's group.
 func chownHysteria(path string) {
-	if _, gid := hysteriaIDs(); gid != 0 {
+	if _, gid := userIDs("hysteria"); gid != 0 {
 		os.Chown(path, 0, gid)
 	}
 }
@@ -440,7 +453,7 @@ func readCert(path string) (certInfo, error) {
 	ci.SelfSigned = bytes.Equal(cert.RawIssuer, cert.RawSubject) &&
 		cert.CheckSignature(cert.SignatureAlgorithm, cert.RawTBSCertificate, cert.Signature) == nil
 	if ci.SelfSigned {
-		ci.Pin = certFP(cert.Raw)
+		ci.Pin = sha256hex(cert.Raw) // the pin clients check
 	}
 	return ci, nil
 }
@@ -448,12 +461,6 @@ func readCert(path string) (certInfo, error) {
 func keyPairOK(crt, key string) bool {
 	_, err := tls.LoadX509KeyPair(crt, key)
 	return err == nil
-}
-
-// certFP is the hex sha256 of a DER certificate: the pin clients check.
-func certFP(der []byte) string {
-	sum := sha256.Sum256(der)
-	return hex.EncodeToString(sum[:])
 }
 
 // panelCert loads the panel's own self-signed certificate from dir, creating it
@@ -470,7 +477,7 @@ func panelCert(dir, host string) (tls.Certificate, string, error) {
 	if err != nil {
 		return c, "", err
 	}
-	return c, certFP(c.Certificate[0]), nil
+	return c, sha256hex(c.Certificate[0]), nil
 }
 
 func newSelfSigned(crtPath, keyPath, host string) error {

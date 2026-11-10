@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // CommitError means the replacement is visible but its directory could not be
@@ -19,8 +20,12 @@ func (e *CommitError) Error() string {
 func (e *CommitError) Unwrap() error { return e.Err }
 func Committed(err error) bool       { var e *CommitError; return errors.As(err, &e) }
 
+// Owner is a file's owner and group, by numeric ID.
+type Owner struct{ UID, GID int }
+
 type Options struct {
 	Mode          os.FileMode
+	Owner         *Owner // set this owner, with Mode as given; overrides PreserveOwner
 	PreserveOwner bool
 	FollowSymlink bool
 	Metadata      os.FileInfo // restore an earlier owner/mode instead of the current one
@@ -63,7 +68,13 @@ func Replace(path string, data []byte, opts Options) error {
 	if opts.Metadata != nil {
 		info = opts.Metadata
 	}
-	if (opts.PreserveOwner || opts.Metadata != nil) && info != nil {
+	switch {
+	case opts.Metadata == nil && opts.Owner != nil:
+		if err = f.Chown(opts.Owner.UID, opts.Owner.GID); err != nil && runtime.GOOS != "windows" {
+			f.Close()
+			return err
+		}
+	case (opts.PreserveOwner || opts.Metadata != nil) && info != nil:
 		mode = info.Mode().Perm()
 		if err = preserveOwner(f, info); err != nil {
 			f.Close()
@@ -89,6 +100,22 @@ func Replace(path string, data []byte, opts Options) error {
 		return &CommitError{err}
 	}
 	return nil
+}
+
+// CreateOnce writes a new file and syncs it; an existing file is left as it
+// is (nil error). For originals and backups that must never be overwritten.
+func CreateOnce(path string, data []byte, mode os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if errors.Is(err, os.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err = WriteAndClose(f, data); err != nil {
+		os.Remove(path)
+	}
+	return err
 }
 
 func WriteAndClose(f *os.File, data []byte) error {

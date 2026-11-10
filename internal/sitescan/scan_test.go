@@ -1,4 +1,4 @@
-package main
+package sitescan
 
 import (
 	"context"
@@ -74,15 +74,15 @@ func TestSiteScan(t *testing.T) {
 	serve("127.0.0.14", "cdn.test", 0, true, 200) // its DNS points away: not a neighbour
 	dns["cdn.test"] = []net.IP{net.ParseIP("203.0.113.9")}
 
-	s := &siteScanner{port: port, roots: roots, timeout: 2 * time.Second, resolve: func(_ context.Context, h string) ([]net.IP, error) {
+	s := &scanner{port: port, roots: roots, timeout: 2 * time.Second, resolve: func(_ context.Context, h string) ([]net.IP, error) {
 		if ips, ok := dns[h]; ok {
 			return ips, nil
 		}
 		return nil, fmt.Errorf("no such host %s", h)
 	}}
-	st := &scanState{scanResult: scanResult{Running: true}}
+	st := &State{result: Result{Running: true}}
 	s.run(st, net.ParseIP("127.0.0.1"))
-	got := st.snapshot()
+	got := st.Snapshot()
 	if got.Running || got.Done != 254 || got.Net != "127.0.0.0/24" {
 		t.Fatalf("%+v", got)
 	}

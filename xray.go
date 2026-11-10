@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/eonyushkin-commits/hy-panel/internal/model"
+	"github.com/eonyushkin-commits/hy-panel/internal/sitescan"
 )
 
 const (
@@ -100,7 +101,13 @@ func (p *jsonPort) UnmarshalJSON(b []byte) error {
 }
 
 func (in *xrayInbound) isVless() bool {
-	return strings.EqualFold(in.Protocol, "vless") && strings.EqualFold(in.StreamSettings.Security, "reality")
+	return isVlessReality(in.Protocol, in.StreamSettings.Security)
+}
+
+// isVlessReality is the inbound the panel manages; Xray matches keys and
+// these values case-insensitively. The config reader and editor both use it.
+func isVlessReality(protocol, security string) bool {
+	return strings.EqualFold(protocol, "vless") && strings.EqualFold(security, "reality")
 }
 
 // vlessInbound returns the VLESS + Reality inbound the panel manages: the first one.
@@ -194,7 +201,7 @@ func vlessLink(in *xrayInbound) (Vless, error) {
 	ss := &in.StreamSettings
 	r := &ss.Reality
 	v := Vless{Port: string(in.Port)}
-	if n, err := strconv.Atoi(v.Port); err != nil || n < 1 || n > 65535 {
+	if !validPortNumber(v.Port) {
 		return v, fmt.Errorf("port %q: нужен один порт", in.Port)
 	}
 	if d := in.Settings.Decryption; d != "none" {
@@ -351,12 +358,9 @@ func newUUID() string {
 // for the name, or active probes see something no real site shows.
 func checkTarget(target, sni string) error {
 	d := &net.Dialer{Timeout: 10 * time.Second}
-	c, err := tls.DialWithDialer(d, "tcp", target, &tls.Config{
-		ServerName:       sni,
-		MinVersion:       tls.VersionTLS13,
-		CurvePreferences: []tls.CurveID{tls.X25519},
-		NextProtos:       []string{"h2"},
-	})
+	cfg := sitescan.BrowserTLS() // the same handshake the site search accepts
+	cfg.ServerName = sni
+	c, err := tls.DialWithDialer(d, "tcp", target, cfg)
 	if err != nil {
 		return err
 	}

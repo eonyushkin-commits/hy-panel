@@ -161,8 +161,7 @@ func download(base, name string, sum func(name string) (string, error)) ([]byte,
 	if err != nil {
 		return nil, err
 	}
-	got := sha256.Sum256(b)
-	if hex.EncodeToString(got[:]) != strings.ToLower(want) {
+	if sha256hex(b) != strings.ToLower(want) {
 		return nil, fmt.Errorf("%s: SHA-256 не совпал с опубликованным", name)
 	}
 	fmt.Println("✓ SHA-256 " + name)
@@ -206,7 +205,8 @@ func fetchHysteria() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	want, err := hashesTxt(sums)(name)
+	sum := hashesTxt(sums)
+	want, err := sum(name)
 	if err != nil {
 		return false, err
 	}
@@ -214,7 +214,7 @@ func fetchHysteria() (bool, error) {
 	if cur, err := os.ReadFile(hysteriaBin); err == nil && sha256hex(cur) == strings.ToLower(want) {
 		changed = false
 	} else {
-		bin, err := download(hysteriaURL, name, hashesTxt(sums))
+		bin, err := download(hysteriaURL, name, sum)
 		if err != nil {
 			return false, err
 		}
@@ -222,12 +222,14 @@ func fetchHysteria() (bool, error) {
 			return false, err
 		}
 	}
-	if err := systemUser("hysteria", "/var/lib/hysteria", true); err != nil {
+	if err := systemUser("hysteria", "/var/lib/hysteria"); err != nil {
 		return false, err
 	}
 	return changed, installUnit(hysteriaUnitPath, hysteriaUnit)
 }
 
+// sha256hex is the lowercase hex SHA-256 of b: release checksums and the
+// certificate pins clients check.
 func sha256hex(b []byte) string {
 	s := sha256.Sum256(b)
 	return hex.EncodeToString(s[:])
@@ -263,7 +265,7 @@ func fetchXray() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if err := systemUser("xray", "", false); err != nil {
+	if err := systemUser("xray", ""); err != nil {
 		return false, err
 	}
 	if err := os.MkdirAll(xrayDatDir, 0o755); err != nil {
@@ -335,8 +337,10 @@ func installUnit(path, unit string) error {
 	return systemctl("daemon-reload")
 }
 
-// systemUser creates a system account without login, if missing.
-func systemUser(name, home string, mkHome bool) error {
+// systemUser creates a system account without login, if missing; with a
+// home ("" for none) that is created too, and recreated if it went missing.
+func systemUser(name, home string) error {
+	mkHome := home != ""
 	if _, err := user.Lookup(name); err == nil {
 		if mkHome {
 			uid, gid := userIDs(name)

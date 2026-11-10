@@ -102,10 +102,10 @@ func TestSystemdLifecycle(t *testing.T) {
 		}
 		write(pair[1], b, 0755)
 	}
-	if err := systemUser("hysteria", "/var/lib/hysteria", true); err != nil {
+	if err := systemUser("hysteria", "/var/lib/hysteria"); err != nil {
 		t.Fatal(err)
 	}
-	if err := systemUser("xray", "", false); err != nil {
+	if err := systemUser("xray", ""); err != nil {
 		t.Fatal(err)
 	}
 	write(hysteriaUnitPath, []byte(hysteriaUnit), 0644)

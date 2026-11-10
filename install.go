@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	_ "embed"
 	"errors"
@@ -18,6 +19,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/eonyushkin-commits/hy-panel/internal/atomicfile"
+	"github.com/eonyushkin-commits/hy-panel/internal/hostname"
 )
 
 //go:embed hy-panel.service
@@ -89,7 +93,7 @@ func runInstall(args []string) {
 	// The running panel owns users.json. Only the new serve process migrates it,
 	// after systemd has stopped its predecessor and completed its final flush.
 	step("data directory "+dataDir, os.MkdirAll(dataDir, 0700))
-	step("user "+panelUser, systemUser(panelUser, "", false))
+	step("user "+panelUser, systemUser(panelUser, ""))
 	step("systemd unit → "+unitPath, os.WriteFile(unitPath, []byte(unitFile), 0o644))
 	step("systemd unit → "+agentUnitPath, os.WriteFile(agentUnitPath, []byte(agentUnit), 0o644))
 	if port := env["HYP_UI_PORT"]; port != "off" {
@@ -104,8 +108,7 @@ func runInstall(args []string) {
 	cfgPath, svc := hyPaths(env)
 	b, readErr := os.ReadFile(cfgPath)
 	if _, kind := classify(b, readErr); kind == cfgPanel {
-		_, changed := rewriteHyConfig(cfgPath, b, false, nil)
-		if changed {
+		if rewriteHyConfig(cfgPath, b) {
 			step("apply Hysteria ACL", systemctl("try-restart", svc))
 		}
 	}
@@ -167,11 +170,7 @@ func runUninstall(args []string) {
 // already gone are fine, so a repeated uninstall succeeds.
 func removePanel() error {
 	var errs []error
-	if fileExists(unitPath) {
-		errs = append(errs, systemctl("disable", "--now", "hy-panel"))
-	}
-	// Stop the panel helper.
-	for _, u := range []string{agentUnitPath} {
+	for _, u := range []string{unitPath, agentUnitPath} {
 		if fileExists(u) {
 			errs = append(errs, systemctl("disable", "--now", strings.TrimSuffix(filepath.Base(u), ".service")))
 		}
@@ -214,13 +213,25 @@ var envKeys = []string{"HYP_PASSWORD", "HYP_UI_PATH", "HYP_UI_PORT", "HYP_HOST",
 	"HYP_SUB_LISTEN", "HYP_SUB_URL", "HYP_XRAY_CONFIG", "HYP_XRAY_SERVICE"}
 
 func readEnv() map[string]string {
-	env := map[string]string{}
 	b, err := os.ReadFile(envPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		// Never take an unreadable file for "not installed": install would
 		// then replace the panel password and URL.
 		log.Fatalf("✗ %v", err)
 	}
+	return parseEnv(b)
+}
+
+// readEnvNoFatal is readEnv for the long-running agent: an unreadable file
+// means defaults here, not an exit.
+func readEnvNoFatal() map[string]string {
+	b, _ := os.ReadFile(envPath)
+	return parseEnv(b)
+}
+
+// parseEnv reads KEY=VALUE lines; # starts a comment line.
+func parseEnv(b []byte) map[string]string {
+	env := map[string]string{}
 	for _, l := range strings.Split(string(b), "\n") {
 		if k, v, ok := strings.Cut(strings.TrimSpace(l), "="); ok && !strings.HasPrefix(k, "#") {
 			env[k] = v
@@ -246,12 +257,10 @@ func renderEnv(env map[string]string) []byte {
 func checkEnv(env map[string]string) error {
 	var errs []error
 	bad := func(k, why string) { errs = append(errs, fmt.Errorf("%s=%q: %s", k, env[k], why)) }
-	if p := env["HYP_UI_PORT"]; p != "" && p != "off" {
-		if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 {
-			bad("HYP_UI_PORT", "нужен порт 1–65535 или off")
-		}
+	if p := env["HYP_UI_PORT"]; p != "" && p != "off" && !validPortNumber(p) {
+		bad("HYP_UI_PORT", "нужен порт 1–65535 или off")
 	}
-	if h := env["HYP_HOST"]; h != "" && net.ParseIP(strings.Trim(h, "[]")) == nil && !validHostname(h) {
+	if h := env["HYP_HOST"]; h != "" && net.ParseIP(strings.Trim(h, "[]")) == nil && !hostname.Valid(h) {
 		bad("HYP_HOST", "нужен IP или домен")
 	}
 	if p := env["HYP_UI_PATH"]; p != "" && (!strings.HasPrefix(p, "/") || strings.ContainsAny(p, " ?#%")) {
@@ -276,23 +285,6 @@ func checkEnv(env map[string]string) error {
 	return nil
 }
 
-func validHostname(h string) bool {
-	if len(h) > 253 || h == "" {
-		return false
-	}
-	for _, l := range strings.Split(h, ".") {
-		if l == "" || len(l) > 63 || l[0] == '-' || l[len(l)-1] == '-' {
-			return false
-		}
-		for _, c := range l {
-			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
-				return false
-			}
-		}
-	}
-	return true
-}
-
 // noInterrupt keeps Ctrl+C or a dropped SSH session from stopping a command
 // between writing the config and restarting the services.
 func noInterrupt() { signal.Ignore(os.Interrupt, syscall.SIGHUP) }
@@ -305,14 +297,7 @@ func installed(env map[string]string) bool {
 
 // hyPaths returns the Hysteria config path and service name.
 func hyPaths(env map[string]string) (cfg, svc string) {
-	return envOr(env, "HYP_HY_CONFIG", defaultCfg), envOr(env, "HYP_HY_SERVICE", defaultSvc)
-}
-
-func envOr(env map[string]string, key, def string) string {
-	if v := env[key]; v != "" {
-		return v
-	}
-	return def
+	return cmp.Or(env["HYP_HY_CONFIG"], defaultCfg), cmp.Or(env["HYP_HY_SERVICE"], defaultSvc)
 }
 
 // ---- system helpers ----
@@ -407,10 +392,13 @@ func publicIP() string {
 
 // backupOnce keeps the original of path: later runs don't overwrite it.
 func backupOnce(path string, b []byte) error {
-	if fileExists(path + backupExt) {
-		return nil
-	}
-	return os.WriteFile(path+backupExt, b, 0o600)
+	return atomicfile.CreateOnce(path+backupExt, b, 0o600)
+}
+
+// validPortNumber reports whether s is a single TCP/UDP port, 1–65535.
+func validPortNumber(s string) bool {
+	n, err := strconv.Atoi(s)
+	return err == nil && n >= 1 && n <= 65535
 }
 
 // ufwAllow opens the rules when ufw is active.
