@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-10T20:57:41.6166303Z",
+  "title": "Design System: hy-panel",
+  "extensions": {
+    "colorMeta": {
+      "acc": {
+        "role": "primary",
+        "displayName": "Warm Focus Orange"
+      },
+      "dark-acc": {
+        "role": "primary",
+        "displayName": "Soft Focus Orange"
+      },
+      "bg": {
+        "role": "neutral",
+        "displayName": "Near White"
+      },
+      "dark-bg": {
+        "role": "neutral",
+        "displayName": "Near Black"
+      }
+    },
+    "typographyMeta": {
+      "body": {
+        "displayName": "System Sans",
+        "purpose": "Panel operation and readable data."
+      },
+      "metric": {
+        "displayName": "Tabular Metric",
+        "purpose": "Overview counts and traffic."
+      },
+      "mono": {
+        "displayName": "System Monospace",
+        "purpose": "Wordmark, host, metrics, protocol details, traffic, configuration and logs."
+      }
+    },
+    "shadows": [
+      {
+        "name": "shadow",
+        "value": "none",
+        "purpose": "Flat cards and selected segments."
+      },
+      {
+        "name": "shadow-lg-light",
+        "value": "0 24px 80px -16px #171b2340",
+        "purpose": "Light-theme dialogs, tooltips and toasts."
+      },
+      {
+        "name": "shadow-lg-dark",
+        "value": "0 24px 80px -16px #000a",
+        "purpose": "Dark-theme dialogs, tooltips and toasts."
+      },
+      {
+        "name": "switch-knob",
+        "value": "0 1px 2px #0004",
+        "purpose": "Switch knob separation."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(.23,1,.32,1)",
+        "purpose": "Dialog and toast entry/exit and button press."
+      },
+      {
+        "name": "dialog",
+        "value": "200ms",
+        "purpose": "Opacity, scale and discrete dialog/backdrop transitions."
+      },
+      {
+        "name": "control",
+        "value": "150ms",
+        "purpose": "Button colors and field borders."
+      },
+      {
+        "name": "press",
+        "value": "160ms",
+        "purpose": "Button active scale to .97."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "none",
+        "purpose": "Disable all animations and transitions when requested; lists have no choreography."
+      }
+    ],
+    "breakpoints": [
+      {
+        "value": "900px",
+        "name": "narrow-data-columns"
+      },
+      {
+        "value": "760px",
+        "name": "protocol-stack"
+      },
+      {
+        "value": "640px",
+        "name": "mobile"
+      },
+      {
+        "value": "480px",
+        "name": "form-stack"
+      },
+      {
+        "value": "360px",
+        "name": "compact"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Primary task action with visible keyboard focus.",
+      "html": "<button class=\"pri\">Сохранить</button>",
+      "css": ".pri{font:14px/1.5 ui-sans-serif,system-ui,sans-serif;background:var(--fg);color:var(--bg);border:1px solid transparent;border-radius:var(--r-sm);padding:8px 13px;min-height:38px;font-weight:550;cursor:pointer;transition:background .15s,transform .16s var(--ease-out)}.pri:hover{opacity:.88}.pri:focus-visible{outline:2px solid var(--acc);outline-offset:3px}.pri:active:not(:disabled){transform:scale(.97)}.pri:disabled{opacity:.55;cursor:wait}@media(prefers-reduced-motion:reduce){.pri{transition:none}}"
+    },
+    {
+      "name": "Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Standard field with hover and keyboard focus.",
+      "html": "<input class=\"field\" aria-label=\"Заметка\" placeholder=\"Заметка\">",
+      "css": ".field{font:14px/1.5 ui-sans-serif,system-ui,sans-serif;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:8px 10px;width:100%;caret-color:var(--acc);transition:border-color .15s}.field:hover{border-color:var(--mute)}.field:focus-visible{outline:2px solid var(--acc);outline-offset:3px}.field:disabled{opacity:.55;cursor:wait}@media(prefers-reduced-motion:reduce){.field{transition:none}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Minimal and neat",
+    "overview": "A compact VPN operator workspace with grayscale hierarchy, open rows and selective system monospace. Branding is a text wordmark with no default globe. One embedded HTML file uses system fonts and functional inline SVGs, with no external assets or frontend build.",
+    "keyCharacteristics": [
+      "Flat dividers",
+      "Monochrome primary actions",
+      "Aligned identity, traffic and actions",
+      "Selective monospace",
+      "Explicit operational states",
+      "Light and dark themes"
+    ],
+    "rules": [
+      {
+        "body": "Pair state colors with text. Warm orange marks focus, selection, carets and help affordances.",
+        "section": "colors",
+        "name": "Semantic state"
+      },
+      {
+        "body": "Whitespace and dividers separate overview, protocols and user rows. Elevation is reserved for overlays.",
+        "section": "elevation",
+        "name": "Flat hierarchy"
+      }
+    ],
+    "dos": [
+      "Do preserve state wording, focus, mobile wrapping and both themes.",
+      "Do keep monochrome actions, aligned traffic and selective monospace."
+    ],
+    "donts": [
+      "Don't restore the default globe or metric icons.",
+      "Don't use orange as broad button or progress fill.",
+      "Don't add decorative list choreography or external fonts and assets."
+    ]
+  }
+}
