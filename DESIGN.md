@@ -37,7 +37,7 @@ colors:
   backdrop: "#090d0ba8"
 typography:
   headline:
-    fontSize: "26px"
+    fontSize: "22px"
     fontWeight: 550
     lineHeight: 1.2
     letterSpacing: "-.035em"
@@ -53,7 +53,7 @@ typography:
     fontSize: "12.5px"
   metric:
     fontFamily: 'ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace'
-    fontSize: "32px"
+    fontSize: "26px"
     fontWeight: 500
     lineHeight: 1.2
     letterSpacing: "-.04em"
@@ -113,17 +113,17 @@ Unprefixed frontmatter tokens describe light mode; `dark-*` records dark values.
 
 ## Typography
 
-System sans remains the operating UI: body 14px/1.5, overview 26px at weight 550, user section 16px at weight 600 and secondary labels 11–12.5px. The actual `--mono` stack supplies the wordmark (18px, weight 500), host (12px), tabular metrics (32px, weight 500), protocol details/ports (11px), traffic (13px with 11px detail), configuration and logs (12px). The login wordmark is 22px. Metrics use -.04em tracking.
+System sans remains the operating UI: body 14px/1.5, overview 22px at weight 550, user section 16px at weight 600 and secondary labels 11–12.5px. The actual `--mono` stack supplies the wordmark (18px, weight 500), host (12px), tabular metrics (26px, weight 500), protocol details/ports (11px), traffic (13px with 11px detail), configuration and logs (12px). The login wordmark is 22px. Metrics use -.04em tracking.
 
-At 640px overview becomes 23px, wordmark 16px, host 10px and metrics 22px. At 360px metrics become 17px and overview 22px. Use monospace for identifiers and quantitative content while retaining sans for labels and actions.
+At 640px wordmark becomes 16px, host 10px and metrics 22px. At 360px metrics become 17px. Use monospace for identifiers and quantitative content while retaining sans for labels and actions. Compactness comes primarily from spacing, not shrinking body text or controls.
 
 ## Layout
 
-`main` is centered with a 1120px maximum width, 32px horizontal padding and 64px bottom padding. Header minimum height is 88px with a bottom divider. Statistics are three unboxed columns with internal dividers and a shared bottom rule; they have no metric icons. Protocols are two flat columns with no gap, a dividing rule and top/bottom borders; they stack at 760px.
+`main` is centered with a 1120px maximum width, 32px horizontal and bottom padding. Header minimum height is 60px with a bottom divider and 24px bottom margin. The overview has one heading and its primary action, without a supporting description. Statistics are three unboxed columns with internal dividers and a shared bottom rule; they have no metric icons, 6px between labels and numbers and 16px bottom padding. Protocols are two flat columns with no gap, a dividing rule, top/bottom borders and 12px vertical padding; they stack at 760px.
 
-Desktop user rows and header use `minmax(0,1fr) 220px 198px` columns for identity, traffic and actions, with 24px gaps. At 900px traffic/actions become 180px with 16px gaps. Rows use horizontal dividers rather than separate cards. Search sits to the right of underline filters on desktop.
+Desktop user rows and header use `minmax(0,1fr) 220px 198px` columns for identity, traffic and actions, with 24px gaps. At 900px traffic/actions become 180px with 16px gaps. Rows use horizontal dividers rather than separate cards, with 12px vertical padding and 8px for column headings. Search sits to the right of underline filters on desktop; the toolbar uses 12px vertical padding. Separate the user section from protocols by 24px. A representative three-user list fits a 900px-high desktop viewport without scrolling; longer lists and alerts grow naturally.
 
-At 640px gutters become 20px, bottom padding 40px and header minimum height 80px. Search precedes full-width filters. User rows stack identity, traffic and actions; traffic/actions indent 46px under text and controls receive larger touch targets. At 360px gutters become 16px and actions lose the indent. Dialog forms use two columns with a 12px gap, becoming one at 480px. Normal dialogs are at most 480px wide, sharing at most 640px, both retaining 12px viewport side margins. Long identifiers and configuration wrap.
+At 640px gutters become 20px, bottom padding 24px and header minimum height 64px. Search precedes full-width filters. User rows stack identity, traffic and actions, with 14px vertical padding and 8px internal gaps; traffic/actions indent 46px under text and controls retain 44px-high touch areas. At 360px gutters become 16px and actions lose the indent. Dialog forms use two columns with a 12px gap, becoming one at 480px. Normal dialogs are at most 480px wide, sharing at most 640px, both retaining 12px viewport side margins. Long identifiers and configuration wrap.
 
 ## Elevation & Depth
 
