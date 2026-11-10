@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-10T20:57:41.6166303Z",
+  "generatedAt": "2026-11-10T21:07:48.102Z",
   "title": "Design System: hy-panel",
   "extensions": {
     "colorMeta": {
@@ -146,6 +146,11 @@
         "body": "Whitespace and dividers separate overview, protocols and user rows. Elevation is reserved for overlays.",
         "section": "elevation",
         "name": "Flat hierarchy"
+      },
+      {
+        "name": "Compact spacing",
+        "section": "layout",
+        "body": "Use a 60px desktop header, 24px section separation, 12px protocol/user-row vertical padding and an 8px column-header padding. Keep body text and controls readable; mobile actions retain 44px-high touch areas. Long lists and alerts grow naturally."
       }
     ],
     "dos": [
