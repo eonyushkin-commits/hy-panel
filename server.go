@@ -50,11 +50,12 @@ type App struct {
 	loginLimiter adminauth.Limiter
 	poke         chan struct{}
 
-	mu        sync.RWMutex
-	live      map[string]*live // per protocol: who is online, sync errors
-	targetErr string
-	revoked   map[string]revocation // password changed: drop old sessions
-	listenErr map[string]string     // public listener → why it does not run
+	mu         sync.RWMutex
+	live       map[string]*live // per protocol: who is online, sync errors
+	targetErr  string
+	targetErrs map[string]string
+	revoked    map[string]revocation // password changed: drop old sessions
+	listenErr  map[string]string     // public listener → why it does not run
 
 	kicked map[string]int // syncLoop only: pending kick -> online count when sent
 }
@@ -73,10 +74,14 @@ func newApp(store *Store, stats *statsClient, ep Endpoint, password string, key 
 }
 
 func server(addr string, h http.Handler) *http.Server {
+	return serverWithLimit(addr, h, 64<<10)
+}
+
+func serverWithLimit(addr string, h http.Handler, limit int64) *http.Server {
 	return &http.Server{
 		Addr: addr,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
 			h.ServeHTTP(w, r)
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -426,6 +431,7 @@ func (p userPatch) apply(u *User, now time.Time) {
 		u.Password = randStr(20)
 		u.SubToken = randStr(24)
 		u.UUID = newUUID()
+		u.AWGKey = model.NewAWGKey()
 	}
 }
 
@@ -526,6 +532,9 @@ func (a *App) handleQR(w http.ResponseWriter, r *http.Request) {
 	text := ps[0].Link(a.ep, u)
 	if p := r.URL.Query().Get("proto"); p != "" {
 		text = a.ep.Link(p, u)
+		if p == protoAWG {
+			text = a.ep.AWGConf(u)
+		}
 	}
 	if r.URL.Query().Has("sub") && a.subBase != "" {
 		text = a.subBase + "/sub/" + u.SubToken
@@ -667,7 +676,17 @@ func (a *App) handleSystem(w http.ResponseWriter, r *http.Request) {
 	if v := a.ep.Vless; v != nil {
 		settings[protoVless] = map[string]any{"port": v.Port, "sni": v.SNI, "network": v.Network}
 	}
-	writeJSON(w, map[string]any{"status": st, "settings": settings, "agentError": agentErr, "host": a.ep.Host})
+	if v := a.ep.VlessTCP; v != nil {
+		settings[protoVlessTCP] = map[string]any{"port": v.Port, "sni": v.SNI, "network": v.Network}
+	}
+	if c := a.ep.AWG; c != nil {
+		settings[protoAWG] = c.publicSettings()
+	}
+	defaults := map[string]any{}
+	if a.ep.AWG == nil {
+		defaults[protoAWG] = freshAWG().publicSettings()
+	}
+	writeJSON(w, map[string]any{"status": st, "settings": settings, "defaults": defaults, "agentError": agentErr, "host": a.ep.Host})
 }
 
 // handleJobStart and handleJob pass the request to the agent, which checks
@@ -777,7 +796,9 @@ func (a *App) routes(withAuth bool) http.Handler {
 	mux.HandleFunc("DELETE /api/users/{name}", a.guard(a.handleDelete))
 	mux.HandleFunc("GET /api/users/{name}/qr.png", a.guard(a.handleQR))
 	mux.HandleFunc("GET /api/users/{name}/mihomo", a.guard(a.handleMihomo))
+	mux.HandleFunc("GET /api/users/{name}/awg.conf", a.guard(a.handleAWGConf))
 	mux.HandleFunc("GET /api/system", a.guard(a.handleSystem))
+	mux.HandleFunc("GET /api/system/awg-preset", a.guard(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, freshAWG().awgObfuscation) }))
 	mux.HandleFunc("POST /api/system/jobs", a.guard(a.handleJobStart))
 	mux.HandleFunc("GET /api/system/job", a.guard(a.handleJob))
 	mux.HandleFunc("POST /api/system/releases", a.guard(a.handleReleases))

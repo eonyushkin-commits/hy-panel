@@ -8,7 +8,8 @@ web
 
 ## Product Purpose
 
-Manage Hysteria 2 and VLESS/Reality VPN access from a compact browser interface.
+Manage Hysteria 2, independent VLESS/Reality XHTTP and TCP/Vision profiles,
+and kernel AmneziaWG 3.1 VPN access from a compact browser interface.
 Product facts below come from README.md and the existing implementation; the
 administrator audience is inferred from the available operations.
 

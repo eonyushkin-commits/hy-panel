@@ -12,8 +12,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/eonyushkin-commits/hy-panel/internal/hostname"
@@ -40,6 +42,7 @@ After=network-online.target
 
 [Service]
 ExecStart=/usr/local/bin/hy-panel agent
+ExecStopPost=/usr/local/bin/hy-panel awg-down
 RuntimeDirectory=hy-panel
 RuntimeDirectoryMode=0755
 StateDirectory=hy-panel-agent
@@ -132,8 +135,11 @@ func jobArgs(action string, p map[string]string) ([]string, error) {
 			}
 		}
 		return args, nil
-	case "vless":
+	case "vless", "vless-tcp":
 		args := []string{"xray"}
+		if action == protoVlessTCP {
+			args = append(args, "-network", "tcp")
+		}
 		if port := p["port"]; port != "" {
 			if !validPortNumber(port) {
 				return nil, fmt.Errorf("порт %q: нужен 1–65535", port)
@@ -145,6 +151,19 @@ func jobArgs(action string, p map[string]string) ([]string, error) {
 			return nil, fmt.Errorf("сайт для маскировки %q: нужен домен", t)
 		}
 		return append(args, "-target", t), nil
+	case "awg":
+		if p["port"] == "" {
+			return nil, errors.New("AWG: укажи порт UDP")
+		}
+		c, err := awgRequestFlags(p)
+		if err != nil {
+			return nil, err
+		}
+		args := []string{"awg", "-port", c.Port, "-subnet", c.Subnet, "-dns", c.DNS, "-mtu", fmt.Sprint(c.MTU)}
+		if p["obfuscation"] != "" {
+			args = append(args, "-obfuscation-stdin")
+		}
+		return args, nil
 	case "update-hysteria", "update-xray":
 		return []string{"fetch", strings.TrimPrefix(action, "update-")}, nil
 	}
@@ -183,6 +202,12 @@ func runAgent() {
 		log.Fatal(err)
 	}
 	mux := http.NewServeMux()
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	awg := &awgRuntime{}
+	awg.routes(mux)
+	done := make(chan struct{})
+	go func() { defer close(done); awg.watch(ctx) }()
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, systemStatus(rel)) })
 	mux.HandleFunc("POST /releases", func(w http.ResponseWriter, r *http.Request) {
 		rel.check()
@@ -191,7 +216,14 @@ func runAgent() {
 	mux.HandleFunc("GET /job", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, a.current()) })
 	mux.HandleFunc("POST /jobs", a.handleStart)
 	log.Printf("hy-panel agent on %s", agentSock)
-	log.Fatal(server("", mux).Serve(l))
+	srv := serverWithLimit("", mux, 16<<20)
+	go func() { <-ctx.Done(); srv.Close() }()
+	err = srv.Serve(l)
+	cancel()
+	<-done
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Print(err)
+	}
 }
 
 func (a *agent) current() job {
@@ -232,17 +264,24 @@ func (a *agent) handleStart(w http.ResponseWriter, r *http.Request) {
 	a.job = j
 	a.log.Reset()
 	a.mu.Unlock()
-	log.Printf("job %s: %s %s", req.Action, a.bin, strings.Join(args, " "))
-	go a.run(args)
+	log.Printf("job %s: %s", req.Action, a.bin)
+	go a.run(args, req.Params["obfuscation"])
 	writeJSON(w, j)
 }
 
-func (a *agent) run(args []string) {
+func (a *agent) run(args []string, input ...string) {
 	// A job that hangs (a download that never ends) must not hold the agent forever.
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	deadline := 15 * time.Minute
+	if len(args) > 0 && args[0] == "awg" {
+		deadline = 45 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, a.bin, args...)
 	cmd.Stdin = nil // no terminal: no questions
+	if len(args) > 0 && args[0] == "awg" && len(input) > 0 {
+		cmd.Stdin = strings.NewReader(input[0])
+	}
 	cmd.Stdout, cmd.Stderr = a, a
 	cmd.WaitDelay = 10 * time.Second // a child left holding the output does not keep the job open
 	err := cmd.Run()
@@ -291,8 +330,10 @@ func systemStatus(rel *releases) map[string]protoStatus {
 		return s
 	}
 	return map[string]protoStatus{
-		protoHy2:   st(protoHy2, hysteriaBin, hySvc, hysteriaVersion),
-		protoVless: st(protoVless, xrayBin, xSvc, xrayVersion),
+		protoHy2:      st(protoHy2, hysteriaBin, hySvc, hysteriaVersion),
+		protoVless:    st(protoVless, xrayBin, xSvc, xrayVersion),
+		protoVlessTCP: st(protoVless, xrayBin, defaultTCPService, xrayVersion),
+		protoAWG:      awgStatus(),
 	}
 }
 

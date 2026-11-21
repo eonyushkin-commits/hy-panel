@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -13,7 +14,7 @@ import (
 func TestLegacyUsersKeepHysteriaCredentials(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "users.json")
 	legacy := `[
- {"name":"alice","password":"original-password","subToken":"original-token","uuid":"old-key","awgKey":"old-key","awgIndex":2,"enabled":true,"protoOff":["vless","awg"],"up":123,"down":456,"quotaBytes":10000,"maxDevices":2},
+ {"name":"alice","password":"original-password","subToken":"original-token","uuid":"old-key","awgKey":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=","awgIndex":2,"enabled":true,"protoOff":["vless","awg"],"up":123,"down":456,"quotaBytes":10000,"maxDevices":2},
  {"name":"bob","password":"another-password","subToken":"another-token","enabled":true,"protoOff":["hysteria2"]}
  ]`
 	if err := os.WriteFile(path, []byte(legacy), 0600); err != nil {
@@ -27,7 +28,7 @@ func TestLegacyUsersKeepHysteriaCredentials(t *testing.T) {
 	if !ok || !u.Enabled || u.SubToken != "original-token" || u.Up != 123 || u.Down != 456 || u.QuotaBytes != 10000 || u.MaxDevices != 2 {
 		t.Fatalf("migration changed user: %+v", u)
 	}
-	if u.UUID != "old-key" || len(u.ProtoOff) != 1 || u.ProtoOff[0] != protoVless {
+	if u.UUID != "old-key" || !slices.Equal(u.ProtoOff, []string{protoVless, protoAWG, protoVlessTCP}) || u.AWGIndex != 2 || u.AWGKey != "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=" {
 		t.Fatalf("VLESS credentials or access changed: %+v", u)
 	}
 	a := testApp(t, nil)
@@ -43,8 +44,8 @@ func TestLegacyUsersKeepHysteriaCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, key := range []string{"awgKey", "awgIndex"} {
-		if strings.Contains(string(b), `"`+key+`"`) {
-			t.Fatalf("obsolete field retained: %s", key)
+		if !strings.Contains(string(b), `"`+key+`"`) {
+			t.Fatalf("AWG credentials lost: %s", key)
 		}
 	}
 	s, err = OpenStore(path)

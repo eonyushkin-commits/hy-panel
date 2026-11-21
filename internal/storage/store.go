@@ -34,6 +34,8 @@ type Store struct {
 	passwords     map[[32]byte]string
 	subscriptions map[[32]byte]string
 	uuids         map[string]string
+	awgKeys       map[string]string
+	awgIndices    map[int]string
 	dirty         bool
 	problem       error
 	write         func(string, []byte) error
@@ -60,11 +62,44 @@ func open(path string, write func(string, []byte) error) (*Store, error) {
 		return nil, errors.New("users database: expected an array, got null")
 	}
 	changed := false
+	protocolMigration := false
+	reservedAWG := map[int]bool{}
+	for _, row := range rows {
+		if row != nil {
+			reservedAWG[row.AWGIndex] = true
+		}
+	}
 	for i, ptr := range rows {
 		if ptr == nil {
 			return nil, fmt.Errorf("users database: null user at index %d", i)
 		}
 		u := ptr.Clone()
+		if u.ProtocolVersion == 0 {
+			protocolMigration = true
+			if slices.Contains(u.ProtoOff, model.VLESS) && !slices.Contains(u.ProtoOff, model.VLESSTCP) {
+				u.ProtoOff = append(u.ProtoOff, model.VLESSTCP)
+			}
+			u.ProtocolVersion = 1
+			changed = true
+		}
+		if u.AWGKey == "" {
+			u.AWGKey = model.NewAWGKey()
+			changed = true
+		}
+		if u.AWGIndex < 2 {
+			// Reserve all addresses in the input before allocating a missing one.
+			for index := 2; index <= 65534; index++ {
+				if !reservedAWG[index] {
+					u.AWGIndex = index
+					reservedAWG[index] = true
+					break
+				}
+			}
+			if u.AWGIndex < 2 {
+				return nil, errors.New("AWG address pool exhausted")
+			}
+			changed = true
+		}
 		if _, exists := s.users[u.Name]; exists {
 			return nil, fmt.Errorf("users database: duplicate user %q", u.Name)
 		}
@@ -92,6 +127,11 @@ func open(path string, write func(string, []byte) error) (*Store, error) {
 	if changed {
 		if err := migrationBackup(path, b); err != nil {
 			return nil, fmt.Errorf("backup before user migration: %w", err)
+		}
+		if protocolMigration {
+			if err := atomicfile.CreateOnce(path+".pre-protocols-v3", b, 0600); err != nil {
+				return nil, fmt.Errorf("backup before protocol migration: %w", err)
+			}
 		}
 		if err = s.persist(s.users); err != nil {
 			return nil, fmt.Errorf("save user migration: %w", err)
@@ -142,6 +182,18 @@ func (s *Store) persist(users map[string]model.User) error {
 	return nil
 }
 func (s *Store) unique(u model.User, self string) error {
+	if u.AWGKey != "" {
+		pub, err := model.AWGPublicKey(u.AWGKey)
+		if err != nil {
+			return err
+		}
+		if name, ok := s.awgKeys[pub]; ok && name != self {
+			return errors.New("duplicate AWG public key: " + name)
+		}
+	}
+	if name, ok := s.awgIndices[u.AWGIndex]; ok && u.AWGIndex >= 2 && name != self {
+		return errors.New("duplicate AWG address: " + name)
+	}
 	if name, ok := s.passwords[sha256.Sum256([]byte(u.Password))]; ok && name != self {
 		return errors.New("password already used by " + name)
 	}
@@ -155,6 +207,12 @@ func (s *Store) unique(u model.User, self string) error {
 }
 
 func (s *Store) index(u model.User) {
+	if pub, err := model.AWGPublicKey(u.AWGKey); err == nil {
+		s.awgKeys[pub] = u.Name
+	}
+	if u.AWGIndex >= 2 {
+		s.awgIndices[u.AWGIndex] = u.Name
+	}
 	s.passwords[sha256.Sum256([]byte(u.Password))] = u.Name
 	s.subscriptions[sha256.Sum256([]byte(u.SubToken))] = u.Name
 	s.uuids[u.UUID] = u.Name
@@ -163,6 +221,8 @@ func (s *Store) reindex() {
 	s.passwords = make(map[[32]byte]string, len(s.users))
 	s.subscriptions = make(map[[32]byte]string, len(s.users))
 	s.uuids = make(map[string]string, len(s.users))
+	s.awgKeys = make(map[string]string, len(s.users))
+	s.awgIndices = make(map[int]string, len(s.users))
 	for _, u := range s.users {
 		s.index(u)
 	}
@@ -216,6 +276,25 @@ func (s *Store) Create(u model.User) (model.User, error) {
 		u.UUID = model.UUID()
 	}
 	u.SubToken = model.Token(24)
+	u.ProtocolVersion = 1
+	if u.AWGKey == "" {
+		u.AWGKey = model.NewAWGKey()
+	}
+	if u.AWGIndex < 2 {
+		used := map[int]bool{}
+		for _, other := range s.users {
+			used[other.AWGIndex] = true
+		}
+		for i := 2; i <= 65534; i++ {
+			if !used[i] {
+				u.AWGIndex = i
+				break
+			}
+		}
+		if u.AWGIndex < 2 {
+			return model.User{}, errors.New("AWG address pool exhausted")
+		}
+	}
 	u.CreatedAt = time.Now().Unix()
 	u.LastReset = model.Month(time.Now())
 	if err := model.Validate(u); err != nil {

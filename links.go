@@ -20,6 +20,8 @@ type Endpoint struct {
 	ECH      string // base64 ECHConfigList, "" if ECH is off
 	Name     string // profile/remark prefix
 	Vless    *Vless // Xray's VLESS + Reality, nil if off
+	VlessTCP *Vless
+	AWG      *awgConfig
 }
 
 // endpointFor builds the link parameters from the Hysteria config and the
@@ -169,6 +171,27 @@ func (vlessProto) On(e Endpoint) bool                  { return e.Vless != nil }
 func (vlessProto) Link(e Endpoint, u User) string      { return e.VlessURI(u) }
 func (vlessProto) ProxyName(e Endpoint, u User) string { return e.vlessRemark(u) }
 func (vlessProto) Mihomo(e Endpoint, u User) string    { return e.MihomoVless(u) }
+
+// The additional listener has its own service and API, so counters and
+// access changes remain independent from the existing XHTTP listener.
+type tcpProto struct{}
+
+func (tcpProto) ID() string           { return protoVlessTCP }
+func (tcpProto) Title() string        { return "VLESS / Vision" }
+func (tcpProto) On(e Endpoint) bool   { return e.VlessTCP != nil }
+func tcpEndpoint(e Endpoint) Endpoint { e.Vless = e.VlessTCP; return e }
+func (tcpProto) Link(e Endpoint, u User) string {
+	if e.VlessTCP == nil {
+		return ""
+	}
+	link, _ := url.Parse(tcpEndpoint(e).VlessURI(u))
+	link.Fragment = e.remark(u) + "-vision"
+	return link.String()
+}
+func (tcpProto) ProxyName(e Endpoint, u User) string { return e.remark(u) + "-vision" }
+func (tcpProto) Mihomo(e Endpoint, u User) string {
+	return strings.Replace(tcpEndpoint(e).MihomoVless(u), fmt.Sprintf("name: %q", e.vlessRemark(u)), fmt.Sprintf("name: %q", e.remark(u)+"-vision"), 1)
+}
 
 // The Safari preset and ClientHello size depend on the client core version.
 // VlessURI builds the vless:// share link the way v2rayN and the Xray apps

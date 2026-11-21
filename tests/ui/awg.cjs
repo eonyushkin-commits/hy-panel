@@ -1,0 +1,98 @@
+const fs = require('fs'), assert = require('assert/strict');
+const launchBrowser = require('./browser.cjs');
+(async () => {
+  const browser = await launchBrowser();
+  try {
+    const page = await browser.newPage({viewport: {width: 1024, height: 900}}), errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.emulateMedia({reducedMotion:'reduce'});
+    const now = Math.floor(Date.now() / 1000);
+    const obfuscation = {jc:4,jmin:40,jmax:100,s1:24,s2:24,s3:24,s4:24,h:['100-199','200-299','300-399','400-499'],i1:'<r 64>',i2:'<b 0x1234>',i3:'<t>',i4:'<rc 16>',i5:'<rd 20>',headerProtectionKey:'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=',contentPaddingAddition:'8-16',rekeyAfterTime:'110-130',rekeyTimeout:'4-7',rejectAfterTime:'180-240',keepaliveTimeout:'8-12',maxHandshakeAttempts:'18-24',randomTrailers:false,disableCookies:false};
+    const awg = {port:'51820',subnet:'10.77.0.0/16',dns:'1.1.1.1, 1.0.0.1',mtu:1380,...obfuscation};
+    const protocols = [{id:'hysteria2',title:'Hysteria 2'},{id:'vless',title:'VLESS'},{id:'vless-tcp',title:'VLESS / Vision'},{id:'awg',title:'AmneziaWG'}];
+    const user = {name:'alice',enabled:true,password:'example-pass',protoOff:[],quotaBytes:0,maxDevices:0,expiresAt:0,up:100,down:200,lastSeen:now,note:'',resetMonthly:false,online:{awg:1,'vless-tcp':1},status:'',links:protocols.map(p=>({proto:p.id,uri:p.id==='awg'?'vpn://example':p.id+'://example'}))};
+    const state = {users:[user],server:{host:'vpn.example.com',protocols},onlineStatus:Object.fromEntries(protocols.map(p=>[p.id,{lastSuccess:now,stale:false}])),serverTime:now,onlineFreshFor:30,problems:'',subBase:''};
+    const system = {settings:{awg,'vless-tcp':{port:'8443',sni:'www.example.org',network:'tcp'}},defaults:{awg},status:{awg:{installed:true,active:true,version:'3.1.20260812'},'vless-tcp':{installed:true,active:true,version:'26.11.9'}},agentError:''};
+    let sent, reject = false;
+    const conf = '[Interface]\nPrivateKey = client-key\nS4 = 24\nHeaderProtectionKey = shared-key\nRandomTrailers = on\n[Peer]\nPublicKey = server-key\n';
+    await page.route('https://panel.test/**', async route => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === '/') return route.fulfill({contentType:'text/html',body:fs.readFileSync('index.html','utf8')});
+      if (path.endsWith('/awg.conf')) return route.fulfill({contentType:'text/plain',body:conf});
+      let data = {};
+      if (path === '/api/state') data = state;
+      if (path === '/api/system') data = system;
+      if (path === '/api/system/awg-preset') data = {...obfuscation,i1:'<r 128>'};
+      if (path === '/api/system/jobs') {
+        sent = route.request().postDataJSON();
+        if (reject) return route.fulfill({status:400,contentType:'text/plain',body:'AWG: диапазоны H пересекаются'});
+        data = {running:true};
+      }
+      if (path === '/api/system/job') data = {running:false,ok:true,log:'done'};
+      return route.fulfill({contentType:'application/json',body:JSON.stringify(data)});
+    });
+    await page.goto('https://panel.test/');
+    await page.locator('#app').waitFor({state:'visible'});
+    await page.getByText('AmneziaWG: работает',{exact:true}).waitFor();
+    assert.match(await page.locator('#stOnline').getAttribute('title'), /AmneziaWG: 1 peer/);
+    assert.match(await page.locator('#list').innerText(), /VLESS \/ Vision: 1 IP/);
+    await page.locator('#serverStatus [data-proto="awg"]').click();
+    await page.locator('#awgAdvanced summary').click();
+    assert.equal(await page.locator('#awgForm [name="s4"]').inputValue(),'24');
+    await page.locator('#awgForm [name="randomTrailers"]').check();
+    await page.locator('#awgForm [name="disableCookies"]').check();
+    await page.locator('#awgForm [name="i5"]').fill('<rd 32>');
+    fs.mkdirSync('dist',{recursive:true});
+    await page.screenshot({path:'dist/awg31-settings-desktop.png'});
+    reject = true;
+    await page.locator('#awgBtn').click();
+    await page.getByText('AWG: диапазоны H пересекаются',{exact:true}).waitFor();
+    assert.equal(await page.locator('#awgDlg').isVisible(),true);
+    assert.equal(await page.locator('#awgForm [name="i5"]').inputValue(),'<rd 32>');
+    await page.locator('#awgBtn').waitFor({state:'visible'});
+    reject = false;
+    await page.locator('#awgBtn').click();
+    await page.locator('#jobDlg').waitFor({state:'visible'});
+    assert.equal(sent.action,'awg');
+    const saved = JSON.parse(sent.params.obfuscation);
+    assert.equal(saved.randomTrailers,true); assert.equal(saved.disableCookies,true);
+    assert.equal(saved.i5,'<rd 32>'); assert.equal(saved.headerProtectionKey,obfuscation.headerProtectionKey);
+    assert.deepEqual(saved.h,obfuscation.h);
+    assert.equal(saved.rekeyAfterTime,obfuscation.rekeyAfterTime);
+    await page.evaluate(()=>document.querySelector('#jobDlg').close());
+    await page.locator('#serverStatus [data-proto="vless-tcp"]').click();
+    assert.match(await page.locator('#vlTitle').innerText(),/Vision/);
+    await page.locator('#vlForm [name="port"]').fill('9444');
+    await page.locator('#vlBtn').click();
+    await page.locator('#jobDlg').waitFor({state:'visible'});
+    assert.equal(sent.action,'vless-tcp'); assert.equal(sent.params.port,'9444');
+    await page.evaluate(()=>document.querySelector('#jobDlg').close());
+    await page.locator('#list [data-a="share"]').click();
+    await page.locator('#tabs [data-t="awg"]').click();
+    await page.waitForFunction(()=>document.querySelector('#shareText').value.startsWith('[Interface]'));
+    assert.equal(await page.locator('#shareText').inputValue(),conf);
+    assert.equal(await page.locator('#dlConf').innerText(),'Скачать .conf');
+    assert.match(await page.locator('#qr').getAttribute('src'),/proto=awg/);
+    await page.evaluate(()=>document.querySelector('#share').close());
+    delete system.settings.awg;
+    await page.evaluate(()=>loadSystem());
+    await page.locator('#serverStatus [data-proto="awg"]').click();
+    assert.equal(await page.locator('#awgBtn').innerText(),'Установить');
+    await page.locator('#awgAdvanced summary').click();
+    await page.locator('#awgGenerate').click();
+    await page.waitForFunction(()=>document.querySelector('#awgForm [name="i1"]').value==='<r 128>');
+    await page.evaluate(()=>{const box=document.querySelector('#toasts');box.replaceChildren();if(box.matches(':popover-open'))box.hidePopover();});
+    for (const width of [390,320]) {
+      await page.setViewportSize({width,height:812});
+      assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+      assert(await page.locator('#awgDlg').evaluate(el=>el.scrollWidth<=el.clientWidth));
+      await page.screenshot({path:`dist/awg31-settings-${width}.png`});
+    }
+    await page.evaluate(()=>document.querySelector('#awgDlg').close());
+    await page.setViewportSize({width:1024,height:900});
+    await page.evaluate(()=>setTheme('dark'));
+    await page.screenshot({path:'dist/protocols-dark.png'});
+    assert.deepEqual(errors,[]);
+    console.log('PASS: AWG 3.1 settings, all fields retained after rejection, Vision setup, .conf export, generated preset, 320px layout');
+  } finally { await browser.close(); }
+})().catch(error=>{console.error(error);process.exit(1)});

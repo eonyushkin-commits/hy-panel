@@ -150,10 +150,11 @@ func (v *Vless) clientFingerprint() string {
 // xraySetup is what the panel takes from the Xray config: the inbound it
 // manages, the API to manage it with, and the link parameters.
 type xraySetup struct {
-	Tag  string
-	API  string
-	Link Vless
-	Warn string // works, but something is off
+	Protocol string
+	Tag      string
+	API      string
+	Link     Vless
+	Warn     string // works, but something is off
 }
 
 func readXray(path string) (*xraySetup, error) {

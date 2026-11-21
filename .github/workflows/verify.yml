@@ -70,7 +70,14 @@ jobs:
           XRAY_BIN: ${{ runner.temp }}/protocol-tools/xray
           XRAY_MINIMUM_BIN: ${{ runner.temp }}/protocol-tools/xray-minimum
           MIHOMO_BIN: ${{ runner.temp }}/protocol-tools/mihomo
+          AWG_TOOL_BIN: ${{ runner.temp }}/protocol-tools/awg
         run: go test -race -tags=e2e -run E2E -count=1 -timeout=5m -v .
+      - name: Verify AWG firewall in an isolated network namespace
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq nftables
+          go test -tags=e2e -c -o "$RUNNER_TEMP/awg-firewall.test" .
+          sudo unshare --net env HYP_AWG_NFT_CHECK=1 "$RUNNER_TEMP/awg-firewall.test" -test.run '^TestE2EAWGFirewall$' -test.v
       - name: Build disposable systemd verification
         run: |
           go build -o "$RUNNER_TEMP/hy-panel-candidate" .

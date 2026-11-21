@@ -26,7 +26,7 @@ const launchBrowser=require('./browser.cjs');
  });
  await page.goto('https://panel.test/');await page.locator('#app').waitFor({state:'visible'});
  await page.getByText('VLESS / Reality: работает',{exact:true}).waitFor();
- assert.equal(await page.locator('.server-bar').count(),2);
+ assert.equal(await page.locator('.server-bar').count(),4);
  assert.equal(await page.locator('#stOnline').innerText(),'1');
  assert.match(await page.locator('#stOnline').getAttribute('title'),/VLESS: 1 IP/);
  assert.equal(await page.locator('#list .sessions').count(),2);
