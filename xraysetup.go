@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -66,6 +67,24 @@ func freshXray(port, domain string) []byte {
 	q := func(s string) string { b, _ := json.Marshal(s); return string(b) }
 	return []byte(fmt.Sprintf(xrayTemplate, q(xrayAPIAddr), q(xrayTag), port, q("/"+randHex(6)),
 		q(net.JoinHostPort(domain, "443")), q(domain), q(newRealityKey()), q(randHex(8))))
+}
+
+const defaultTCPConfig = "/usr/local/etc/xray/vision.json"
+const defaultTCPService = "hy-panel-vision"
+
+func tcpPaths(env map[string]string) (string, string) {
+	return cmp.Or(env["HYP_XRAY_TCP_CONFIG"], defaultTCPConfig), defaultTCPService
+}
+
+func freshTCPXray(port, domain string) []byte {
+	d, _ := parseXrayDoc(freshXray(port, domain))
+	d.root.sub("api").set("listen", "127.0.0.1:10086")
+	d.inbound().set("tag", "vless-vision")
+	stream := d.inbound().sub("streamSettings")
+	stream.set("network", "tcp")
+	stream.del("xhttpSettings")
+	b, _ := d.bytes()
+	return b
 }
 
 // ---- what kind of config this is ----
@@ -162,6 +181,13 @@ func (o *jobj) set(k string, v any) {
 	}
 	o.keys = append(o.keys, k)
 	o.vals[k] = v
+}
+
+func (o *jobj) del(k string) {
+	if actual, ok := o.key(k); ok {
+		delete(o.vals, actual)
+		o.keys = slices.DeleteFunc(o.keys, func(s string) bool { return s == actual })
+	}
 }
 
 func (o *jobj) MarshalJSON() ([]byte, error) {
@@ -310,8 +336,12 @@ func (d *xrayDoc) setTarget(domain string) {
 func runXray(args []string) {
 	fs := flag.NewFlagSet("xray", flag.ExitOnError)
 	target := fs.String("target", "", "site Reality impersonates (SNI), e.g. www.example.com")
-	port := fs.String("port", "", "TCP port for VLESS (default: 443 for a new setup, the current one after)")
+	port := fs.String("port", "", "TCP port (new XHTTP: 8443, Vision: 443; existing: keep current)")
+	network := fs.String("network", "", "tcp for the independent Vision listener; xhttp for the existing listener")
 	fs.Parse(args)
+	if *network != "" && *network != "tcp" && *network != "xhttp" {
+		log.Fatal("-network: нужен tcp или xhttp")
+	}
 	needRoot("xray")
 	env := readEnv()
 	if !installed(env) {
@@ -325,11 +355,25 @@ func runXray(args []string) {
 	if !hostname.Domain(site) {
 		log.Fatalf("✗ -target %q: нужен домен сайта для маскировки", *target)
 	}
-	managed := env["HYP_XRAY_CONFIG"] != "" // the panel runs a config it wrote
+	configKey, profile := "HYP_XRAY_CONFIG", protoVless
+	if *network == "tcp" {
+		configKey, profile = "HYP_XRAY_TCP_CONFIG", protoVlessTCP
+	}
+	managed := env[configKey] != "" // the panel runs a config it wrote
 	cfgPath, svc := xrayPaths(env)
-	if !fileExists(xrayBin) || !unitExists(svc) {
+	if profile == protoVlessTCP {
+		cfgPath, svc = tcpPaths(env)
+	}
+	if !fileExists(xrayBin) || (profile == protoVless && !unitExists(svc)) {
 		_, err := fetchXray()
 		step("xray: официальный релиз", err)
+	}
+	if profile == protoVlessTCP {
+		unit := strings.ReplaceAll(xrayUnit, defaultXrayCfg, cfgPath)
+		step("Vision service user", systemUser("xray", ""))
+		step("Vision config directory", os.MkdirAll(filepath.Dir(cfgPath), 0755))
+		unit = strings.ReplaceAll(unit, "RuntimeDirectory=xray", "RuntimeDirectory=hy-panel-vision")
+		step("Vision unit", installUnit("/etc/systemd/system/"+svc+".service", unit))
 	}
 	if v := xrayVersion(); !v.atLeast(minXray) {
 		log.Fatalf("✗ нужен Xray ≥ %s, установлен %s — обнови: hy-panel fetch xray", minXray, v)
@@ -384,10 +428,20 @@ func runXray(args []string) {
 		if kind != xrayNone {
 			fmt.Printf("Конфиг Xray писала не панель — настраиваю заново, прежний сохранится в %s.\n", cfgPath+backupExt)
 		}
-		out = freshXray(xrayPort(cmp.Or(*port, "443"), svc), site)
+		defaultPort := "8443"
+		if profile == protoVlessTCP {
+			defaultPort = "443"
+		}
+		chosenPort := xrayPort(cmp.Or(*port, defaultPort), svc)
+		if profile == protoVlessTCP {
+			out = freshTCPXray(chosenPort, site)
+		} else {
+			out = freshXray(chosenPort, site)
+		}
 	}
 	xs, err := parseXray(out)
 	step("check new xray config", err)
+	xs.Protocol = profile
 
 	noInterrupt()
 	ufwAllow(xs.Link.Port + "/tcp")
@@ -396,7 +450,7 @@ func runXray(args []string) {
 	if len(orig) > 0 {
 		step("backup → "+cfgPath+backupExt, backupOnce(cfgPath, orig))
 	}
-	env["HYP_XRAY_CONFIG"] = cfgPath
+	env[configKey] = cfgPath
 	err = transaction.Run([]transaction.File{
 		{Path: cfgPath, Data: out, Options: cfgOpts},
 		{Path: envPath, Data: renderEnv(env), Options: atomicfile.Options{Mode: 0600}},
@@ -417,6 +471,7 @@ func runXray(args []string) {
 			if err != nil {
 				return err
 			}
+			previous.Protocol = profile
 			return waitXrayReady(previous)
 		}
 		return waitPanelReady()
@@ -588,7 +643,8 @@ func waitXrayReady(xs *xraySetup) error {
 			if have, last = api.usersContext(ctx, xs.Tag); last == nil {
 				missing := 0
 				for _, u := range list {
-					if u.Allowed(protoVless, time.Now()) {
+					profile := cmp.Or(xs.Protocol, protoVless)
+					if u.Allowed(profile, time.Now()) {
 						if id, ok := have[u.Name]; !ok || u.UUID == "" || id != u.UUID {
 							missing++
 						}

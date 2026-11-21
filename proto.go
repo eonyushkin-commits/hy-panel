@@ -15,8 +15,10 @@ import (
 // protocol is a type for each and an entry in protocols.
 
 const (
-	protoHy2   = model.Hysteria
-	protoVless = model.VLESS
+	protoHy2      = model.Hysteria
+	protoVless    = model.VLESS
+	protoVlessTCP = model.VLESSTCP
+	protoAWG      = model.AmneziaWG
 )
 
 type protocol interface {
@@ -33,7 +35,7 @@ type protocol interface {
 }
 
 // Prefer Hysteria over UDP; VLESS over TCP is the fallback.
-var protocols = []protocol{hy2Proto{}, vlessProto{}}
+var protocols = []protocol{hy2Proto{}, vlessProto{}, tcpProto{}, awgProto{}}
 
 func protoByID(id string) protocol {
 	for _, p := range protocols {

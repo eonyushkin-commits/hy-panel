@@ -6,6 +6,7 @@ import io
 from pathlib import Path
 import sys
 import subprocess
+import tempfile
 import zipfile
 
 ASSETS = (
@@ -18,6 +19,37 @@ ASSETS = (
     ("mihomo", "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.33/mihomo-linux-amd64-v1-v1.19.33.gz",
      "8ec92e7b2fdc6b853ba00156bab7e4e965c8b0d843b8c4ac8ab98795f02ad524", "gzip"),
 )
+
+AWG_TAG = "v3.1.20260812"
+AWG_COMMIT = "ee0f0a9aa34ff0a0da4b3433b9512781cfe02843"
+
+
+def build_awg(destination):
+    binary = destination / "awg"
+    marker = destination / "awg.source"
+    if binary.exists() and marker.exists():
+        expected = f"{AWG_COMMIT} {hashlib.sha256(binary.read_bytes()).hexdigest()}"
+        if marker.read_text().strip() == expected:
+            print("Verified cached awg (pinned source build)", flush=True)
+            return
+    with tempfile.TemporaryDirectory(prefix="hy-panel-awg-build-") as temporary:
+        source = Path(temporary) / "tools"
+        subprocess.run([
+            "git", "-c", "advice.detachedHead=false", "clone", "--quiet",
+            "--depth", "1", "--branch", AWG_TAG,
+            "https://github.com/amnezia-vpn/amneziawg-tools.git", str(source),
+        ], check=True, timeout=180)
+        actual = subprocess.check_output(
+            ["git", "-C", str(source), "rev-parse", "HEAD"], text=True,
+        ).strip()
+        if actual != AWG_COMMIT:
+            raise RuntimeError("AWG tag does not match pinned commit; refusing build")
+        subprocess.run(["make", "-C", str(source / "src"), "-j2"], check=True, timeout=180)
+        data = (source / "src" / "wg").read_bytes()
+        binary.write_bytes(data)
+        binary.chmod(0o755)
+        marker.write_text(f"{AWG_COMMIT} {hashlib.sha256(data).hexdigest()}\n")
+        print("Built and verified awg 3.1", flush=True)
 
 
 def main():
@@ -46,6 +78,7 @@ def main():
         target.write_bytes(data)
         target.chmod(0o755)
         print(f"Verified {name}", flush=True)
+    build_awg(destination)
 
 
 if __name__ == "__main__":

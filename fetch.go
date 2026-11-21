@@ -124,11 +124,18 @@ func applyServerUpdate(name, svc string, version func() hyVersion, fetch func() 
 	}
 	// ClientHello requirements changed between Xray generations. Re-read the
 	// installed version so subscriptions immediately export matching profiles.
-	if name == "xray" && systemctl("is-active", "--quiet", "hy-panel") == nil {
-		if err := restartService("hy-panel"); err != nil {
-			return err
+	if name == "xray" {
+		if unitExists(defaultTCPService) && systemctl("is-active", "--quiet", defaultTCPService) == nil {
+			if err := restartService(defaultTCPService); err != nil {
+				return err
+			}
 		}
-		return waitPanelReady()
+		if systemctl("is-active", "--quiet", "hy-panel") == nil {
+			if err := restartService("hy-panel"); err != nil {
+				return err
+			}
+			return waitPanelReady()
+		}
 	}
 	return nil
 }

@@ -27,7 +27,7 @@ trap 'printf "\nCheck directory: %s\nLog: %s/check.log\n" "$check_dir" "$check_d
   tool_cache=${HYP_PROTOCOL_CACHE:-"$HOME/.cache/hy-panel/protocol-tools"}
   python3 "$source_dir/scripts/download-test-tools.py" "$tool_cache"
   mkdir "$check_dir/project" "$check_dir/tools"
-  for tool_name in hysteria xray xray-minimum mihomo; do
+  for tool_name in hysteria xray xray-minimum mihomo awg; do
     install -m 755 "$tool_cache/$tool_name" "$check_dir/tools/$tool_name"
   done
   (cd "$source_dir" && git -c safe.directory="$source_dir" ls-files --cached --others --exclude-standard -z |
@@ -41,6 +41,7 @@ trap 'printf "\nCheck directory: %s\nLog: %s/check.log\n" "$check_dir" "$check_d
   export XRAY_BIN="$check_dir/tools/xray"
   export XRAY_MINIMUM_BIN="$check_dir/tools/xray-minimum"
   export MIHOMO_BIN="$check_dir/tools/mihomo"
+  export AWG_TOOL_BIN="$check_dir/tools/awg"
   echo '=== Real Hysteria, VLESS/Reality and Mihomo integration ==='
   go test -race -tags=e2e -run '^TestE2E' -count=1 -timeout=5m -v .
   echo 'PROTOCOL CHECK PASSED'

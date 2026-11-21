@@ -1,8 +1,10 @@
 package model
 
 import (
+	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"math/big"
@@ -14,24 +16,29 @@ import (
 
 const Hysteria = "hysteria2"
 const VLESS = "vless"
+const VLESSTCP = "vless-tcp"
+const AmneziaWG = "awg"
 
 type User struct {
-	Name         string   `json:"name"`
-	Password     string   `json:"password"`
-	SubToken     string   `json:"subToken"`
-	UUID         string   `json:"uuid"`
-	ProtoOff     []string `json:"protoOff,omitempty"`
-	Enabled      bool     `json:"enabled"`
-	QuotaBytes   int64    `json:"quotaBytes"`
-	ResetMonthly bool     `json:"resetMonthly"`
-	LastReset    int      `json:"lastReset"`
-	ExpiresAt    int64    `json:"expiresAt"`
-	MaxDevices   int      `json:"maxDevices"`
-	Up           int64    `json:"up"`
-	Down         int64    `json:"down"`
-	CreatedAt    int64    `json:"createdAt"`
-	LastSeen     int64    `json:"lastSeen"`
-	Note         string   `json:"note"`
+	Name            string   `json:"name"`
+	Password        string   `json:"password"`
+	SubToken        string   `json:"subToken"`
+	UUID            string   `json:"uuid"`
+	AWGKey          string   `json:"awgKey,omitempty"`
+	AWGIndex        int      `json:"awgIndex,omitempty"`
+	ProtocolVersion int      `json:"protocolVersion,omitempty"`
+	ProtoOff        []string `json:"protoOff,omitempty"`
+	Enabled         bool     `json:"enabled"`
+	QuotaBytes      int64    `json:"quotaBytes"`
+	ResetMonthly    bool     `json:"resetMonthly"`
+	LastReset       int      `json:"lastReset"`
+	ExpiresAt       int64    `json:"expiresAt"`
+	MaxDevices      int      `json:"maxDevices"`
+	Up              int64    `json:"up"`
+	Down            int64    `json:"down"`
+	CreatedAt       int64    `json:"createdAt"`
+	LastSeen        int64    `json:"lastSeen"`
+	Note            string   `json:"note"`
 }
 
 type Traffic struct {
@@ -42,7 +49,29 @@ type Traffic struct {
 func (u *User) Uses(protocol string) bool {
 	return KnownProtocol(protocol) && !slices.Contains(u.ProtoOff, protocol)
 }
-func KnownProtocol(protocol string) bool { return protocol == Hysteria || protocol == VLESS }
+func KnownProtocol(protocol string) bool {
+	return protocol == Hysteria || protocol == VLESS || protocol == VLESSTCP || protocol == AmneziaWG
+}
+
+func NewAWGKey() string {
+	k, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	return base64.StdEncoding.EncodeToString(k.Bytes())
+}
+
+func AWGPublicKey(key string) (string, error) {
+	b, err := base64.StdEncoding.DecodeString(key)
+	if err != nil || len(b) != 32 || strings.ContainsAny(key, "\r\n") {
+		return "", errors.New("AWG: invalid private key")
+	}
+	k, err := ecdh.X25519().NewPrivateKey(b)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(k.PublicKey().Bytes()), nil
+}
 
 // Allowed reports whether u may connect over protocol at now: not blocked and
 // the protocol not switched off. Who a server lets in follows this rule.
@@ -67,6 +96,14 @@ func (u *User) Blocked(now time.Time) string {
 var NamePattern = regexp.MustCompile(`^[a-z0-9_.-]{1,32}$`)
 
 func Validate(u User) error {
+	if u.AWGKey != "" {
+		if _, err := AWGPublicKey(u.AWGKey); err != nil {
+			return err
+		}
+	}
+	if u.AWGIndex < 0 || u.AWGIndex == 1 || u.AWGIndex > 65534 {
+		return errors.New("AWG: address index outside 2..65534")
+	}
 	if !NamePattern.MatchString(u.Name) {
 		return errors.New("name: 1-32 chars of a-z 0-9 _ . -")
 	}

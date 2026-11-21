@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -299,9 +300,15 @@ type xrayBackend struct {
 	api              *xrayAPI
 	tag              string // the inbound
 	flow             string // given to every user: xtls-rprx-vision on TCP, none with XHTTP
+	id               string
 }
 
-func (b *xrayBackend) proto() string   { return protoVless }
+func (b *xrayBackend) proto() string {
+	if b.id != "" {
+		return b.id
+	}
+	return protoVless
+}
 func (b *xrayBackend) errText() string { return "Нет связи с API Xray: " }
 
 // stats reads and clears Xray's per-user counters and consumes the latest
@@ -414,7 +421,7 @@ func (b *xrayBackend) pushContext(ctx context.Context, now time.Time, users []Us
 	}
 	var add []User
 	for _, u := range users {
-		if !u.Allowed(protoVless, now) {
+		if !u.Allowed(b.proto(), now) {
 			continue // stays in have: taken out below
 		}
 		if have[u.Name] == u.UUID {
@@ -469,10 +476,19 @@ func (a *App) watchTarget(ctx context.Context, target, sni string) {
 			log.Printf("reality target %s: %v", target, err)
 		}
 		a.mu.Lock()
-		a.targetErr = ""
-		if fails >= 2 {
-			a.targetErr = fmt.Sprintf("Сайт для маскировки VLESS (%s) не отвечает по TLS 1.3 + HTTP/2: %v. Смени его в панели: VLESS + Reality → «Настройки»", sni, err)
+		if a.targetErrs == nil {
+			a.targetErrs = map[string]string{}
 		}
+		delete(a.targetErrs, target)
+		if fails >= 2 {
+			a.targetErrs[target] = fmt.Sprintf("Сайт для маскировки VLESS (%s) не отвечает по TLS 1.3 + HTTP/2: %v. Смени его в настройках протокола", sni, err)
+		}
+		var messages []string
+		for _, message := range a.targetErrs {
+			messages = append(messages, message)
+		}
+		sort.Strings(messages)
+		a.targetErr = strings.Join(messages, "; ")
 		a.mu.Unlock()
 		delay := time.Hour
 		if fails == 1 {

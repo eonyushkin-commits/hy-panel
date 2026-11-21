@@ -134,7 +134,8 @@ input,textarea{caret-color:var(--acc)}
 #serverStatus{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
 #serverStatus>.err{grid-column:1/-1;margin:0}
 .server-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 24px 12px 0;min-width:0}
-.server-bar+.server-bar{border-left:1px solid var(--line);padding-left:24px;padding-right:0}
+.server-bar:nth-child(even){border-left:1px solid var(--line);padding-left:24px;padding-right:0}
+.server-bar:nth-child(n+3){border-top:1px solid var(--line)}
 .server-state,.server-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .server-state{flex:1;min-width:0;display:grid;grid-template-columns:7px minmax(0,1fr);gap:6px 10px}
 .server-state>span:nth-child(2){font-weight:550;font-size:13px;overflow-wrap:anywhere}
@@ -195,7 +196,7 @@ textarea{font:12px/1.5 var(--mono);background:var(--surface-2);border-color:tran
 
 @media (hover:hover) and (pointer:fine){.user:hover{background:color-mix(in srgb,var(--surface-2) 55%,transparent)}.server-actions button:hover{background:var(--surface-2)}}
 @media (max-width:900px){.user,.list-head{grid-template-columns:minmax(0,1fr) 180px 180px;gap:16px}.acts button{min-width:32px}}
-@media (max-width:760px){#serverStatus{grid-template-columns:1fr}.server-bar,.server-bar+.server-bar{padding:12px 0;border-left:0}.server-bar+.server-bar{border-top:1px solid var(--line)}.brand #host{margin-left:8px;padding-left:12px}}
+@media (max-width:760px){#serverStatus{grid-template-columns:1fr}.server-bar,.server-bar:nth-child(even){padding:12px 0;border-left:0}.server-bar+.server-bar{border-top:1px solid var(--line)}.brand #host{margin-left:8px;padding-left:12px}}
 @media (max-width:640px){
   main{padding:0 20px 24px}.top{min-height:64px;gap:4px;margin-bottom:20px}.brand{gap:6px;flex-wrap:wrap}.brand #host{border:0;padding:0;margin:0;flex-basis:100%;font-size:10px}.brand h1{font-size:16px}.top button{min-width:44px;min-height:44px}
   .overview{align-items:center;gap:12px}.overview .pri{font-size:12px;white-space:nowrap;min-height:44px;padding:8px 12px}
@@ -339,10 +340,10 @@ textarea{font:12px/1.5 var(--mono);background:var(--surface-2);border-color:tran
 
 <dialog id="vlDlg">
   <form method="dialog" id="vlForm" class="dlg">
-    <div class="dlg-h"><h2>VLESS + Reality</h2><button type="button" class="icon ghost" onclick="$('#vlDlg').close()" aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <div class="dlg-h"><h2 id="vlTitle">VLESS + Reality</h2><button type="button" class="icon ghost" onclick="$('#vlDlg').close()" aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
     <div class="server-details small" id="vlInfo"></div>
     <div class="grid">
-      <label class="full"><span>Порт (TCP)</span><input name="port" type="number" min="1" max="65535" value="443"></label>
+      <label class="full"><span>Порт (TCP)</span><input name="port" type="number" min="1" max="65535" value="8443"></label>
       <label class="full"><span>Сайт для маскировки — чужой сайт с TLS 1.3 и HTTP/2, лучше из той же подсети /24, что и сервер</span>
         <div style="display:flex;gap:8px"><input name="target" placeholder="www.example.com" autocapitalize="off"><button type="button" onclick="checkSite()">Проверить</button><button type="button" id="findBtn" onclick="findSites()" title="Найти соседей сервера по /24 с TLS 1.3, HTTP/2 и ответом 200">Найти</button></div>
         <div class="check" id="vlCheck"></div></label>
@@ -350,6 +351,28 @@ textarea{font:12px/1.5 var(--mono);background:var(--surface-2);border-color:tran
     </div>
     <div class="mute small hint" id="vlHint"></div>
     <div class="row"><button type="button" onclick="$('#vlDlg').close()">Отмена</button><button class="pri" value="ok" id="vlBtn">Установить</button></div>
+  </form>
+</dialog>
+
+<dialog id="awgDlg">
+  <form method="dialog" id="awgForm" class="dlg">
+    <div class="dlg-h"><h2>AmneziaWG</h2><button type="button" class="icon ghost" onclick="$('#awgDlg').close()" aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <div class="mute small hint" id="awgInfo"></div>
+    <div class="grid">
+      <label><span>Порт (UDP)</span><input name="port" type="number" min="1" max="65535" required></label>
+      <label><span>MTU</span><input name="mtu" type="number" min="1280" max="1380" required></label>
+      <label class="full"><span>Частная подсеть /16</span><input name="subnet" placeholder="10.77.0.0/16" required autocomplete="off"></label>
+      <label class="full"><span>DNS — публичные IPv4 через запятую</span><input name="dns" required autocomplete="off"></label>
+    </div>
+    <div class="mute small hint">Для VPS с Debian или Ubuntu. При первой установке панель соберёт модуль AmneziaWG; нужны заголовки текущего ядра. Подсеть должна отличаться от сетей сервера и клиентов. IPv4 идёт через VPN, IPv6 внутри туннеля блокируется. Ключи и параметры обфускации сохраняются при смене настроек.</div>
+    <details id="awgAdvanced"><summary>Параметры AWG 3.1</summary>
+      <div class="row"><button type="button" id="awgGenerate" onclick="regenerateAWG()">Сгенерировать параметры</button></div>
+      <div class="grid" id="awgOptions"></div>
+      <label class="chk"><input type="checkbox" name="randomTrailers" class="sw"> RandomTrailers — случайные хвосты пакетов</label>
+      <label class="chk"><input type="checkbox" name="disableCookies" class="sw"> DisableCookies — отключить защиту от handshake-флуда</label>
+      <div class="mute small hint">Защита заголовков требует S1–S4 ≥ 12. Для RandomTrailers все S1–S4 должны совпадать. Диапазоны H1–H4 не должны пересекаться. PersistentKeepalive принимает число или диапазон; Mihomo использует нижнюю границу. После изменения обфускации обнови конфиги всех клиентов; нужен клиент с поддержкой AWG 3.1.</div>
+    </details>
+    <div class="row"><button type="button" onclick="$('#awgDlg').close()">Отмена</button><button class="pri" value="ok" id="awgBtn">Установить</button></div>
   </form>
 </dialog>
 
@@ -459,6 +482,9 @@ function refreshOnlineView() {
 
 // ---- protocols: installed and configured by the agent ----
 let SYS = null;
+let vlProtocol = 'vless';
+const isVless = id => id === 'vless' || id === 'vless-tcp';
+const onlineUnit = id => isVless(id) ? 'IP' : id === 'awg' ? 'peer' : 'сессий';
 async function loadSystem() {
   const request = ++systemRequest, epoch = authEpoch;
   try { const system = await api('GET', 'api/system', undefined, true); if (request !== systemRequest || epoch !== authEpoch) return; SYS = system; } catch { return; }
@@ -467,7 +493,7 @@ async function loadSystem() {
 function renderProtocols() {
   if (!SYS) return;
   const unavailable = !!SYS.agentError;
-  $('#serverStatus').innerHTML = [['hysteria2', 'Hysteria 2', 'UDP'], ['vless', 'VLESS / Reality', 'TCP']].map(([id, name, transport]) => {
+  $('#serverStatus').innerHTML = [['hysteria2', 'Hysteria 2', 'UDP'], ['vless', 'VLESS / Reality', 'TCP'], ['vless-tcp', 'VLESS / Vision', 'TCP'], ['awg', 'AmneziaWG', 'UDP']].map(([id, name, transport]) => {
     const s = SYS.status?.[id] || {}, c = SYS.settings?.[id];
     const title = name + ': ' + (unavailable ? 'состояние неизвестно' : c ? s.active ? 'работает' : 'остановлен' : s.installed ? 'не настроен' : 'не установлен');
     const tone = unavailable ? 'warn' : c ? s.active ? 'ok' : 'bad' : '';
@@ -476,7 +502,7 @@ function renderProtocols() {
   }).join('')
     + (unavailable ? `<div class="err">${icon('alert')}<span>${esc(SYS.agentError)}</span></div>` : '');
   renderHyInfo();
-  renderProtoInfo('vless');
+  renderProtoInfo(vlProtocol);
 }
 function renderHyInfo() { renderProtoInfo('hysteria2'); }
 function renderProtoInfo(id) {
@@ -493,12 +519,12 @@ function renderProtoInfo(id) {
 }
 function systemAction(e) {
   const b = e.target.closest('[data-do]'); if (!b) return;
-  const id = b.dataset.proto, name = id === 'vless' ? 'Xray' : 'Hysteria 2';
-  if (b.dataset.do === 'cfg') (id === 'vless' ? openVl : openHy)();
+  const id = b.dataset.proto, name = isVless(id) ? 'Xray' : 'Hysteria 2';
+  if (b.dataset.do === 'cfg') { if (isVless(id)) openVl(id); else if (id === 'awg') openAWG(); else openHy(); }
   else if (b.dataset.do === 'check') checkReleases(b, id);
   else if (confirm(`Скачать последний релиз ${name} и перезапустить его? Подключения прервутся на секунду.`)) {
-    for (const dialog of ['#hyDlg', '#vlDlg']) if ($(dialog).open) $(dialog).close();
-    startJob(id === 'vless' ? 'update-xray' : 'update-hysteria', {}, 'Обновление ' + name);
+    for (const dialog of ['#hyDlg', '#vlDlg', '#awgDlg']) if ($(dialog).open) $(dialog).close();
+    startJob(isVless(id) ? 'update-xray' : 'update-hysteria', {}, 'Обновление ' + name);
   }
 }
 $('#serverStatus').onclick = systemAction;
@@ -509,7 +535,7 @@ async function checkReleases(b, id) {
   b.disabled = true; b.textContent = 'Проверяю…';
   try { SYS = await api('POST', 'api/system/releases'); } catch { return renderProtocols(); }
   renderProtocols();
-  const s = SYS.status?.[id] || {}, name = id === 'vless' ? 'Xray' : 'Hysteria 2';
+  const s = SYS.status?.[id] || {}, name = isVless(id) ? 'Xray' : 'Hysteria 2';
   if (s.update) toast(`${name}: вышла ${s.latest}`);
   else if (s.latest) toast(`${name}: ${s.version} — последняя версия`);
   else toast(`${name}: ${s.latestErr || 'GitHub не ответил'}`, true);
@@ -542,10 +568,12 @@ $('#hyDlg').onclose = () => {
   startJob('hysteria', params, SYS.settings.hysteria2 ? 'Настройка Hysteria 2' : 'Установка Hysteria 2');
 };
 
-function openVl() {
-  const f = $('#vlForm'), c = SYS.settings.vless;
-  renderProtoInfo('vless');
-  f.port.value = c ? c.port : 443;
+function openVl(id = 'vless') {
+  vlProtocol = id;
+  const f = $('#vlForm'), c = SYS.settings[id];
+  $('#vlTitle').textContent = id === 'vless-tcp' ? 'VLESS + TCP + REALITY / Vision' : 'VLESS + XHTTP + REALITY';
+  renderProtoInfo(id);
+  f.port.value = c ? c.port : id === 'vless-tcp' ? 443 : 8443;
   f.target.value = c ? c.sni : ''; f.target.placeholder = c ? '' : 'www.example.com'; f.target.required = !c;
   $('#vlCheck').textContent = ''; $('#vlFind').hidden = true; $('#findBtn').disabled = false;
   $('#vlBtn').textContent = c ? 'Сохранить' : 'Установить';
@@ -594,23 +622,62 @@ async function checkSite() {
 }
 $('#vlDlg').onclose = () => {
   if ($('#vlDlg').returnValue !== 'ok') return;
-  const f = $('#vlForm'), c = SYS.settings.vless;
+  const f = $('#vlForm'), c = SYS.settings[vlProtocol];
   const params = {target: f.target.value.trim().toLowerCase() || c.sni, port: String(f.port.value)};
   if (c && params.target === c.sni && params.port === String(c.port)) return;
-  startJob('vless', params, c ? 'Настройка VLESS + Reality' : 'Установка VLESS + Reality');
+  startJob(vlProtocol, params, c ? 'Настройка VLESS + Reality' : 'Установка VLESS + Reality');
+};
+
+const awgNumbers = ['jc', 'jmin', 'jmax', 's1', 's2', 's3', 's4'];
+let awgGeneration = 0;
+const awgStrings = ['i1', 'i2', 'i3', 'i4', 'i5', 'headerProtectionKey', 'contentPaddingAddition', 'rekeyAfterTime', 'rekeyTimeout', 'rejectAfterTime', 'keepaliveTimeout', 'maxHandshakeAttempts', 'persistentKeepalive'];
+function fillAWGOptions(c) {
+  const f = $('#awgForm');
+  const fields = [...awgNumbers.map(k => [k, k.toUpperCase(), 'number', c[k]]), ...[1,2,3,4].map((n,i) => ['h'+n, 'H'+n+' — число или диапазон', 'text', c.h[i]]), ...awgStrings.map(k => [k, k[0].toUpperCase()+k.slice(1), k === 'headerProtectionKey' ? 'password' : 'text', c[k]])];
+  $('#awgOptions').innerHTML = fields.map(([key,label,type,value]) => `<label${awgStrings.includes(key) ? ' class="full"' : ''}><span>${esc(label)}</span><input name="${key}" type="${type}" ${type === 'number' ? 'min="0" step="1" required' : ''} value="${esc(value ?? '')}" autocomplete="off" autocapitalize="off" spellcheck="false"></label>`).join('');
+  f.randomTrailers.checked = !!c.randomTrailers; f.disableCookies.checked = !!c.disableCookies;
+}
+async function regenerateAWG() {
+  const request = ++awgGeneration;
+  const button = $('#awgGenerate'); button.disabled = true;
+  try { const options = await api('GET', 'api/system/awg-preset'); if (request === awgGeneration && $('#awgDlg').open) fillAWGOptions(options); } catch {} finally { if (request === awgGeneration) button.disabled = false; }
+}
+function openAWG() {
+  ++awgGeneration; $('#awgGenerate').disabled = false;
+  const configured = SYS.settings.awg, c = configured || SYS.defaults?.awg, f = $('#awgForm'), s = SYS.status?.awg || {};
+  if (!c) { toast('Не удалось получить параметры AWG. Обнови страницу.', true); return; }
+  f.port.value = c?.port || 51820; f.subnet.value = c?.subnet || '10.77.0.0/16';
+  f.dns.value = c?.dns || '1.1.1.1, 1.0.0.1'; f.mtu.value = c?.mtu || 1380;
+  fillAWGOptions(c);
+  $('#awgAdvanced').open = false;
+  $('#awgInfo').textContent = s.latestErr || (s.installed ? 'Ядерный модуль · ' + s.version : 'Модуль и утилиты будут установлены из закреплённых исходников Amnezia.');
+  $('#awgBtn').textContent = configured ? 'Сохранить' : 'Установить';
+  $('#awgDlg').returnValue = ''; $('#awgDlg').showModal();
+}
+$('#awgForm').addEventListener('invalid', () => { $('#awgAdvanced').open = true; }, true);
+$('#awgForm').onsubmit = async event => {
+  event.preventDefault();
+  const f = $('#awgForm');
+  const obfuscation = Object.fromEntries([...awgNumbers.map(k => [k, Number(f.elements.namedItem(k).value)]), ...awgStrings.map(k => [k, f.elements.namedItem(k).value.trim()])]);
+  obfuscation.h = [1,2,3,4].map(n => f.elements.namedItem('h'+n).value.trim());
+  obfuscation.randomTrailers = f.randomTrailers.checked; obfuscation.disableCookies = f.disableCookies.checked;
+  $('#awgBtn').disabled = true;
+  try { await startJob('awg', {port: f.port.value, subnet: f.subnet.value.trim(), dns: f.dns.value.trim(), mtu: f.mtu.value, obfuscation: JSON.stringify(obfuscation)}, 'Настройка AmneziaWG 3.1', () => $('#awgDlg').close()); }
+  finally { $('#awgBtn').disabled = false; }
 };
 
 // startJob asks the agent to run a job and follows its log. The panel
 // restarts at the end of most jobs: polling errors only mean "wait".
-async function startJob(action, params, title) {
+async function startJob(action, params, title, accepted) {
   let started;
   try { started = await api('POST', 'api/system/jobs', {action, params}); } catch { return; }
+  accepted?.();
   $('#jobTitle').textContent = title; $('#jobLog').textContent = ''; $('#jobState').textContent = 'Идёт…';
   if (!$('#jobDlg').open) $('#jobDlg').showModal();
   const t0 = Date.now(), secs = () => Math.round((Date.now() - t0) / 1000);
   let lost = 0;
   for (;;) {
-    if (Date.now() - t0 > 16 * 60 * 1000) {
+    if (Date.now() - t0 > (action === 'awg' ? 46 : 16) * 60 * 1000) {
       $('#jobState').textContent = 'Не удалось получить результат. Проверь состояние протокола и журнал агента.';
       return;
     }
@@ -669,7 +736,7 @@ function stats() {
   $('#stUsersSub').hidden = enabled === us.length;
   const stale = protos().some(p => onlineStale(p.id));
   $('#stOnline').textContent = stale ? on.length ? '≥ ' + on.length : '—' : on.length;
-  const counts = protos().map(p => `${p.title}: ${on.reduce((n, u) => n + liveOn(u, p.id), 0)} ${p.id === 'vless' ? 'IP' : 'сессий'}`).join('; ');
+  const counts = protos().map(p => `${p.title}: ${on.reduce((n, u) => n + liveOn(u, p.id), 0)} ${onlineUnit(p.id)}`).join('; ');
   $('#stOnline').title = stale ? 'Данные о подключениях устарели' : `Пользователей: ${on.length}. ${counts}.`;
   $('#stOnlineSub').hidden = !stale;
   $('#stOnlineSub').textContent = stale ? 'Данные устарели' : '';
@@ -696,12 +763,12 @@ function render() {
     const pct = u.quotaBytes ? Math.min(100, used / u.quotaBytes * 100) : 0;
     const allowed = userProtos(u), many = protos().length > 1;
     const stale = allowed.some(p => onlineStale(p));
-    const onlineTip = protos().filter(p => allowed.includes(p.id)).map(p => `${p.title}: ${onlineStale(p.id) ? 'данные устарели' : liveOn(u, p.id) + (p.id === 'vless' ? ' IP' : ' сессий')}`).join('; ') || 'Не подключён';
+    const onlineTip = protos().filter(p => allowed.includes(p.id)).map(p => `${p.title}: ${onlineStale(p.id) ? 'данные устарели' : liveOn(u, p.id) + ' ' + onlineUnit(p.id)}`).join('; ') || 'Не подключён';
     const sessions = protos().filter(p => allowed.includes(p.id)).map(p => {
       if (onlineStale(p.id)) return many ? `<span class="pill warn">${esc(p.title)}: ?</span>` : '';
       const n = liveOn(u, p.id), limit = p.id === 'hysteria2' ? u.maxDevices : 0;
       if (!((many && n) || n > 1 || limit)) return '';
-      return `<span class="sessions" title="${p.id === 'vless' ? 'IP-адреса активных соединений' : 'Сессии Hysteria; один клиент может открыть несколько'}">${many ? esc(p.title) + ': ' : ''}${n}${limit ? '/' + limit : ''} ${p.id === 'vless' ? 'IP' : 'сесс.'}</span>`;
+      return `<span class="sessions" title="${isVless(p.id) ? 'IP-адреса активных соединений' : p.id === 'awg' ? 'Peer с рукопожатием за последние 3 минуты' : 'Сессии Hysteria; один клиент может открыть несколько'}">${many ? esc(p.title) + ': ' : ''}${n}${limit ? '/' + limit : ''} ${onlineUnit(p.id)}</span>`;
     }).join('');
     return `<div class="user${u.enabled ? '' : ' off'}" data-n="${esc(u.name)}">
       <div class="identity">
@@ -830,6 +897,8 @@ const protoName = id => (protos().find(p => p.id === id) || {title: id}).title;
 const hints = {
   hysteria2: 'Hiddify, v2RayTun, Happ, Shadowrocket, v2rayN, официальный клиент.',
   vless: 'VLESS + Reality: Happ, v2RayTun, Streisand, v2rayN, Hiddify. Запасной канал по TCP.',
+  'vless-tcp': 'VLESS + TCP + REALITY / Vision. Используй актуальный клиент Xray или Mihomo. Профиль работает независимо от XHTTP.',
+  awg: 'Импортируй .conf в AmneziaWG или AmneziaVPN с поддержкой AWG 3.1. Ключ рассчитан на одно устройство. IPv4 идёт через VPN, IPv6 внутри туннеля блокируется.',
 };
 async function setTab(t) {
   const request = ++shareRequest;
@@ -840,6 +909,10 @@ async function setTab(t) {
   const l = u.links.find(l => l.proto === t);
   if (!t) hint = 'Для пользователя нет доступных протоколов.';
   if (l) { text = l.uri; qr = q + '&proto=' + t; hint = typeof hints[t] === 'function' ? hints[t]() : hints[t] || ''; }
+  if (l && t === 'awg') {
+    download = 'api/users/' + encodeURIComponent(u.name) + '/awg.conf';
+    try { text = await api('GET', download); } catch { text = ''; download = ''; qr = ''; }
+  }
   if (t === 'sub') {
     text = S.subBase + u.subPath; qr = q + '&sub=1';
     hint = 'Клиент сам обновляет конфиг и видит остаток трафика и срок. Clash Verge и mihomo получают полный конфиг (как «Mihomo → Компьютер»).' + (names.length > 1 ? ' Внутри: ' + names.join(', ') + '.' : '');
@@ -866,9 +939,9 @@ async function setTab(t) {
   $('#shareText').value = text; $('#shareHint').textContent = hint;
   $('#qr').hidden = !qr; if (qr) $('#qr').src = qr;
   const full = t === 'mihomo' && (mihomoView === 'router' || mihomoView === 'desktop');
-  $('#shareText').rows = t === 'mihomo' ? (full ? 20 : 12) : 4;
-  $('#dlConf').hidden = !full;
-  $('#dlConf').textContent = 'Скачать .yaml';
+  $('#shareText').rows = t === 'awg' ? 16 : t === 'mihomo' ? (full ? 20 : 12) : 4;
+  $('#dlConf').hidden = !download;
+  $('#dlConf').textContent = t === 'awg' ? 'Скачать .conf' : 'Скачать .yaml';
 }
 $('#tabs').onclick = e => { const b = e.target.closest('button'); if (b) setTab(b.dataset.t); };
 $('#mtabs').onclick = e => { const b = e.target.closest('button'); if (b) { mihomoView = b.dataset.v; setTab('mihomo'); } };

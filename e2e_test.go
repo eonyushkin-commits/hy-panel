@@ -74,13 +74,17 @@ func start(t *testing.T, name string, args ...string) *exec.Cmd {
 }
 
 func TestE2EXray(t *testing.T) {
-	t.Run("current", func(t *testing.T) { testE2EXray(t, os.Getenv("XRAY_BIN")) })
-	if minimum := os.Getenv("XRAY_MINIMUM_BIN"); minimum != "" {
-		t.Run("minimum", func(t *testing.T) { testE2EXray(t, minimum) })
+	for _, network := range []string{"xhttp", "tcp"} {
+		t.Run(network, func(t *testing.T) {
+			t.Run("current", func(t *testing.T) { testE2EXray(t, os.Getenv("XRAY_BIN"), network) })
+			if minimum := os.Getenv("XRAY_MINIMUM_BIN"); minimum != "" {
+				t.Run("minimum", func(t *testing.T) { testE2EXray(t, minimum, network) })
+			}
+		})
 	}
 }
 
-func testE2EXray(t *testing.T, xray string) {
+func testE2EXray(t *testing.T, xray, network string) {
 	if xray == "" {
 		t.Skip("XRAY_BIN not set")
 	}
@@ -105,7 +109,11 @@ func testE2EXray(t *testing.T, xray string) {
 
 	// freshXray, pointed at the local site and free ports; no geoip.dat here.
 	vport, aport := freePort(t), freePort(t)
-	d, err := parseXrayDoc(freshXray(vport, "example.com"))
+	fresh := freshXray
+	if network == "tcp" {
+		fresh = freshTCPXray
+	}
+	d, err := parseXrayDoc(fresh(vport, "example.com"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,12 +162,19 @@ chooseHost:
 	}
 	t.Logf("clients connect to %s", host)
 	a.ep = Endpoint{Host: host, Port: "1", Name: "T", Vless: &xs.Link} // Hysteria: a placeholder
+	profile, proxyName := protoVless, "T-alice-vless"
+	if network == "tcp" {
+		profile, proxyName = protoVlessTCP, "T-alice-vision"
+		xb.id = profile
+		a.ep.Vless = nil
+		a.ep.VlessTCP = &xs.Link
+	}
 	alice := mustCreate(t, a.store, User{Name: "alice"})
 	mustCreate(t, a.store, User{Name: "bob"})
 	sync := func() {
 		a.syncOnce(time.Now())
-		if syncState(a, protoVless).err != "" {
-			t.Fatalf("xray sync: %s", syncState(a, protoVless).err)
+		if syncState(a, profile).err != "" {
+			t.Fatalf("xray sync: %s", syncState(a, profile).err)
 		}
 	}
 	sync()
@@ -194,7 +209,7 @@ chooseHost:
 	}
 	// mihomo with the panel's snippet, as a router would use it.
 	mport := freePort(t)
-	mcfg := fmt.Sprintf("mixed-port: %s\nmode: rule\nlog-level: info\n%s\nrules:\n  - MATCH,%s\n", mport, a.ep.MihomoDoc(alice), "T-alice-vless")
+	mcfg := fmt.Sprintf("mixed-port: %s\nmode: rule\nlog-level: info\n%s\nrules:\n  - MATCH,%s\n", mport, a.ep.MihomoDoc(alice), proxyName)
 	os.WriteFile(filepath.Join(dir, "mihomo.yaml"), []byte(mcfg), 0o600)
 	start(t, mihomo, "-d", dir, "-f", filepath.Join(dir, "mihomo.yaml"))
 	waitTCP(t, "127.0.0.1:"+mport)
@@ -226,8 +241,8 @@ chooseHost:
 		sync()
 		releaseHold()
 		<-done
-		if a.onlineOf(protoVless)["alice"] != 1 {
-			t.Fatalf("online while connected: %v", a.onlineOf(protoVless))
+		if a.onlineOf(profile)["alice"] != 1 {
+			t.Fatalf("online while connected: %v", a.onlineOf(profile))
 		}
 	}
 
@@ -269,7 +284,10 @@ func TestE2EMihomoFull(t *testing.T) {
 	ci := certInfo{Pin: strings.Repeat("ab", 32)}
 	e := buildEndpoint(&hyConfig{Listen: ":443"}, ci, "", "203.0.113.7", "NL")
 	e.Vless = &xs.Link
-	u := User{Name: "u", Password: "secret123", UUID: newUUID(), SubToken: "tok"}
+	vision, _ := parseXray(freshTCPXray("8443", "lurkpro.tech"))
+	e.VlessTCP = &vision.Link
+	e.AWG = freshAWG()
+	u := User{Name: "u", Password: "secret123", UUID: newUUID(), SubToken: "tok", AWGKey: newAWGTestKey(), AWGIndex: 2}
 	for _, router := range []bool{true, false} {
 		b, err := e.MihomoFull(mihomoBuiltin, u, router)
 		if err != nil {

@@ -159,6 +159,12 @@ func runUninstall(args []string) {
 			fmt.Println("✓ restart " + xraySvc)
 		}
 	}
+	if *purge && env["HYP_XRAY_TCP_CONFIG"] != "" {
+		step("clear Vision users", restartService(defaultTCPService))
+	}
+	if *purge && env["HYP_AWG_CONFIG"] != "" {
+		step("remove AWG config", os.Remove(env["HYP_AWG_CONFIG"]))
+	}
 	step("remove "+dataDir, os.RemoveAll(dataDir))
 	step("remove "+agentStateDir, os.RemoveAll(agentStateDir))
 	step("remove "+envPath, os.RemoveAll(envPath))
@@ -210,7 +216,7 @@ func runPasswd() {
 // ---- /etc/hy-panel.env ----
 
 var envKeys = []string{"HYP_PASSWORD", "HYP_UI_PATH", "HYP_UI_PORT", "HYP_HOST", "HYP_NAME", "HYP_HY_CONFIG", "HYP_HY_SERVICE",
-	"HYP_SUB_LISTEN", "HYP_SUB_URL", "HYP_XRAY_CONFIG", "HYP_XRAY_SERVICE"}
+	"HYP_SUB_LISTEN", "HYP_SUB_URL", "HYP_XRAY_CONFIG", "HYP_XRAY_SERVICE", "HYP_XRAY_TCP_CONFIG", "HYP_AWG_CONFIG"}
 
 func readEnv() map[string]string {
 	b, err := os.ReadFile(envPath)
@@ -278,6 +284,11 @@ func checkEnv(env map[string]string) error {
 	}
 	if s := env["HYP_XRAY_CONFIG"]; s != "" && !filepath.IsAbs(s) {
 		bad("HYP_XRAY_CONFIG", "нужен абсолютный путь к конфигу Xray")
+	}
+	for _, k := range []string{"HYP_XRAY_TCP_CONFIG", "HYP_AWG_CONFIG"} {
+		if s := env[k]; s != "" && !filepath.IsAbs(s) {
+			bad(k, "нужен абсолютный путь")
+		}
 	}
 	if err := errors.Join(errs...); err != nil {
 		return fmt.Errorf("%s: %w", envPath, err)
