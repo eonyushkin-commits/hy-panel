@@ -18,6 +18,7 @@ const Hysteria = "hysteria2"
 const VLESS = "vless"
 const VLESSTCP = "vless-tcp"
 const AmneziaWG = "awg"
+const TrustTunnel = "trusttunnel"
 
 type User struct {
 	Name            string   `json:"name"`
@@ -50,7 +51,7 @@ func (u *User) Uses(protocol string) bool {
 	return KnownProtocol(protocol) && !slices.Contains(u.ProtoOff, protocol)
 }
 func KnownProtocol(protocol string) bool {
-	return protocol == Hysteria || protocol == VLESS || protocol == VLESSTCP || protocol == AmneziaWG
+	return protocol == Hysteria || protocol == VLESS || protocol == VLESSTCP || protocol == AmneziaWG || protocol == TrustTunnel
 }
 
 func NewAWGKey() string {

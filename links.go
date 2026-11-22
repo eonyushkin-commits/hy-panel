@@ -11,17 +11,18 @@ import (
 
 // Endpoint describes how clients reach the server; built from hysteria config + flags.
 type Endpoint struct {
-	Host     string // public IP/domain
-	Port     string // "8443" or port-hopping range "20000-50000"
-	SNI      string
-	ObfsType string
-	ObfsPass string
-	Pin      string // hex sha256 of a self-signed cert
-	ECH      string // base64 ECHConfigList, "" if ECH is off
-	Name     string // profile/remark prefix
-	Vless    *Vless // Xray's VLESS + Reality, nil if off
-	VlessTCP *Vless
-	AWG      *awgConfig
+	Host        string // public IP/domain
+	Port        string // "8443" or port-hopping range "20000-50000"
+	SNI         string
+	ObfsType    string
+	ObfsPass    string
+	Pin         string // hex sha256 of a self-signed cert
+	ECH         string // base64 ECHConfigList, "" if ECH is off
+	Name        string // profile/remark prefix
+	Vless       *Vless // Xray's VLESS + Reality, nil if off
+	VlessTCP    *Vless
+	AWG         *awgConfig
+	TrustTunnel *trustTunnelConfig
 }
 
 // endpointFor builds the link parameters from the Hysteria config and the

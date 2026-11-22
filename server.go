@@ -561,6 +561,10 @@ func (a *App) handleMihomo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	q := r.URL.Query()
+	if q.Get("proto") == protoTrustTunnel || len(a.ep.mihomoProtos(u)) == 0 {
+		http.Error(w, "нет доступного профиля для Mihomo", http.StatusBadRequest)
+		return
+	}
 	if full := q.Get("full"); full == "router" || full == "desktop" {
 		b, err := a.mihomoFull(u, full == "router")
 		if err != nil {
@@ -682,10 +686,14 @@ func (a *App) handleSystem(w http.ResponseWriter, r *http.Request) {
 	if c := a.ep.AWG; c != nil {
 		settings[protoAWG] = c.publicSettings()
 	}
+	if c := a.ep.TrustTunnel; c != nil {
+		settings[protoTrustTunnel] = c
+	}
 	defaults := map[string]any{}
 	if a.ep.AWG == nil {
 		defaults[protoAWG] = freshAWG().publicSettings()
 	}
+	defaults[protoTrustTunnel] = map[string]string{"port": trustTunnelPort}
 	writeJSON(w, map[string]any{"status": st, "settings": settings, "defaults": defaults, "agentError": agentErr, "host": a.ep.Host})
 }
 
@@ -797,6 +805,7 @@ func (a *App) routes(withAuth bool) http.Handler {
 	mux.HandleFunc("GET /api/users/{name}/qr.png", a.guard(a.handleQR))
 	mux.HandleFunc("GET /api/users/{name}/mihomo", a.guard(a.handleMihomo))
 	mux.HandleFunc("GET /api/users/{name}/awg.conf", a.guard(a.handleAWGConf))
+	mux.HandleFunc("GET /api/users/{name}/trusttunnel.toml", a.guard(a.handleTrustTunnelConf))
 	mux.HandleFunc("GET /api/system", a.guard(a.handleSystem))
 	mux.HandleFunc("GET /api/system/awg-preset", a.guard(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, freshAWG().awgObfuscation) }))
 	mux.HandleFunc("POST /api/system/jobs", a.guard(a.handleJobStart))

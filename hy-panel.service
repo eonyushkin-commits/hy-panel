@@ -1,5 +1,5 @@
 [Unit]
-Description=hy-panel (Hysteria 2, VLESS/Reality and AmneziaWG)
+Description=hy-panel VPN management panel
 Wants=network-online.target
 After=network-online.target
 Before=hysteria-server.service

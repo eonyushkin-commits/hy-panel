@@ -15,10 +15,11 @@ import (
 // protocol is a type for each and an entry in protocols.
 
 const (
-	protoHy2      = model.Hysteria
-	protoVless    = model.VLESS
-	protoVlessTCP = model.VLESSTCP
-	protoAWG      = model.AmneziaWG
+	protoHy2         = model.Hysteria
+	protoVless       = model.VLESS
+	protoVlessTCP    = model.VLESSTCP
+	protoAWG         = model.AmneziaWG
+	protoTrustTunnel = model.TrustTunnel
 )
 
 type protocol interface {
@@ -35,7 +36,7 @@ type protocol interface {
 }
 
 // Prefer Hysteria over UDP; VLESS over TCP is the fallback.
-var protocols = []protocol{hy2Proto{}, vlessProto{}, tcpProto{}, awgProto{}}
+var protocols = []protocol{hy2Proto{}, vlessProto{}, tcpProto{}, awgProto{}, trustTunnelProto{}}
 
 func protoByID(id string) protocol {
 	for _, p := range protocols {
@@ -106,12 +107,22 @@ func (e Endpoint) MihomoProxy(id string, u User) string {
 	return ""
 }
 
+func (e Endpoint) mihomoProtos(u User) []protocol {
+	var ps []protocol
+	for _, p := range e.userProtos(u) {
+		if p.ID() != protoTrustTunnel {
+			ps = append(ps, p)
+		}
+	}
+	return ps
+}
+
 // MihomoDoc is a complete mihomo proxy-provider document for u: a proxy
 // for each of u's protocols.
 func (e Endpoint) MihomoDoc(u User) string {
 	var b strings.Builder
 	b.WriteString("proxies:\n")
-	for _, p := range e.userProtos(u) {
+	for _, p := range e.mihomoProtos(u) {
 		b.WriteString(p.Mihomo(e, u))
 	}
 	return b.String()
@@ -121,7 +132,7 @@ func (e Endpoint) MihomoDoc(u User) string {
 // panel's order: when a protocol is blocked, mihomo moves to the next one.
 func (e Endpoint) MihomoFallback(u User) string {
 	var names []string
-	for _, p := range e.userProtos(u) {
+	for _, p := range e.mihomoProtos(u) {
 		names = append(names, fmt.Sprintf("%q", p.ProxyName(e, u)))
 	}
 	return e.MihomoDoc(u) + fmt.Sprintf(`proxy-groups:

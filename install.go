@@ -113,6 +113,9 @@ func runInstall(args []string) {
 		}
 	}
 	step("restart hy-panel", restartService("hy-panel")) // picks up the new binary and config
+	if env["HYP_TRUSTTUNNEL"] == "1" && fileExists(trustTunnelUnit) && systemctl("is-enabled", "--quiet", trustTunnelService) != nil {
+		step("restore TrustTunnel", systemctl("enable", "--now", trustTunnelService))
+	}
 	fmt.Println("\nГотово.")
 	printInfo(env)
 }
@@ -165,6 +168,14 @@ func runUninstall(args []string) {
 	if *purge && env["HYP_AWG_CONFIG"] != "" {
 		step("remove AWG config", os.Remove(env["HYP_AWG_CONFIG"]))
 	}
+	if fileExists(trustTunnelUnit) || fileExists(trustTunnelDir) {
+		for _, file := range []string{trustTunnelBin, trustTunnelUnit, trustTunnelMeta, trustTunnelCert, trustTunnelKey, trustTunnelVPN, trustTunnelHosts, trustTunnelCreds, trustTunnelDir + "/.lock", trustTunnelDir} {
+			if err := os.Remove(file); err != nil && !errors.Is(err, os.ErrNotExist) {
+				step("remove "+file, err)
+			}
+		}
+		step("systemd daemon-reload", systemctl("daemon-reload"))
+	}
 	step("remove "+dataDir, os.RemoveAll(dataDir))
 	step("remove "+agentStateDir, os.RemoveAll(agentStateDir))
 	step("remove "+envPath, os.RemoveAll(envPath))
@@ -176,9 +187,20 @@ func runUninstall(args []string) {
 // already gone are fine, so a repeated uninstall succeeds.
 func removePanel() error {
 	var errs []error
+	hasTrustTunnel := fileExists(trustTunnelUnit)
+	if hasTrustTunnel {
+		if err := systemctl("disable", "--now", trustTunnelService); err != nil {
+			return err
+		}
+	}
 	for _, u := range []string{unitPath, agentUnitPath} {
 		if fileExists(u) {
 			errs = append(errs, systemctl("disable", "--now", strings.TrimSuffix(filepath.Base(u), ".service")))
+		}
+	}
+	if hasTrustTunnel && len(errs) == 0 && fileExists(trustTunnelCreds) {
+		if err := atomicfile.Replace(trustTunnelCreds, closedTrustTunnelCredentials(), trustTunnelFileOptions()); err != nil {
+			return err
 		}
 	}
 	for _, f := range []string{unitPath, agentUnitPath, binPath} {
@@ -216,7 +238,7 @@ func runPasswd() {
 // ---- /etc/hy-panel.env ----
 
 var envKeys = []string{"HYP_PASSWORD", "HYP_UI_PATH", "HYP_UI_PORT", "HYP_HOST", "HYP_NAME", "HYP_HY_CONFIG", "HYP_HY_SERVICE",
-	"HYP_SUB_LISTEN", "HYP_SUB_URL", "HYP_XRAY_CONFIG", "HYP_XRAY_SERVICE", "HYP_XRAY_TCP_CONFIG", "HYP_AWG_CONFIG"}
+	"HYP_SUB_LISTEN", "HYP_SUB_URL", "HYP_XRAY_CONFIG", "HYP_XRAY_SERVICE", "HYP_XRAY_TCP_CONFIG", "HYP_AWG_CONFIG", "HYP_TRUSTTUNNEL"}
 
 func readEnv() map[string]string {
 	b, err := os.ReadFile(envPath)

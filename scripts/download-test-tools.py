@@ -6,6 +6,7 @@ import io
 from pathlib import Path
 import sys
 import subprocess
+import tarfile
 import tempfile
 import zipfile
 
@@ -18,6 +19,8 @@ ASSETS = (
      "82d4be3a5ed8bd2621df9c9913c3a2761b86a42ae8485da836f7447ff2ec3d4d", "zip"),
     ("mihomo", "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.33/mihomo-linux-amd64-v1-v1.19.33.gz",
      "8ec92e7b2fdc6b853ba00156bab7e4e965c8b0d843b8c4ac8ab98795f02ad524", "gzip"),
+    ("trusttunnel", "https://github.com/TrustTunnel/TrustTunnel/releases/download/v1.3.1/trusttunnel-v1.3.1-linux-x86_64.tar.gz",
+     "29fd330eafab37eb8ab668dcbd57aa8f99b46e26b268e5dc9b416a483fadca97", "tar"),
 )
 
 AWG_TAG = "v3.1.20260812"
@@ -74,6 +77,11 @@ def main():
                 data = archive.read("xray")
         elif kind == "gzip":
             data = gzip.decompress(data)
+        elif kind == "tar":
+            with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+                member = next(item for item in archive
+                              if item.isfile() and Path(item.name).name == "trusttunnel_endpoint")
+                data = archive.extractfile(member).read()
         target = destination / name
         target.write_bytes(data)
         target.chmod(0o755)

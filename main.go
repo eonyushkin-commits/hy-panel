@@ -34,6 +34,7 @@ const usage = `hy-panel — VPN-панель: Hysteria 2, VLESS/REALITY и Amnez
   hy-panel xray -target сайт [-port 8443]      VLESS + XHTTP + REALITY: установить или сменить сайт для маскировки
   hy-panel xray -network tcp -target сайт [-port 443]   независимый VLESS + TCP + REALITY / Vision
   hy-panel awg -port 51820 [-subnet 10.77.0.0/16]      AmneziaWG 3.1 с модулем ядра Linux
+  hy-panel trusttunnel -domain vpn.example.com [-port 9444]   TrustTunnel по HTTP/2
   hy-panel fetch hysteria|xray                 поставить или обновить сервер из официального релиза
 `
 
@@ -61,6 +62,8 @@ func main() {
 		runAWG(os.Args[2:])
 	case "awg-down":
 		runAWGDown()
+	case "trusttunnel":
+		runTrustTunnel(os.Args[2:])
 	case "info":
 		printInfo(readEnv())
 	case "passwd":
@@ -145,6 +148,11 @@ func serve() {
 			cfgErr = strings.TrimPrefix(cfgErr+"; конфиг AWG: "+err.Error(), "; ")
 		}
 	}
+	if env["HYP_TRUSTTUNNEL"] == "1" {
+		if ep.TrustTunnel, err = readTrustTunnel(); err != nil {
+			cfgErr = strings.TrimPrefix(cfgErr+"; конфиг TrustTunnel: "+err.Error(), "; ")
+		}
+	}
 	// The session key survives restarts: the panel restarts after every
 	// protocol change made in it, and must not log the admin out.
 	key, err := sessionKey(dataDir + "/session.key")
@@ -170,6 +178,9 @@ func serve() {
 	app.agent = newAgentClient(agentSock)
 	if ep.AWG != nil {
 		app.addBackend(&awgBackend{agent: app.agent, config: ep.AWG})
+	}
+	if ep.TrustTunnel != nil {
+		app.addBackend(&trustTunnelBackend{agent: app.agent})
 	}
 	if tcpSetup != nil {
 		app.addBackend(&xrayBackend{api: newXrayAPI(tcpSetup.API), tag: tcpSetup.Tag, flow: visionFlow, id: protoVlessTCP})

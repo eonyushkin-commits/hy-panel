@@ -166,6 +166,14 @@ func jobArgs(action string, p map[string]string) ([]string, error) {
 		return args, nil
 	case "update-hysteria", "update-xray":
 		return []string{"fetch", strings.TrimPrefix(action, "update-")}, nil
+	case protoTrustTunnel:
+		c, err := trustTunnelSettings(p["domain"], p["port"])
+		if err != nil {
+			return nil, err
+		}
+		return []string{"trusttunnel", "-domain", c.Domain, "-port", c.Port}, nil
+	case "stop-trusttunnel":
+		return []string{"trusttunnel", "-stop"}, nil
 	}
 	return nil, fmt.Errorf("неизвестное действие %q", action)
 }
@@ -206,6 +214,7 @@ func runAgent() {
 	defer cancel()
 	awg := &awgRuntime{}
 	awg.routes(mux)
+	trustTunnelRoutes(mux)
 	done := make(chan struct{})
 	go func() { defer close(done); awg.watch(ctx) }()
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, systemStatus(rel)) })
@@ -330,10 +339,11 @@ func systemStatus(rel *releases) map[string]protoStatus {
 		return s
 	}
 	return map[string]protoStatus{
-		protoHy2:      st(protoHy2, hysteriaBin, hySvc, hysteriaVersion),
-		protoVless:    st(protoVless, xrayBin, xSvc, xrayVersion),
-		protoVlessTCP: st(protoVless, xrayBin, defaultTCPService, xrayVersion),
-		protoAWG:      awgStatus(),
+		protoHy2:         st(protoHy2, hysteriaBin, hySvc, hysteriaVersion),
+		protoVless:       st(protoVless, xrayBin, xSvc, xrayVersion),
+		protoVlessTCP:    st(protoVless, xrayBin, defaultTCPService, xrayVersion),
+		protoAWG:         awgStatus(),
+		protoTrustTunnel: trustTunnelStatus(),
 	}
 }
 

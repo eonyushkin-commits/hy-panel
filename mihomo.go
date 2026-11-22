@@ -42,6 +42,10 @@ func mihomoTemplate() ([]byte, error) {
 // behind the router may run their own client to it), and the controller's
 // secret is u's own. For a computer the router-only keys go.
 func (e Endpoint) MihomoFull(tmpl []byte, u User, router bool) ([]byte, error) {
+	proxies := e.mihomoProtos(u)
+	if len(proxies) == 0 {
+		return nil, errors.New("нет доступных протоколов для Mihomo")
+	}
 	t := topKeys(string(tmpl))
 
 	direct := "DOMAIN," + e.Host + ",DIRECT"
@@ -95,7 +99,7 @@ func (e Endpoint) MihomoFull(tmpl []byte, u User, router bool) ([]byte, error) {
 	if err := yaml.Unmarshal(out, &check); err != nil {
 		return nil, fmt.Errorf("шаблон mihomo: %v", err)
 	}
-	if len(check.Proxies) != len(e.userProtos(u)) || len(check.Rules) == 0 || check.Rules[0] != direct {
+	if len(check.Proxies) != len(proxies) || len(check.Rules) == 0 || check.Rules[0] != direct {
 		return nil, errors.New("шаблон mihomo: proxies или rules не на верхнем уровне")
 	}
 	return out, nil

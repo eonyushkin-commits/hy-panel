@@ -45,12 +45,13 @@ func TestSystemdLifecycle(t *testing.T) {
 	}
 	smokeDir := "/run/hy-panel-smoke"
 	owned := []string{binPath, envPath, unitPath, agentUnitPath, hysteriaBin, xrayBin, hysteriaUnitPath, xrayUnitPath, dataDir, agentStateDir, "/etc/hysteria", "/var/lib/hysteria", filepath.Dir(defaultXrayCfg), smokeDir, hysteriaUnitPath + ".d", xrayUnitPath + ".d"}
+	owned = append(owned, trustTunnelBin, trustTunnelUnit, trustTunnelDir)
 	for _, path := range owned {
 		if _, err := os.Lstat(path); !os.IsNotExist(err) {
 			t.Fatalf("refusing to touch existing path %s (use a clean test VM/WSL)", path)
 		}
 	}
-	for _, addr := range []string{panelAddr, "127.0.0.1:25413"} {
+	for _, addr := range []string{panelAddr, "127.0.0.1:25413", trustTunnelMetrics} {
 		l, err := net.Listen("tcp", addr)
 		if err != nil {
 			t.Fatalf("test port is occupied: %s", addr)
@@ -59,10 +60,10 @@ func TestSystemdLifecycle(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if t.Failed() {
-			out, _ := exec.Command("journalctl", "--no-pager", "-n", "100", "-u", "hy-panel", "-u", "hy-panel-agent", "-u", defaultSvc, "-u", defaultXraySvc).CombinedOutput()
+			out, _ := exec.Command("journalctl", "--no-pager", "-n", "100", "-u", "hy-panel", "-u", "hy-panel-agent", "-u", defaultSvc, "-u", defaultXraySvc, "-u", trustTunnelService).CombinedOutput()
 			t.Logf("systemd journal:\n%s", out)
 		}
-		_ = systemctl("disable", "--now", "hy-panel", "hy-panel-agent", defaultSvc, defaultXraySvc)
+		_ = systemctl("disable", "--now", "hy-panel", "hy-panel-agent", defaultSvc, defaultXraySvc, trustTunnelService)
 		for _, path := range owned {
 			if err := os.RemoveAll(path); err != nil {
 				t.Errorf("cleanup %s: %v", path, err)
@@ -338,11 +339,53 @@ func TestSystemdLifecycle(t *testing.T) {
 	}
 	mustRequest("GET", "/api/state", nil, 200)
 
+	runTrustTunnelJob := func(action string, params map[string]string) {
+		t.Helper()
+		var started job
+		if err := json.Unmarshal(mustRequest("POST", "/api/system/jobs", map[string]any{"action": action, "params": params}, 200), &started); err != nil {
+			t.Fatal(err)
+		}
+		systemdWait(t, func() bool {
+			code, b, err := request("GET", "/api/system/job", nil)
+			var status job
+			if err != nil || code != 200 || json.Unmarshal(b, &status) != nil || status.ID != started.ID || status.Running {
+				return false
+			}
+			if !status.OK {
+				t.Fatalf("%s: %s", action, status.Log)
+			}
+			return true
+		})
+	}
+	waitTrustTunnelUser := func(username string) {
+		t.Helper()
+		systemdWait(t, func() bool {
+			clients, err := readTrustTunnelStats()
+			return err == nil && len(clients) == 1 && clients[0].Username == username
+		})
+	}
+	t.Log("install official TrustTunnel from the root agent and synchronize credentials")
+	runTrustTunnelJob(protoTrustTunnel, map[string]string{"domain": "vpn.example.test", "port": systemdPort(t, "tcp")})
+	waitTrustTunnelUser("legacy")
+	config := mustRequest("GET", "/api/users/legacy/trusttunnel.toml", nil, 200)
+	if !bytes.Contains(config, []byte(`hostname = "vpn.example.test"`)) || !bytes.Contains(config, []byte(`skip_verification = false`)) {
+		t.Fatal("TrustTunnel TLS settings are missing in client export")
+	}
+	mustRequest("GET", "/api/users/legacy/qr.png?proto=trusttunnel", nil, 200)
+	mustRequest("PATCH", "/api/users/legacy", map[string]any{"protoOff": []string{protoTrustTunnel}}, 200)
+	waitTrustTunnelUser(trustTunnelClosedUser)
+	mustRequest("GET", "/api/users/legacy/trusttunnel.toml", nil, 404)
+	mustRequest("PATCH", "/api/users/legacy", map[string]any{"protoOff": []string{}}, 200)
+	waitTrustTunnelUser("legacy")
+
 	t.Log("password change revokes old session and reinstall preserves users")
 	mustRun("passwd")
 	systemdWait(t, func() bool { code, _, err := request("GET", "/api/state", nil); return err == nil && code == 401 })
 	login()
 	mustRun("uninstall", "-y")
+	if systemctl("is-active", "--quiet", trustTunnelService) == nil {
+		t.Fatal("TrustTunnel remained active after uninstall")
+	}
 	if b, err := os.ReadFile(dataPath); err != nil || len(b) == 0 {
 		t.Fatal("uninstall lost retained users")
 	}
@@ -352,6 +395,14 @@ func TestSystemdLifecycle(t *testing.T) {
 	if len(final) != 1 || final[0].UUID != original.UUID || final[0].Password != original.Password || final[0].SubToken != original.SubToken || final[0].Up != original.Up {
 		t.Fatal("reinstall changed user credentials/counters")
 	}
+	waitTrustTunnelUser("legacy")
+	runTrustTunnelJob("stop-trusttunnel", nil)
+	if systemctl("is-active", "--quiet", trustTunnelService) == nil ||
+		systemctl("is-active", "--quiet", defaultSvc) != nil ||
+		systemctl("is-active", "--quiet", defaultXraySvc) != nil {
+		t.Fatal("disabling TrustTunnel did not preserve the other services")
+	}
+	mustRequest("GET", "/api/users/legacy/trusttunnel.toml", nil, 404)
 	u, _ := url.Parse("http://" + panelAddr)
 	oldCookies := jar.Cookies(u)
 	mustRequest("POST", "/api/logout", nil, 204)

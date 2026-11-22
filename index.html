@@ -376,6 +376,23 @@ textarea{font:12px/1.5 var(--mono);background:var(--surface-2);border-color:tran
   </form>
 </dialog>
 
+<dialog id="trustTunnelDlg">
+  <form method="dialog" id="trustTunnelForm" class="dlg">
+    <div class="dlg-h"><h2>TrustTunnel</h2><button type="button" class="icon ghost" onclick="$('#trustTunnelDlg').close()" aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <div class="mute small hint" id="trustTunnelInfo"></div>
+    <div class="grid">
+      <label class="full"><span>Домен сервера</span><input name="domain" type="text" placeholder="vpn.example.com" required maxlength="253" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+      <label><span>Порт (TCP)</span><input name="port" type="number" min="1" max="65535" required></label>
+    </div>
+    <div class="mute small hint">Подключение по HTTP/2. Запись A домена должна указывать на VPS. Панель добавит сертификат сервера в профиль. После изменения домена или порта импортируй профиль заново.</div>
+    <div class="row">
+      <button type="button" id="trustTunnelStop" hidden>Отключить</button>
+      <button type="button" onclick="$('#trustTunnelDlg').close()">Отмена</button>
+      <button class="pri" value="ok" id="trustTunnelSave">Установить</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="jobDlg">
   <div class="dlg">
     <div class="dlg-h"><h2 id="jobTitle"></h2><button class="icon ghost" onclick="$('#jobDlg').close()" aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
@@ -493,7 +510,7 @@ async function loadSystem() {
 function renderProtocols() {
   if (!SYS) return;
   const unavailable = !!SYS.agentError;
-  $('#serverStatus').innerHTML = [['hysteria2', 'Hysteria 2', 'UDP'], ['vless', 'VLESS / Reality', 'TCP'], ['vless-tcp', 'VLESS / Vision', 'TCP'], ['awg', 'AmneziaWG', 'UDP']].map(([id, name, transport]) => {
+  $('#serverStatus').innerHTML = [['hysteria2', 'Hysteria 2', 'UDP'], ['vless', 'VLESS / Reality', 'TCP'], ['vless-tcp', 'VLESS / Vision', 'TCP'], ['awg', 'AmneziaWG', 'UDP'], ['trusttunnel', 'TrustTunnel', 'TCP']].map(([id, name, transport]) => {
     const s = SYS.status?.[id] || {}, c = SYS.settings?.[id];
     const title = name + ': ' + (unavailable ? 'состояние неизвестно' : c ? s.active ? 'работает' : 'остановлен' : s.installed ? 'не настроен' : 'не установлен');
     const tone = unavailable ? 'warn' : c ? s.active ? 'ok' : 'bad' : '';
@@ -520,7 +537,7 @@ function renderProtoInfo(id) {
 function systemAction(e) {
   const b = e.target.closest('[data-do]'); if (!b) return;
   const id = b.dataset.proto, name = isVless(id) ? 'Xray' : 'Hysteria 2';
-  if (b.dataset.do === 'cfg') { if (isVless(id)) openVl(id); else if (id === 'awg') openAWG(); else openHy(); }
+  if (b.dataset.do === 'cfg') { if (isVless(id)) openVl(id); else if (id === 'awg') openAWG(); else if (id === 'trusttunnel') openTrustTunnel(); else openHy(); }
   else if (b.dataset.do === 'check') checkReleases(b, id);
   else if (confirm(`Скачать последний релиз ${name} и перезапустить его? Подключения прервутся на секунду.`)) {
     for (const dialog of ['#hyDlg', '#vlDlg', '#awgDlg']) if ($(dialog).open) $(dialog).close();
@@ -668,6 +685,32 @@ $('#awgForm').onsubmit = async event => {
 
 // startJob asks the agent to run a job and follows its log. The panel
 // restarts at the end of most jobs: polling errors only mean "wait".
+function openTrustTunnel() {
+  const c = SYS.settings.trusttunnel;
+  const f = $('#trustTunnelForm'), s = SYS.status?.trusttunnel || {};
+  const host = SYS.host || '';
+  f.domain.value = c?.domain || (/\.[a-z][a-z0-9-]*$/i.test(host) ? host : '');
+  f.port.value = c?.port || SYS.defaults?.trusttunnel?.port || '9444';
+  $('#trustTunnelInfo').textContent = s.installed ? 'Версия ' + s.version : 'Панель установит официальный сервер TrustTunnel.';
+  $('#trustTunnelStop').hidden = !c;
+  $('#trustTunnelSave').textContent = c ? 'Сохранить' : 'Установить';
+  $('#trustTunnelDlg').showModal();
+}
+$('#trustTunnelForm').onsubmit = async event => {
+  event.preventDefault();
+  const f = event.currentTarget;
+  $('#trustTunnelSave').disabled = true;
+  try {
+    await startJob('trusttunnel', {domain: f.domain.value.trim(), port: f.port.value}, 'Настройка TrustTunnel', () => $('#trustTunnelDlg').close());
+  } finally { $('#trustTunnelSave').disabled = false; }
+};
+$('#trustTunnelStop').onclick = async event => {
+  if (!confirm('Отключить TrustTunnel? Активные сессии TrustTunnel завершатся.')) return;
+  const b = event.currentTarget;
+  b.disabled = true;
+  try { await startJob('stop-trusttunnel', {}, 'Отключение TrustTunnel', () => $('#trustTunnelDlg').close()); }
+  finally { b.disabled = false; }
+};
 async function startJob(action, params, title, accepted) {
   let started;
   try { started = await api('POST', 'api/system/jobs', {action, params}); } catch { return; }
@@ -768,7 +811,7 @@ function render() {
       if (onlineStale(p.id)) return many ? `<span class="pill warn">${esc(p.title)}: ?</span>` : '';
       const n = liveOn(u, p.id), limit = p.id === 'hysteria2' ? u.maxDevices : 0;
       if (!((many && n) || n > 1 || limit)) return '';
-      return `<span class="sessions" title="${isVless(p.id) ? 'IP-адреса активных соединений' : p.id === 'awg' ? 'Peer с рукопожатием за последние 3 минуты' : 'Сессии Hysteria; один клиент может открыть несколько'}">${many ? esc(p.title) + ': ' : ''}${n}${limit ? '/' + limit : ''} ${onlineUnit(p.id)}</span>`;
+      return `<span class="sessions" title="${isVless(p.id) ? 'IP-адреса активных соединений' : p.id === 'awg' ? 'Peer с рукопожатием за последние 3 минуты' : 'Активные сессии'}">${many ? esc(p.title) + ': ' : ''}${n}${limit ? '/' + limit : ''} ${onlineUnit(p.id)}</span>`;
     }).join('');
     return `<div class="user${u.enabled ? '' : ' off'}" data-n="${esc(u.name)}">
       <div class="identity">
@@ -887,7 +930,7 @@ async function openShare(n) {
   const u = shareUser, many = u.links.length > 1;
   const tabs = u.links.map(l => [l.proto, many ? protoName(l.proto) : 'Ссылка']);
   if (S.subBase) tabs.push(['sub', 'Подписка']);
-  if (u.links.length) tabs.push(['mihomo', 'Mihomo']);
+  if (u.links.some(l => l.proto !== 'trusttunnel')) tabs.push(['mihomo', 'Mihomo']);
   $('#tabs').innerHTML = tabs.map(([t, title]) => `<button data-t="${esc(t)}" style="flex:1">${esc(title)}</button>`).join('');
   mihomoView = 'router';
   setTab(tabs.length ? tabs[0][0] : '');
@@ -899,6 +942,7 @@ const hints = {
   vless: 'VLESS + Reality: Happ, v2RayTun, Streisand, v2rayN, Hiddify. Запасной канал по TCP.',
   'vless-tcp': 'VLESS + TCP + REALITY / Vision. Используй актуальный клиент Xray или Mihomo. Профиль работает независимо от XHTTP.',
   awg: 'Импортируй .conf в AmneziaWG или AmneziaVPN с поддержкой AWG 3.1. Ключ рассчитан на одно устройство. IPv4 идёт через VPN, IPv6 внутри туннеля блокируется.',
+  trusttunnel: 'Импортируй ссылку, QR-код или .toml в приложение TrustTunnel.',
 };
 async function setTab(t) {
   const request = ++shareRequest;
@@ -913,6 +957,7 @@ async function setTab(t) {
     download = 'api/users/' + encodeURIComponent(u.name) + '/awg.conf';
     try { text = await api('GET', download); } catch { text = ''; download = ''; qr = ''; }
   }
+  if (l && t === 'trusttunnel') download = 'api/users/' + encodeURIComponent(u.name) + '/trusttunnel.toml';
   if (t === 'sub') {
     text = S.subBase + u.subPath; qr = q + '&sub=1';
     hint = 'Клиент сам обновляет конфиг и видит остаток трафика и срок. Clash Verge и mihomo получают полный конфиг (как «Mihomo → Компьютер»).' + (names.length > 1 ? ' Внутри: ' + names.join(', ') + '.' : '');
@@ -920,7 +965,7 @@ async function setTab(t) {
   $('#mtabs').hidden = t !== 'mihomo';
   if (t === 'mihomo') {
     // Whole configs first, then the pieces for one's own config.
-    const parts = u.links.map(l => [l.proto, protoName(l.proto)]);
+    const parts = u.links.filter(l => l.proto !== 'trusttunnel').map(l => [l.proto, protoName(l.proto)]);
     $('#mtabs').style.gridTemplateColumns = 'repeat(' + (parts.length > 1 ? 2 : 3) + ',minmax(0,1fr))';
     const btn = ([v, title]) => `<button data-v="${esc(v)}" style="flex:1" class="${v === mihomoView ? 'act' : ''}">${esc(title)}</button>`;
     $('#mtabs').innerHTML = [['router', 'Роутер (XKeen)'], ['desktop', 'Компьютер (Clash Verge)'], ...parts].map(btn).join('');
@@ -941,7 +986,7 @@ async function setTab(t) {
   const full = t === 'mihomo' && (mihomoView === 'router' || mihomoView === 'desktop');
   $('#shareText').rows = t === 'awg' ? 16 : t === 'mihomo' ? (full ? 20 : 12) : 4;
   $('#dlConf').hidden = !download;
-  $('#dlConf').textContent = t === 'awg' ? 'Скачать .conf' : 'Скачать .yaml';
+  $('#dlConf').textContent = t === 'awg' ? 'Скачать .conf' : t === 'trusttunnel' ? 'Скачать .toml' : 'Скачать .yaml';
 }
 $('#tabs').onclick = e => { const b = e.target.closest('button'); if (b) setTab(b.dataset.t); };
 $('#mtabs').onclick = e => { const b = e.target.closest('button'); if (b) { mihomoView = b.dataset.v; setTab('mihomo'); } };
